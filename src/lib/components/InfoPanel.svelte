@@ -5,9 +5,84 @@
 	import { openUrl } from '$lib/api';
 	import { getVersion } from '@tauri-apps/api/app';
 	import type { VaultStats } from '$lib/types';
+	import {
+		ACTIONS,
+		keybindings,
+		setBinding,
+		resetBinding,
+		bindingFromEvent,
+		bindingToKeys,
+		bindingsEqual,
+		type ActionDef,
+	} from '$lib/keybindings';
 
 	const modKey = navigator.platform.startsWith('Mac') ? '⌘' : 'Ctrl';
 	const isMobile = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
+
+	// Customizable shortcuts, grouped for display.
+	const actionGroups: { title: string; actions: ActionDef[] }[] = [
+		{ title: 'General', actions: ACTIONS.filter((a) => a.group === 'General') },
+		{ title: 'Interface', actions: ACTIONS.filter((a) => a.group === 'Interface') },
+		{ title: 'Navigation', actions: ACTIONS.filter((a) => a.group === 'Navigation') },
+	];
+
+	// id of the action currently listening for a new key combo, or null.
+	let capturingId = $state<string | null>(null);
+	// id of an action whose row should briefly flash a "already in use" warning.
+	let conflictId = $state<string | null>(null);
+	let conflictTimer: ReturnType<typeof setTimeout> | null = null;
+
+	function startCapture(id: string) {
+		conflictId = null;
+		capturingId = id;
+	}
+
+	function stopCapture() {
+		capturingId = null;
+	}
+
+	function flashConflict(id: string) {
+		conflictId = id;
+		if (conflictTimer) clearTimeout(conflictTimer);
+		conflictTimer = setTimeout(() => { conflictId = null; }, 1600);
+	}
+
+	function captureKeydown(e: KeyboardEvent) {
+		if (!capturingId) return;
+		// Capture phase + stopImmediatePropagation keeps the combo from also
+		// triggering the app-level shortcut handler on window.
+		e.preventDefault();
+		e.stopImmediatePropagation();
+		if (e.key === 'Escape') { stopCapture(); return; }
+
+		const binding = bindingFromEvent(e);
+		if (!binding) return; // modifier-only press; keep listening
+
+		// Reject combos already bound to a different action.
+		const map = $keybindings;
+		const target = capturingId;
+		const clash = Object.keys(map).find((other) => other !== target && bindingsEqual(map[other], binding));
+		if (clash) {
+			flashConflict(target);
+			stopCapture();
+			return;
+		}
+
+		setBinding(target, binding);
+		stopCapture();
+	}
+
+	$effect(() => {
+		if (!capturingId) return;
+		window.addEventListener('keydown', captureKeydown, true);
+		return () => window.removeEventListener('keydown', captureKeydown, true);
+	});
+
+	function resetKey(e: MouseEvent, id: string) {
+		e.preventDefault();
+		resetBinding(id);
+		if (capturingId === id) stopCapture();
+	}
 
 	let stats = $state<VaultStats | null>(null);
 	let activeTab = $state<'about' | 'shortcuts'>(isMobile ? 'about' : 'shortcuts');
@@ -158,27 +233,38 @@
 					</div>
 				{:else}
 					<div class="shortcuts-section">
-						<h4 class="shortcuts-group-title">General</h4>
-						<div class="shortcut-row"><span class="shortcut-desc">New note</span><span class="shortcut-keys"><kbd>{modKey}</kbd>+<kbd>N</kbd></span></div>
-						<div class="shortcut-row"><span class="shortcut-desc">Save</span><span class="shortcut-keys"><kbd>{modKey}</kbd>+<kbd>S</kbd></span></div>
-						<div class="shortcut-row"><span class="shortcut-desc">Quick open</span><span class="shortcut-keys"><kbd>{modKey}</kbd>+<kbd>P</kbd></span></div>
-						<div class="shortcut-row"><span class="shortcut-desc">Find in note</span><span class="shortcut-keys"><kbd>{modKey}</kbd>+<kbd>F</kbd></span></div>
-						<div class="shortcut-row"><span class="shortcut-desc">Search vault</span><span class="shortcut-keys"><kbd>{modKey}</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></span></div>
-						<div class="shortcut-row"><span class="shortcut-desc">Open note in new window</span><span class="shortcut-keys"><kbd>{modKey}</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd></span></div>
-
-						<h4 class="shortcuts-group-title">Interface</h4>
-						<div class="shortcut-row"><span class="shortcut-desc">Toggle sidebar</span><span class="shortcut-keys"><kbd>{modKey}</kbd>+<kbd>\</kbd></span></div>
-						<div class="shortcut-row"><span class="shortcut-desc">Toggle notes list</span><span class="shortcut-keys"><kbd>{modKey}</kbd>+<kbd>Shift</kbd>+<kbd>\</kbd></span></div>
-						<div class="shortcut-row"><span class="shortcut-desc">Toggle dark / light theme</span><span class="shortcut-keys"><kbd>{modKey}</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></span></div>
-						<div class="shortcut-row"><span class="shortcut-desc">Toggle focus mode</span><span class="shortcut-keys"><kbd>{modKey}</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd></span></div>
-						<div class="shortcut-row"><span class="shortcut-desc">Toggle read-only</span><span class="shortcut-keys"><kbd>{modKey}</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></span></div>
-						<div class="shortcut-row"><span class="shortcut-desc">Toggle source / WYSIWYG</span><span class="shortcut-keys"><kbd>{modKey}</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd></span></div>
-						<div class="shortcut-row"><span class="shortcut-desc">Toggle fullscreen</span><span class="shortcut-keys"><kbd>F11</kbd></span></div>
+						{#if !isMobile}
+							<p class="shortcuts-hint">Click a shortcut to rebind it, right-click to reset.</p>
+						{/if}
+						{#each actionGroups as group}
+							<h4 class="shortcuts-group-title">{group.title}</h4>
+							{#each group.actions as action}
+								<div class="shortcut-row">
+									<span class="shortcut-desc">{action.label}</span>
+									{#if isMobile}
+										<span class="shortcut-keys">{#each bindingToKeys($keybindings[action.id]) as key, i}{#if i > 0}+{/if}<kbd>{key}</kbd>{/each}</span>
+									{:else}
+										<button
+											class="shortcut-key-btn"
+											class:capturing={capturingId === action.id}
+											class:conflict={conflictId === action.id}
+											title="Click to rebind · right-click to reset"
+											onclick={() => startCapture(action.id)}
+											oncontextmenu={(e) => resetKey(e, action.id)}
+										>
+											{#if capturingId === action.id}
+												<span class="capture-prompt">Press keys…</span>
+											{:else if conflictId === action.id}
+												<span class="conflict-msg">Already in use</span>
+											{:else}
+												<span class="shortcut-keys">{#each bindingToKeys($keybindings[action.id]) as key, i}{#if i > 0}+{/if}<kbd>{key}</kbd>{/each}</span>
+											{/if}
+										</button>
+									{/if}
+								</div>
+							{/each}
+						{/each}
 						<div class="shortcut-row"><span class="shortcut-desc">Close panel / exit focus</span><span class="shortcut-keys"><kbd>Esc</kbd></span></div>
-
-						<h4 class="shortcuts-group-title">Navigation</h4>
-						<div class="shortcut-row"><span class="shortcut-desc">Go back</span><span class="shortcut-keys"><kbd>Alt</kbd>+<kbd>←</kbd></span></div>
-						<div class="shortcut-row"><span class="shortcut-desc">Go forward</span><span class="shortcut-keys"><kbd>Alt</kbd>+<kbd>→</kbd></span></div>
 
 						<h4 class="shortcuts-group-title">Formatting</h4>
 						<div class="shortcut-row"><span class="shortcut-desc">Bold</span><span class="shortcut-keys"><kbd>{modKey}</kbd>+<kbd>B</kbd></span></div>
@@ -501,6 +587,48 @@
 		flex-shrink: 0;
 		font-size: 12px;
 		color: var(--text-tertiary);
+	}
+
+	.shortcuts-hint {
+		font-size: 12px;
+		color: var(--text-tertiary);
+		margin: 0 0 4px;
+	}
+
+	.shortcut-key-btn {
+		background: none;
+		border: 1px solid transparent;
+		border-radius: 6px;
+		padding: 2px 4px;
+		margin: -2px -4px;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		flex-shrink: 0;
+		font: inherit;
+	}
+
+	.shortcut-key-btn:hover {
+		background: var(--bg-hover);
+	}
+
+	.shortcut-key-btn.capturing {
+		border-color: var(--accent);
+		background: var(--accent-light);
+	}
+
+	.shortcut-key-btn.conflict {
+		border-color: var(--danger, #e11d48);
+	}
+
+	.capture-prompt {
+		font-size: 12px;
+		color: var(--accent);
+	}
+
+	.conflict-msg {
+		font-size: 12px;
+		color: var(--danger, #e11d48);
 	}
 
 	.shortcut-keys kbd,
