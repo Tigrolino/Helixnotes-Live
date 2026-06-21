@@ -40,6 +40,7 @@ export const notebookSortMode = writable<"alphabetical" | "manual">(
 );
 // Map from notebook absolute path → ordinal position (lower = earlier). Only consulted when notebookSortMode === 'manual'.
 export const notebookOrder = writable<Record<string, number>>({});
+export const noteOrder = writable<Record<string, number>>({});
 
 // Data
 export const notebooks = writable<NotebookEntry[]>([]);
@@ -177,16 +178,30 @@ export const canGoForward = derived(navHistory, $h => $h.index < $h.stack.length
 
 // Derived
 export const sortedNotes = derived(
-  [notes, sortMode, viewMode],
-  ([$notes, $sortMode, $viewMode]) => {
+  [notes, sortMode, viewMode, noteOrder],
+  ([$notes, $sortMode, $viewMode, $noteOrder]) => {
     // Quick Access preserves stored order
     if ($viewMode === "quickaccess") return $notes;
+    const customSortable =
+      $viewMode === "all" || $viewMode === "notebook" || $viewMode === "tag";
 
     const pinned = $notes.filter((n) => n.meta.pinned);
     const unpinned = $notes.filter((n) => !n.meta.pinned);
 
     const sortFn = (a: NoteEntry, b: NoteEntry) => {
       switch ($sortMode) {
+        case "custom": {
+          if (!customSortable) {
+            return (
+              new Date(b.meta.modified).getTime() -
+              new Date(a.meta.modified).getTime()
+            );
+          }
+          const oa = $noteOrder[a.path] ?? Number.MAX_SAFE_INTEGER;
+          const ob = $noteOrder[b.path] ?? Number.MAX_SAFE_INTEGER;
+          if (oa !== ob) return oa - ob;
+          return a.meta.title.localeCompare(b.meta.title);
+        }
         case "title":
           return a.meta.title.localeCompare(b.meta.title);
         case "created":
@@ -217,6 +232,7 @@ export const vaultState = derived(
     collapsedNotebooks,
     notebookSortMode,
     notebookOrder,
+    noteOrder,
   ],
   ([
     $activeNotePath,
@@ -227,6 +243,7 @@ export const vaultState = derived(
     $collapsedNotebooks,
     $notebookSortMode,
     $notebookOrder,
+    $noteOrder,
   ]) => {
     return {
       last_open_note: $activeNotePath,
@@ -237,6 +254,7 @@ export const vaultState = derived(
       collapsed_notebooks: $collapsedNotebooks,
       notebook_sort_mode: $notebookSortMode,
       notebook_order: $notebookOrder,
+      note_order: $noteOrder,
     } satisfies VaultState;
   },
 );

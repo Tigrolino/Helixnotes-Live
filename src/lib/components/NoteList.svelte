@@ -13,6 +13,7 @@
 		quickAccessPaths,
 		appConfig,
 		notelistCollapsed,
+		noteOrder,
 		notebooks,
 		tags,
 		mobileView
@@ -206,6 +207,11 @@
 	let qaDragFrom = $state<number | null>(null);
 	let qaDragOver = $state<number | null>(null);
 	let qaDragHalf = $state<'top' | 'bottom'>('bottom');
+	let noteDragFrom = $state<number | null>(null);
+	let noteDragOver = $state<number | null>(null);
+	let noteDragHalf = $state<'top' | 'bottom'>('bottom');
+	const customOrderViews = new Set(['all', 'notebook', 'tag']);
+	let canCustomReorder = $derived($sortMode === 'custom' && customOrderViews.has($viewMode));
 
 	// Virtual scroll
 	let listContainer = $state<HTMLDivElement>(null!);
@@ -415,6 +421,7 @@
 		}
 		try {
 			const entry = await createNote(nbRelative, 'Untitled');
+			if ($sortMode === 'custom') appendManualNoteOrder(entry.path);
 			noteCache.clear();
 			await refresh();
 			await selectNote(entry);
@@ -432,6 +439,7 @@
 		try {
 			const newTitle = editValue.trim();
 			const newPath = await renameNote(note.path, newTitle);
+			renameManualNoteOrderPath(note.path, newPath);
 			noteCache.clear();
 			editingNote = null;
 			// Update local store immediately (avoid full vault re-scan)
@@ -453,6 +461,7 @@
 		contextMenu = null;
 		try {
 			await deleteNote(note.path);
+			removeManualNoteOrderPath(note.path);
 			noteCache.clear();
 			// Remove from local store immediately (avoid full vault re-scan)
 			$notes = $notes.filter(n => n.path !== note.path);
@@ -480,6 +489,7 @@
 		contextMenu = null;
 		try {
 			await permanentDelete(note.path);
+			removeManualNoteOrderPath(note.path);
 			noteCache.clear();
 			$notes = $notes.filter(n => n.path !== note.path);
 			if ($activeNotePath === note.path) {
@@ -673,11 +683,60 @@
 		}
 	}
 
+	function persistManualNoteOrder(orderedNotes: NoteEntry[]) {
+		// Merge into (not replace) the order map so reordering notes in one view does
+		// not wipe the saved custom order of other notebooks / tags / the all-notes view.
+		const updates = Object.fromEntries(orderedNotes.map((note, index) => [note.path, index]));
+		$noteOrder = { ...$noteOrder, ...updates };
+	}
+
+	function appendManualNoteOrder(path: string) {
+		const nextIndex = Math.max(-1, ...Object.values($noteOrder)) + 1;
+		$noteOrder = { ...$noteOrder, [path]: nextIndex };
+	}
+
+	function renameManualNoteOrderPath(oldPath: string, newPath: string) {
+		if (!Object.hasOwn($noteOrder, oldPath)) return;
+		const { [oldPath]: index, ...rest } = $noteOrder;
+		$noteOrder = { ...rest, [newPath]: index };
+	}
+
+	function removeManualNoteOrderPath(path: string) {
+		if (!Object.hasOwn($noteOrder, path)) return;
+		const { [path]: _, ...rest } = $noteOrder;
+		$noteOrder = rest;
+	}
+
+	function resetNoteDrag() {
+		noteDragFrom = null;
+		noteDragOver = null;
+	}
+
+	function handleCustomNoteDrop(targetIndex: number) {
+		if (noteDragFrom === null || !canCustomReorder) {
+			resetNoteDrag();
+			return;
+		}
+		let insertAt = noteDragHalf === 'bottom' ? targetIndex + 1 : targetIndex;
+		if (noteDragFrom === insertAt || noteDragFrom + 1 === insertAt) {
+			resetNoteDrag();
+			return;
+		}
+		const arr = [...$sortedNotes];
+		const [moved] = arr.splice(noteDragFrom, 1);
+		if (insertAt > noteDragFrom) insertAt--;
+		arr.splice(insertAt, 0, moved);
+		$notes = arr;
+		persistManualNoteOrder(arr);
+		resetNoteDrag();
+	}
+
 	async function handleMoveNote(note: NoteEntry, destPath: string) {
 		contextMenu = null;
 		movePickerNote = null;
 		try {
 			const newPath = await moveNote(note.path, destPath);
+			renameManualNoteOrderPath(note.path, newPath);
 			noteCache.clear();
 			$notes = $notes.filter(n => n.path !== note.path);
 			if ($activeNotePath === note.path) {
@@ -779,6 +838,7 @@
 	async function handleBatchDelete() {
 		const toDelete = new Set(selectedPaths);
 		noteCache.clear();
+		for (const path of toDelete) removeManualNoteOrderPath(path);
 		$notes = $notes.filter(n => !toDelete.has(n.path));
 		if ($activeNotePath && toDelete.has($activeNotePath)) {
 			$activeNote = null;
@@ -814,6 +874,7 @@
 	async function handleBatchPermanentDelete() {
 		const toDelete = new Set(selectedPaths);
 		noteCache.clear();
+		for (const path of toDelete) removeManualNoteOrderPath(path);
 		$notes = $notes.filter(n => !toDelete.has(n.path));
 		if ($activeNotePath && toDelete.has($activeNotePath)) {
 			$activeNote = null;
@@ -839,6 +900,9 @@
 	}
 
 	function setSortMode(mode: SortMode) {
+		if (mode === 'custom' && Object.keys($noteOrder).length === 0) {
+			persistManualNoteOrder($sortedNotes);
+		}
 		$sortMode = mode;
 		sortMenu = null;
 	}
@@ -1089,6 +1153,8 @@
 					class:compact={compact}
 					class:qa-drag-above={$viewMode === 'quickaccess' && qaDragOver === noteIndex && qaDragFrom !== null && qaDragHalf === 'top'}
 					class:qa-drag-below={$viewMode === 'quickaccess' && qaDragOver === noteIndex && qaDragFrom !== null && qaDragHalf === 'bottom'}
+					class:note-drag-above={canCustomReorder && noteDragOver === noteIndex && noteDragFrom !== null && noteDragHalf === 'top'}
+					class:note-drag-below={canCustomReorder && noteDragOver === noteIndex && noteDragFrom !== null && noteDragHalf === 'bottom'}
 					onclick={(e) => handleNoteClick(e, note)}
 					onkeydown={(e) => {
 						if (e.key === 'F2') {
@@ -1122,6 +1188,12 @@
 							e.dataTransfer!.effectAllowed = 'move';
 							return;
 						}
+						if (canCustomReorder) {
+							noteDragFrom = noteIndex;
+							e.dataTransfer!.setData('text/plain', note.path);
+							e.dataTransfer!.effectAllowed = 'move';
+							return;
+						}
 						if (selectedPaths.size > 1 && selectedPaths.has(note.path)) {
 							e.dataTransfer!.setData('text/plain', [...selectedPaths].join('\n'));
 						} else {
@@ -1136,18 +1208,28 @@
 							const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
 							qaDragHalf = e.clientY < rect.top + rect.height / 2 ? 'top' : 'bottom';
 							qaDragOver = noteIndex;
+						} else if (canCustomReorder && noteDragFrom !== null) {
+							e.preventDefault();
+							e.dataTransfer!.dropEffect = 'move';
+							const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+							noteDragHalf = e.clientY < rect.top + rect.height / 2 ? 'top' : 'bottom';
+							noteDragOver = noteIndex;
 						}
 					}}
 					ondragleave={() => {
 						if (qaDragOver === noteIndex) qaDragOver = null;
+						if (noteDragOver === noteIndex) noteDragOver = null;
 					}}
 					ondrop={(e) => {
 						if ($viewMode === 'quickaccess' && qaDragFrom !== null) {
 							e.preventDefault();
 							handleQaDrop(noteIndex);
+						} else if (canCustomReorder && noteDragFrom !== null) {
+							e.preventDefault();
+							handleCustomNoteDrop(noteIndex);
 						}
 					}}
-					ondragend={() => { qaDragFrom = null; qaDragOver = null; }}
+					ondragend={() => { qaDragFrom = null; qaDragOver = null; resetNoteDrag(); }}
 				>
 					{#if compact}
 						<div class="note-compact-row" title={getNotebookPath(note) ? `${getNotebookPath(note)}/${note.meta.title}` : note.meta.title}>
@@ -1425,6 +1507,18 @@
 			</svg>
 			Title
 			{#if $sortMode === 'title'}<span class="sort-check">&#10003;</span>{/if}
+		</button>
+		<button class:active={$sortMode === 'custom'} onclick={() => setSortMode('custom')}>
+			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+				<line x1="8" y1="6" x2="21" y2="6" />
+				<line x1="8" y1="12" x2="21" y2="12" />
+				<line x1="8" y1="18" x2="21" y2="18" />
+				<circle cx="4" cy="6" r="1" />
+				<circle cx="4" cy="12" r="1" />
+				<circle cx="4" cy="18" r="1" />
+			</svg>
+			Custom
+			{#if $sortMode === 'custom'}<span class="sort-check">&#10003;</span>{/if}
 		</button>
 	</div>
 {/if}
@@ -1948,11 +2042,13 @@
 		font-size: 14px;
 	}
 
-	.note-item.qa-drag-above {
+	.note-item.qa-drag-above,
+	.note-item.note-drag-above {
 		border-top: 2px solid var(--accent);
 	}
 
-	.note-item.qa-drag-below {
+	.note-item.qa-drag-below,
+	.note-item.note-drag-below {
 		border-bottom: 2px solid var(--accent);
 	}
 
