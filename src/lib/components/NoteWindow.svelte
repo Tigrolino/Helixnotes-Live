@@ -12,6 +12,7 @@
 		theme
 	} from '$lib/stores/app';
 	import { readNote } from '$lib/api';
+	import { keybindings, matchAction } from '$lib/keybindings';
 	import type { FileEvent } from '$lib/types';
 
 	let { notePath }: { notePath: string } = $props();
@@ -73,13 +74,11 @@
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
-		const mod = e.ctrlKey || e.metaKey;
-		if (mod && !e.shiftKey && e.code === 'KeyS') {
+		const action = matchAction(e, $keybindings);
+		if (action === 'save') {
 			e.preventDefault();
 			editor?.forceSave();
-			return;
-		}
-		if (mod && e.shiftKey && e.code === 'KeyM') {
+		} else if (action === 'toggle-source') {
 			e.preventDefault();
 			$sourceMode = !$sourceMode;
 		}

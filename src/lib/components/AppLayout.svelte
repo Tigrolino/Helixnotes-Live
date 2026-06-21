@@ -51,6 +51,7 @@
 		syncState,
 		platformIsMobile
 	} from '$lib/stores/app';
+	import { keybindings, matchAction } from '$lib/keybindings';
 
 	const appWindow = getCurrentWindow();
 	const isMac = navigator.platform.startsWith('Mac');
@@ -394,88 +395,73 @@
 	function handleKeydown(e: KeyboardEvent) {
 		const mod = e.ctrlKey || e.metaKey;
 		const code = e.code;
-		if (e.altKey && e.key === 'ArrowLeft') {
-			e.preventDefault();
-			navigateHistory(-1);
-			return;
-		}
-		if (e.altKey && e.key === 'ArrowRight') {
-			e.preventDefault();
-			navigateHistory(1);
-			return;
-		}
-		if (mod && !e.shiftKey && code === 'KeyN') {
-			e.preventDefault();
-			createAndFocusNote();
-			return;
-		}
-		if (mod && e.shiftKey && code === 'KeyN') {
-			e.preventDefault();
-			const isDark = $theme === 'dark' || ($theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-			const next = isDark ? 'light' : 'dark';
-			$theme = next;
-			setTheme(next);
-			return;
-		}
-		if (mod && e.shiftKey && code === 'KeyF') {
-			e.preventDefault();
-			$showSearch = true;
-			return;
-		}
-		if (mod && !e.shiftKey && code === 'KeyF') {
-			e.preventDefault();
-			if ($activeNotePath) {
-				editor?.openNoteSearch();
-			} else {
-				$showSearch = true;
-			}
-			return;
-		}
-		if (mod && !e.shiftKey && code === 'KeyP') {
-			e.preventDefault();
-			$showCommandPalette = true;
-			return;
-		}
-		if (mod && !e.shiftKey && code === 'KeyS') {
-			e.preventDefault();
-			editor?.forceSave();
-			return;
-		}
+
+		// Mod+K (insert link) is an editor formatting action and is not user-customizable.
 		if (mod && code === 'KeyK' && !e.shiftKey && $activeNotePath && !$sourceMode) {
 			e.preventDefault();
 			editor?.addLinkFromToolbar();
 		}
-		if (mod && e.shiftKey && code === 'KeyM') {
+
+		const action = matchAction(e, $keybindings);
+		if (action) {
 			e.preventDefault();
-			$sourceMode = !$sourceMode;
-		}
-		if (mod && e.shiftKey && code === 'KeyW') {
-			e.preventDefault();
-			if ($activeNotePath && $activeNote) {
-				openNoteWindow($activeNotePath, $activeNote.meta.title);
+			switch (action) {
+				case 'nav-back':
+					navigateHistory(-1);
+					return;
+				case 'nav-forward':
+					navigateHistory(1);
+					return;
+				case 'new-note':
+					createAndFocusNote();
+					return;
+				case 'toggle-theme': {
+					const isDark = $theme === 'dark' || ($theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+					const next = isDark ? 'light' : 'dark';
+					$theme = next;
+					setTheme(next);
+					return;
+				}
+				case 'search-vault':
+					$showSearch = true;
+					return;
+				case 'find-in-note':
+					if ($activeNotePath) {
+						editor?.openNoteSearch();
+					} else {
+						$showSearch = true;
+					}
+					return;
+				case 'quick-open':
+					$showCommandPalette = true;
+					return;
+				case 'save':
+					editor?.forceSave();
+					return;
+				case 'toggle-source':
+					$sourceMode = !$sourceMode;
+					return;
+				case 'open-new-window':
+					if ($activeNotePath && $activeNote) {
+						openNoteWindow($activeNotePath, $activeNote.meta.title);
+					}
+					return;
+				case 'toggle-sidebar':
+					$sidebarCollapsed = !$sidebarCollapsed;
+					return;
+				case 'toggle-focus':
+					$focusMode = !$focusMode;
+					return;
+				case 'toggle-readonly':
+					if ($viewerNote) return; // viewer mode is always read-only
+					$readOnly = !$readOnly;
+					return;
+				case 'fullscreen':
+					appWindow.isFullscreen().then(fs => appWindow.setFullscreen(!fs));
+					return;
 			}
 		}
-		if (mod && e.key === '\\') {
-			e.preventDefault();
-			$sidebarCollapsed = !$sidebarCollapsed;
-			return;
-		}
-		if (mod && e.shiftKey && code === 'KeyE') {
-			e.preventDefault();
-			$focusMode = !$focusMode;
-			return;
-		}
-		if (mod && e.shiftKey && code === 'KeyR') {
-			e.preventDefault();
-			if ($viewerNote) return; // viewer mode is always read-only
-			$readOnly = !$readOnly;
-			return;
-		}
-		if (e.key === 'F11') {
-			e.preventDefault();
-			appWindow.isFullscreen().then(fs => appWindow.setFullscreen(!fs));
-			return;
-		}
+
 		if (e.key === 'Escape') {
 			if ($showSettings) $showSettings = false;
 			else if ($showInfo) $showInfo = false;
