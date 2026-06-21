@@ -48,6 +48,7 @@
 		viewerNote,
 		notebookSortMode,
 		notebookOrder,
+		noteOrder,
 		syncState,
 		platformIsMobile
 	} from '$lib/stores/app';
@@ -203,6 +204,7 @@
 			collapsed_notebooks: $collapsedNotebooks,
 			notebook_sort_mode: $notebookSortMode,
 			notebook_order: $notebookOrder,
+			note_order: $noteOrder,
 			sort_mode: $sortMode,
 			last_view_mode: $viewMode,
 			last_notebook: $activeNotebook?.relative_path ?? null,
@@ -519,6 +521,11 @@
 	});
 
 	$effect(() => {
+		$noteOrder;
+		persistState();
+	});
+
+	$effect(() => {
 		$sortMode;
 		$tasksLayout;
 		$tasksHideCompleted;
@@ -547,7 +554,8 @@
 			$collapsedNotebooks = state.collapsed_notebooks ?? [];
 			$notebookSortMode = state.notebook_sort_mode === 'manual' ? 'manual' : 'alphabetical';
 			$notebookOrder = state.notebook_order ?? {};
-			if (state.sort_mode === 'created' || state.sort_mode === 'title' || state.sort_mode === 'modified') $sortMode = state.sort_mode;
+			$noteOrder = state.note_order ?? {};
+			if (state.sort_mode === 'created' || state.sort_mode === 'title' || state.sort_mode === 'modified' || state.sort_mode === 'custom') $sortMode = state.sort_mode;
 			if (state.tasks_layout === 'calendar' || state.tasks_layout === 'list') $tasksLayout = state.tasks_layout;
 			if (typeof state.tasks_hide_completed === 'boolean') $tasksHideCompleted = state.tasks_hide_completed;
 			if (typeof state.tasks_only_flagged === 'boolean') $tasksOnlyFlagged = state.tasks_only_flagged;

@@ -108,6 +108,7 @@ export interface VaultState {
   collapsed_notebooks: string[];
   notebook_sort_mode?: string;
   notebook_order?: Record<string, number>;
+  note_order?: Record<string, number>;
   sort_mode?: string;
   last_view_mode?: string;
   last_notebook?: string | null;
@@ -166,7 +167,7 @@ export interface NoteTitleEntry {
   path: string;
 }
 
-export type SortMode = "modified" | "title" | "created";
+export type SortMode = "modified" | "title" | "created" | "custom";
 export type ViewMode =
   | "all"
   | "notebook"
