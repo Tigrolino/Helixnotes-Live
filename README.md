@@ -1,7 +1,7 @@
 # HelixNotes
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://codeberg.org/ArkHost/HelixNotes/src/branch/main/LICENSE)
-[![Latest Release](https://img.shields.io/badge/release-v1.3.1-green)](https://codeberg.org/ArkHost/HelixNotes/releases)
+[![Latest Release](https://img.shields.io/badge/release-v1.3.2-green)](https://codeberg.org/ArkHost/HelixNotes/releases)
 [![Website](https://img.shields.io/badge/web-helixnotes.com-purple)](https://helixnotes.com)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS%20%7C%20Android-lightgrey)]()
 
@@ -10,7 +10,7 @@ A local markdown note-taking app built with Tauri, SvelteKit, and Rust.
 Your notes are stored as standard Markdown files on your local filesystem.
 No cloud, no lock-in.
 
-## Download (v1.3.1)
+## Download (v1.3.2)
 
 ### Linux
 
@@ -92,23 +92,23 @@ sudo eopkg it helixnotes
 
 #### AppImage (Arch, Fedora 43+, openSUSE Tumbleweed)
 
-[Download AppImage](https://download.helixnotes.com/releases/v1.3.1/HelixNotes_1.3.1_amd64.AppImage)
+[Download AppImage](https://download.helixnotes.com/releases/v1.3.2/HelixNotes_1.3.2_amd64.AppImage)
 
 #### .deb (manual)
 
-[Download .deb](https://codeberg.org/ArkHost/HelixNotes/releases/download/v1.3.1/HelixNotes_1.3.1_amd64.deb) (Ubuntu 22.04+)
+[Download .deb](https://codeberg.org/ArkHost/HelixNotes/releases/download/v1.3.2/HelixNotes_1.3.2_amd64.deb) (Ubuntu 22.04+)
 
 ### Windows
 
-[Download Installer](https://codeberg.org/ArkHost/HelixNotes/releases/download/v1.3.1/HelixNotes_1.3.1_x64-setup.exe) (Windows 10/11)
+[Download Installer](https://codeberg.org/ArkHost/HelixNotes/releases/download/v1.3.2/HelixNotes_1.3.2_x64-setup.exe) (Windows 10/11)
 
 ### macOS
 
-[Download .dmg](https://codeberg.org/ArkHost/HelixNotes/releases/download/v1.3.1/HelixNotes_1.3.1_x64.dmg) (Intel, runs on Apple Silicon via Rosetta)
+[Download .dmg](https://codeberg.org/ArkHost/HelixNotes/releases/download/v1.3.2/HelixNotes_1.3.2_x64.dmg) (Intel, runs on Apple Silicon via Rosetta)
 
 ### Android
 
-[Download APK](https://codeberg.org/ArkHost/HelixNotes/releases/download/v1.3.1/HelixNotes_1.3.1_android.apk)
+[Download APK](https://codeberg.org/ArkHost/HelixNotes/releases/download/v1.3.2/HelixNotes_1.3.2_android.apk)
 
 ---
 
