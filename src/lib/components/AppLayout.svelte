@@ -258,7 +258,14 @@
 
 	function handleViewChanged() {
 		taskNoteOpened = false;
-		noteList?.refresh();
+		// Picking a notebook/tag/Tasks/etc. in the sidebar is a request to browse that view's
+		// notes - so if the notes list was hidden, bring it back rather than navigating blindly
+		// into a panel the user can't see. revealNoteList() re-mounts the list and refreshes it.
+		if ($notelistCollapsed) {
+			revealNoteList();
+		} else {
+			noteList?.refresh();
+		}
 		if (isMobile) $mobileView = 'notelist';
 	}
 
