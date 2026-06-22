@@ -3,6 +3,18 @@
 	import { setTheme, reindex } from '$lib/api';
 	import { darkThemes } from '$lib/platform';
 
+	// onNavigate runs the parent's view-change handler (refreshes the note list and reveals it
+	// if it was hidden), so opening a view here behaves exactly like clicking it in the sidebar.
+	let { onNavigate = () => {} }: { onNavigate?: () => void } = $props();
+
+	function openView(mode: 'all' | 'quickaccess' | 'tasks' | 'daily' | 'trash') {
+		$viewMode = mode;
+		$activeNotebook = null;
+		$activeTag = null;
+		$showCommandPalette = false;
+		onNavigate();
+	}
+
 	interface Command {
 		id: string;
 		label: string;
@@ -27,14 +39,29 @@
 			}
 		},
 		{
+			id: 'open-all-notes',
+			label: 'Open All Notes',
+			action: () => openView('all')
+		},
+		{
+			id: 'open-quick-access',
+			label: 'Open Quick Access',
+			action: () => openView('quickaccess')
+		},
+		{
+			id: 'open-tasks',
+			label: 'Open Tasks',
+			action: () => openView('tasks')
+		},
+		{
+			id: 'open-daily',
+			label: 'Open Daily Notes',
+			action: () => openView('daily')
+		},
+		{
 			id: 'open-trash',
 			label: 'Open Trash (restore deleted notes)',
-			action: () => {
-				$viewMode = 'trash';
-				$activeNotebook = null;
-				$activeTag = null;
-				$showCommandPalette = false;
-			}
+			action: () => openView('trash')
 		},
 		{
 			id: 'theme-light',

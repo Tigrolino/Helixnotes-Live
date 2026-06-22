@@ -967,7 +967,7 @@
 {/if}
 
 <SearchPanel />
-<CommandPalette />
+<CommandPalette onNavigate={handleViewChanged} />
 <SettingsPanel />
 <InfoPanel />
 
