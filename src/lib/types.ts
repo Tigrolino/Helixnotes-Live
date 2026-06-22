@@ -69,6 +69,11 @@ export interface AppConfig {
   hide_title_in_body: boolean;
   show_line_numbers: boolean;
   show_link_arrows: boolean;
+  show_all_notes: boolean;
+  show_quick_access: boolean;
+  show_tasks: boolean;
+  show_daily_notes: boolean;
+  show_trash: boolean;
   backup_enabled: boolean;
   backup_frequency: string;
   backup_max_count: number;

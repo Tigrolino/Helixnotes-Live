@@ -99,6 +99,16 @@ pub struct AppConfig {
     pub show_line_numbers: bool,
     #[serde(default = "default_true")]
     pub show_link_arrows: bool,
+    #[serde(default = "default_true")]
+    pub show_all_notes: bool,
+    #[serde(default = "default_true")]
+    pub show_quick_access: bool,
+    #[serde(default = "default_true")]
+    pub show_tasks: bool,
+    #[serde(default = "default_true")]
+    pub show_daily_notes: bool,
+    #[serde(default = "default_true")]
+    pub show_trash: bool,
     #[serde(default)]
     pub backup_enabled: bool,
     #[serde(default = "default_backup_frequency")]
@@ -221,6 +231,11 @@ impl Default for AppConfig {
             hide_title_in_body: false,
             show_line_numbers: false,
             show_link_arrows: true,
+            show_all_notes: true,
+            show_quick_access: true,
+            show_tasks: true,
+            show_daily_notes: true,
+            show_trash: true,
             backup_enabled: false,
             backup_frequency: "24h".to_string(),
             backup_max_count: 10,

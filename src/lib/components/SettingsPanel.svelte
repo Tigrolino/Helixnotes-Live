@@ -522,6 +522,13 @@
 	let closeToTray = $state($appConfig?.close_to_tray ?? false);
 	let enableWikiLinks = $state($appConfig?.enable_wiki_links ?? true);
 
+	// Sidebar item visibility
+	let showAllNotes = $state($appConfig?.show_all_notes ?? true);
+	let showQuickAccess = $state($appConfig?.show_quick_access ?? true);
+	let showTasks = $state($appConfig?.show_tasks ?? true);
+	let showDailyNotes = $state($appConfig?.show_daily_notes ?? true);
+	let showTrash = $state($appConfig?.show_trash ?? true);
+
 	const pdfHeightPresets = [
 		{ label: 'Small', value: 300 },
 		{ label: 'Medium', value: 450 },
@@ -579,8 +586,13 @@
 			$appConfig.show_tray_icon = showTrayIcon;
 			$appConfig.close_to_tray = closeToTray;
 			$appConfig.enable_wiki_links = enableWikiLinks;
+			$appConfig.show_all_notes = showAllNotes;
+			$appConfig.show_quick_access = showQuickAccess;
+			$appConfig.show_tasks = showTasks;
+			$appConfig.show_daily_notes = showDailyNotes;
+			$appConfig.show_trash = showTrash;
 			}
-			setGeneralSettings(compactNotes, timeFormat, weekStart, dailyTitleFormat, gpuAcceleration, autostart, pdfPreview, pdfHeight, titleMode, hideTitleInBody, showLineNumbers, showLinkArrows, defaultViewMode, showTrayIcon, closeToTray, enableWikiLinks, showNoteDates, restoreLastSession)
+			setGeneralSettings(compactNotes, timeFormat, weekStart, dailyTitleFormat, gpuAcceleration, autostart, pdfPreview, pdfHeight, titleMode, hideTitleInBody, showLineNumbers, showLinkArrows, defaultViewMode, showTrayIcon, closeToTray, enableWikiLinks, showNoteDates, restoreLastSession, showAllNotes, showQuickAccess, showTasks, showDailyNotes, showTrash)
 			.catch((e) => console.error('Failed to save general settings:', e));
 	}
 
@@ -769,6 +781,11 @@
 			pdfPreview = $appConfig.pdf_preview ?? false;
 			pdfHeight = $appConfig.pdf_height ?? 600;
 			titleMode = $appConfig.title_mode ?? 'input';
+			showAllNotes = $appConfig.show_all_notes ?? true;
+			showQuickAccess = $appConfig.show_quick_access ?? true;
+			showTasks = $appConfig.show_tasks ?? true;
+			showDailyNotes = $appConfig.show_daily_notes ?? true;
+			showTrash = $appConfig.show_trash ?? true;
 		}
 	});
 
@@ -891,6 +908,46 @@
 									<button class="option-btn" class:active={$notebookSortMode === 'manual'} onclick={() => { $notebookSortMode = 'manual'; }}>Manual</button>
 								</div>
 							</div>
+
+							{#if !isMobile}
+							<div class="settings-section">
+								<h3>Sidebar</h3>
+								<p class="setting-desc" style="margin: 0 0 10px;">Hide navigation items you don't use. The notebook tree always stays.</p>
+								<label class="setting-toggle">
+									<span class="setting-label"><span class="setting-name">All Notes</span></span>
+									<button class="toggle-switch" class:on={showAllNotes} onclick={() => { showAllNotes = !showAllNotes; saveGeneralSettings(); }}>
+										<span class="toggle-knob"></span>
+									</button>
+								</label>
+								<label class="setting-toggle">
+									<span class="setting-label"><span class="setting-name">Quick Access</span></span>
+									<button class="toggle-switch" class:on={showQuickAccess} onclick={() => { showQuickAccess = !showQuickAccess; saveGeneralSettings(); }}>
+										<span class="toggle-knob"></span>
+									</button>
+								</label>
+								<label class="setting-toggle">
+									<span class="setting-label"><span class="setting-name">Tasks</span></span>
+									<button class="toggle-switch" class:on={showTasks} onclick={() => { showTasks = !showTasks; saveGeneralSettings(); }}>
+										<span class="toggle-knob"></span>
+									</button>
+								</label>
+								<label class="setting-toggle">
+									<span class="setting-label"><span class="setting-name">Daily Notes</span></span>
+									<button class="toggle-switch" class:on={showDailyNotes} onclick={() => { showDailyNotes = !showDailyNotes; saveGeneralSettings(); }}>
+										<span class="toggle-knob"></span>
+									</button>
+								</label>
+								<label class="setting-toggle">
+									<span class="setting-label">
+										<span class="setting-name">Trash</span>
+										<span class="setting-desc">Deleted notes stay recoverable from the command palette (Ctrl/Cmd+P → Open Trash).</span>
+									</span>
+									<button class="toggle-switch" class:on={showTrash} onclick={() => { showTrash = !showTrash; saveGeneralSettings(); }}>
+										<span class="toggle-knob"></span>
+									</button>
+								</label>
+							</div>
+							{/if}
 
 							<div class="settings-section">
 								<h3>Time Format</h3>

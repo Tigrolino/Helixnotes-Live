@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { showCommandPalette, showSearch, theme, sourceMode } from '$lib/stores/app';
+	import { showCommandPalette, showSearch, theme, sourceMode, viewMode, activeNotebook, activeTag } from '$lib/stores/app';
 	import { setTheme, reindex } from '$lib/api';
 	import { darkThemes } from '$lib/platform';
 
@@ -24,6 +24,16 @@
 			action: () => {
 				$showCommandPalette = false;
 				$showSearch = true;
+			}
+		},
+		{
+			id: 'open-trash',
+			label: 'Open Trash (restore deleted notes)',
+			action: () => {
+				$viewMode = 'trash';
+				$activeNotebook = null;
+				$activeTag = null;
+				$showCommandPalette = false;
 			}
 		},
 		{

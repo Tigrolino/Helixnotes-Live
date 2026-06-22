@@ -1102,11 +1102,21 @@ pub fn set_general_settings(
     enable_wiki_links: bool,
     show_note_dates: bool,
     restore_last_session: bool,
+    show_all_notes: bool,
+    show_quick_access: bool,
+    show_tasks: bool,
+    show_daily_notes: bool,
+    show_trash: bool,
 ) -> Result<(), String> {
     let mut config = state.config.lock().map_err(|e| e.to_string())?;
     config.compact_notes = compact_notes;
     config.show_note_dates = show_note_dates;
     config.restore_last_session = restore_last_session;
+    config.show_all_notes = show_all_notes;
+    config.show_quick_access = show_quick_access;
+    config.show_tasks = show_tasks;
+    config.show_daily_notes = show_daily_notes;
+    config.show_trash = show_trash;
     config.time_format = time_format;
     config.week_start = week_start;
     config.daily_title_format = daily_title_format;

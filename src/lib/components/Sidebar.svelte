@@ -34,6 +34,16 @@
 	const modKey = navigator.platform.startsWith('Mac') ? '⌘' : 'Ctrl';
 	const isMobile = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
 
+	// Whether any top nav item (All Notes, Quick Access, Tasks, Daily Notes, Trash) is visible.
+	// When all are hidden we drop the empty <nav> and its divider so the tree sits flush.
+	const anyNavItem = $derived(
+		$appConfig?.show_all_notes !== false ||
+		$appConfig?.show_quick_access !== false ||
+		$appConfig?.show_tasks !== false ||
+		$appConfig?.show_daily_notes !== false ||
+		$appConfig?.show_trash !== false
+	);
+
 	let editingNotebook = $state<string | null>(null);
 	let editValue = $state('');
 	let renameInput: HTMLInputElement | null = $state(null);
@@ -568,7 +578,7 @@
 
 <svelte:window onclick={handleWindowClick} />
 
-<aside class="sidebar" class:collapsed={$sidebarCollapsed} class:mobile={isMobile} ondblclick={startNewNotebookFromSidebar}>
+<aside class="sidebar" class:collapsed={$sidebarCollapsed} class:mobile={isMobile} class:nav-empty={!anyNavItem} ondblclick={startNewNotebookFromSidebar}>
 	{#if !isMobile}
 	<div class="sidebar-header">
 		<button class="collapse-btn" onclick={() => ($sidebarCollapsed = !$sidebarCollapsed)} title="Toggle sidebar">
@@ -592,7 +602,9 @@
 	{/if}
 
 	{#if !$sidebarCollapsed}
+		{#if anyNavItem}
 		<nav class="sidebar-nav">
+			{#if $appConfig?.show_all_notes !== false}
 			<button
 				class="nav-item"
 				class:active={$viewMode === 'all'}
@@ -604,7 +616,9 @@
 				</svg>
 				<span>All Notes</span>
 			</button>
+			{/if}
 
+			{#if $appConfig?.show_quick_access !== false}
 			<button
 				class="nav-item"
 				class:active={$viewMode === 'quickaccess'}
@@ -615,7 +629,9 @@
 				</svg>
 				<span>Quick Access</span>
 			</button>
+			{/if}
 
+			{#if $appConfig?.show_tasks !== false}
 			<button
 				class="nav-item"
 				class:active={$viewMode === 'tasks'}
@@ -627,7 +643,9 @@
 				</svg>
 				<span>Tasks</span>
 			</button>
+			{/if}
 
+			{#if $appConfig?.show_daily_notes !== false}
 			<button
 				class="nav-item"
 				class:active={$viewMode === 'daily'}
@@ -641,7 +659,9 @@
 				</svg>
 				<span>Daily Notes</span>
 			</button>
+			{/if}
 
+			{#if $appConfig?.show_trash !== false}
 			<button
 				class="nav-item"
 				class:active={$viewMode === 'trash'}
@@ -653,7 +673,9 @@
 				</svg>
 				<span>Trash</span>
 			</button>
+			{/if}
 		</nav>
+		{/if}
 
 		<div class="section">
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -1029,6 +1051,12 @@
 		overflow-y: auto;
 		padding: 4px 0;
 		border-top: 1px solid var(--border-light);
+	}
+
+	/* With the top nav hidden, the header's border-bottom is the only divider needed -
+	   drop the section's border-top so there's no doubled line under the header. */
+	.sidebar.nav-empty .section {
+		border-top: none;
 	}
 
 	/* Pin the Notebooks header so its collapse/expand-all button stays reachable while the tree

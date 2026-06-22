@@ -239,6 +239,11 @@ export async function setGeneralSettings(
   enableWikiLinks: boolean,
   showNoteDates: boolean,
   restoreLastSession: boolean,
+  showAllNotes: boolean,
+  showQuickAccess: boolean,
+  showTasks: boolean,
+  showDailyNotes: boolean,
+  showTrash: boolean,
 ): Promise<void> {
   return invoke("set_general_settings", {
     compactNotes,
@@ -259,6 +264,11 @@ export async function setGeneralSettings(
     enableWikiLinks,
     showNoteDates,
     restoreLastSession,
+    showAllNotes,
+    showQuickAccess,
+    showTasks,
+    showDailyNotes,
+    showTrash,
   });
 }
 
