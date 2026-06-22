@@ -590,14 +590,12 @@
 				{/if}
 			</svg>
 		</button>
-		{#if !$sidebarCollapsed}
 			<button class="icon-btn" onclick={() => ($showSearch = true)} title={`Search (${modKey}+F)`}>
 				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 					<circle cx="11" cy="11" r="8" />
 					<line x1="21" y1="21" x2="16.65" y2="16.65" />
 				</svg>
 			</button>
-		{/if}
 	</div>
 	{/if}
 
@@ -802,6 +800,7 @@
 				{/if}
 			</div>
 		{/if}
+	{/if}
 
 		<div class="sidebar-footer">
 			<button class="icon-btn" onclick={() => ($showInfo = true)} title="Info">
@@ -821,7 +820,6 @@
 
 			</div>
 		</div>
-	{/if}
 </aside>
 
 {#if contextMenu}
@@ -1005,6 +1003,29 @@
 		width: 44px !important;
 		min-width: 44px;
 		max-width: 44px;
+	}
+
+	/* Collapsed rail: stack the toolbar icons vertically - search under the expand chevron at
+	   the top, info + settings pinned to the bottom. */
+	.sidebar.collapsed .sidebar-header {
+		flex-direction: column;
+		justify-content: flex-start;
+		gap: 4px;
+		padding: 8px 4px;
+		border-bottom: none;
+	}
+
+	.sidebar.collapsed .sidebar-footer {
+		flex-direction: column;
+		align-items: center;
+		gap: 4px;
+		margin-top: auto;
+		padding: 8px 4px;
+		border-top: none;
+	}
+
+	.sidebar.collapsed .sidebar-footer-right {
+		flex-direction: column;
 	}
 
 	.sidebar-header {
