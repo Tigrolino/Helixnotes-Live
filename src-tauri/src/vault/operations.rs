@@ -386,7 +386,26 @@ pub fn read_note(path: &str) -> Result<NoteContent, String> {
         .to_string_lossy()
         .to_string();
 
-    let (meta, content) = frontmatter::parse_note(&raw, &filename);
+    let (mut meta, content) = frontmatter::parse_note(&raw, &filename);
+
+    // Fall back to filesystem times when the frontmatter has no created/modified, matching the
+    // note-list scan (read_note_entry_from_str). Without this, a missing `created:` defaults to
+    // Utc::now() here and then gets written to disk on the next save (e.g. a title change),
+    // resetting the create date of imported/frontmatter-less notes. (issue #139)
+    let has_created = raw.contains("\ncreated:") || raw.starts_with("created:");
+    let has_modified = raw.contains("\nmodified:") || raw.starts_with("modified:");
+    if let Ok(fs_meta) = fs::metadata(p) {
+        if !has_modified {
+            if let Ok(modified) = fs_meta.modified() {
+                meta.modified = modified.into();
+            }
+        }
+        if !has_created {
+            if let Ok(created) = fs_meta.created() {
+                meta.created = created.into();
+            }
+        }
+    }
 
     Ok(NoteContent {
         path: path.to_string(),
