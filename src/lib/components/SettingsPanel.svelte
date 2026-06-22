@@ -10,6 +10,7 @@
 	import type { ImportResult, BackupEntry } from '$lib/types';
 
 	const isMobile = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
+	const modKey = navigator.platform.startsWith('Mac') ? '⌘' : 'Ctrl';
 
 	type Tab = 'general' | 'editor' | 'styling' | 'import' | 'backup' | 'ai' | 'sync' | 'updates';
 	let activeTab = $state<Tab>('styling');
@@ -912,7 +913,7 @@
 							{#if !isMobile}
 							<div class="settings-section">
 								<h3>Sidebar</h3>
-								<p class="setting-desc" style="margin: 0 0 10px;">Hide navigation items you don't use. The notebook tree always stays.</p>
+								<p class="setting-desc" style="margin: 0 0 10px;">Hide navigation items you don't use, leaving search and the notebook tree. Any item you hide stays reachable from the command palette ({modKey}+P).</p>
 								<label class="setting-toggle">
 									<span class="setting-label"><span class="setting-name">All Notes</span></span>
 									<button class="toggle-switch" class:on={showAllNotes} onclick={() => { showAllNotes = !showAllNotes; saveGeneralSettings(); }}>
@@ -938,10 +939,7 @@
 									</button>
 								</label>
 								<label class="setting-toggle">
-									<span class="setting-label">
-										<span class="setting-name">Trash</span>
-										<span class="setting-desc">Deleted notes stay recoverable from the command palette (Ctrl/Cmd+P → Open Trash).</span>
-									</span>
+									<span class="setting-label"><span class="setting-name">Trash</span></span>
 									<button class="toggle-switch" class:on={showTrash} onclick={() => { showTrash = !showTrash; saveGeneralSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
