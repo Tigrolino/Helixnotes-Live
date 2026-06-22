@@ -21,7 +21,7 @@
 		notebookSortMode,
 		notebookOrder
 	} from '$lib/stores/app';
-	import { getNotebooks, getAllTags, createNotebook, deleteNotebook, renameNotebook, moveNotebook, getNotebookIcons, setNotebookIcon, saveAttachment, getQuickAccess, addQuickAccess, removeQuickAccess, emptyTrash, moveNote, readNote, getNotes, countRootNotes } from '$lib/api';
+	import { getNotebooks, getAllTags, createNotebook, deleteNotebook, renameNotebook, moveNotebook, getNotebookIcons, setNotebookIcon, saveAttachment, getQuickAccess, addQuickAccess, removeQuickAccess, emptyTrash, moveNote, readNote, countRootNotes } from '$lib/api';
 	import { open as openDialog } from '@tauri-apps/plugin-dialog';
 	import { readFile } from '@tauri-apps/plugin-fs';
 	import { convertFileSrc } from '@tauri-apps/api/core';
@@ -62,19 +62,25 @@
 	let trashContextMenu = $state<{ x: number; y: number } | null>(null);
 	let tagsCollapsed = $state(true);
 	let deleteConfirm = $state<NotebookEntry | null>(null);
-	function toggleCollapse(path: string, e: MouseEvent) {
+	function expandNotebook(nb: NotebookEntry) {
+		if ($collapsedNotebooks.includes(nb.path)) {
+			$collapsedNotebooks = $collapsedNotebooks.filter(p => p !== nb.path);
+		}
+	}
+
+	function toggleCollapse(nb: NotebookEntry, e: Event) {
 		e.stopPropagation();
-		if ($collapsedNotebooks.includes(path)) {
-			$collapsedNotebooks = $collapsedNotebooks.filter(p => p !== path);
+		if ($collapsedNotebooks.includes(nb.path)) {
+			$collapsedNotebooks = $collapsedNotebooks.filter(p => p !== nb.path);
 		} else {
-			$collapsedNotebooks = [...$collapsedNotebooks, path];
+			$collapsedNotebooks = [...$collapsedNotebooks, nb.path];
 		}
 	}
 	// Collapse-all / expand-all: toggles every notebook that has children.
 	function collectParentPaths(tree: NotebookEntry[]): string[] {
 		const out: string[] = [];
 		for (const nb of tree) {
-			if (nb.children && nb.children.length > 0) {
+			if (nb.children.length > 0) {
 				out.push(nb.path);
 				out.push(...collectParentPaths(nb.children));
 			}
@@ -136,12 +142,23 @@
 		onViewChanged();
 	}
 
-	function selectNotebook(nb: NotebookEntry) {
+	async function selectNotebook(nb: NotebookEntry) {
+		const hasVisibleChildren = nb.children.length > 0;
+		const wasCollapsed = $collapsedNotebooks.includes(nb.path);
 		// Deselect if clicking the already-active notebook
 		if ($viewMode === 'notebook' && $activeNotebook?.path === nb.path) {
+			if (hasVisibleChildren) {
+				if (wasCollapsed) {
+					await expandNotebook(nb);
+				} else {
+					$collapsedNotebooks = [...$collapsedNotebooks, nb.path];
+				}
+				return;
+			}
 			selectAllNotes();
 			return;
 		}
+		if (hasVisibleChildren) await expandNotebook(nb);
 		$viewMode = 'notebook';
 		$activeNotebook = nb;
 		$activeTag = null;
@@ -185,6 +202,14 @@
 
 	let newNotebookParent = $state<NotebookEntry | null>(null);
 
+	function getNotebookNameSegments(name: string): string[] | null {
+		const segments = name.split('/').map((segment) => segment.trim());
+		if (segments.some((segment) => !segment || segment === '.' || segment === '..' || segment.includes('\\'))) {
+			return null;
+		}
+		return segments;
+	}
+
 	async function focusNewNotebookInput() {
 		await tick();
 		newNotebookInput?.focus();
@@ -212,14 +237,6 @@
 		newNotebookName = '';
 		showNewNotebook = true;
 		await focusNewNotebookInput();
-	}
-
-	function getNotebookNameSegments(name: string): string[] | null {
-		const segments = name.split('/').map((segment) => segment.trim());
-		if (segments.some((segment) => !segment || segment === '.' || segment === '..' || segment.includes('\\'))) {
-			return null;
-		}
-		return segments;
 	}
 
 	async function handleCreateNotebook() {
@@ -925,7 +942,7 @@
 		>
 			{#if hasChildren}
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<span class="chevron" class:collapsed={isCollapsed} onclick={(e) => toggleCollapse(nb.path, e)} onkeydown={(e) => { if (e.key === 'Enter') toggleCollapse(nb.path, e); }}>
+				<span class="chevron" class:collapsed={isCollapsed} onclick={(e) => toggleCollapse(nb, e)} onkeydown={(e) => { if (e.key === 'Enter') toggleCollapse(nb, e); }}>
 					<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 						<polyline points="6 9 12 15 18 9" />
 					</svg>
