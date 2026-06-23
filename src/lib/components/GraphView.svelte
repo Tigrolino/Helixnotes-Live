@@ -2,13 +2,12 @@
 	import { onDestroy } from 'svelte';
 	import { getGraphData } from '$lib/api';
 	import { activeNotePath, appConfig } from '$lib/stores/app';
+	import { isMobile } from '$lib/platform';
 
 	let { onclose, onnavigate }: {
 		onclose: () => void;
 		onnavigate: (path: string, title: string) => void;
 	} = $props();
-
-	const isMobile = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
 
 	let canvas = $state<HTMLCanvasElement>(null!);
 	let loading = $state(true);

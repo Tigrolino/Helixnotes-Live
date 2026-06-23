@@ -38,7 +38,21 @@ pub fn run() {
     let close_to_tray = config.close_to_tray && show_tray;
     let app_state = AppState::new(config);
 
+    // Inject the compile-time platform so the frontend never sniffs the (sometimes
+    // mobile-looking) WebKitGTK user-agent. (#63)
+    let platform_init = format!(
+        "window.__HELIX_PLATFORM__={{mobile:{},android:{},ios:{}}};",
+        cfg!(mobile),
+        cfg!(target_os = "android"),
+        cfg!(target_os = "ios"),
+    );
+
     let mut builder = tauri::Builder::default()
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry>::new("helix-platform")
+                .js_init_script(platform_init)
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())

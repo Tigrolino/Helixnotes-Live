@@ -49,9 +49,9 @@
 	import { wrapTextareaSelection } from '$lib/editor/source/selectionPairs';
 	import GraphView from './GraphView.svelte';
 	import TagSuggestInput from './TagSuggestInput.svelte';
+	import { isMobile, isAndroid } from '$lib/platform';
 
 	const modKey = navigator.platform.startsWith('Mac') ? '⌘' : 'Ctrl';
-	const isMobile = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
 
 	// Track virtual keyboard height on mobile via visualViewport
 	let keyboardHeight = $state(0);
@@ -1028,7 +1028,6 @@
 			function addToolbar(container: HTMLElement, source: string) {
 				const toolbar = document.createElement('div');
 				toolbar.className = 'mermaid-render-toolbar';
-				const isAndroid = /android/i.test(navigator.userAgent);
 
 				if (!isAndroid) {
 					const copyBtn = document.createElement('button');

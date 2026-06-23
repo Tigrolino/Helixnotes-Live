@@ -3,6 +3,7 @@
 	import { searchNotes, readNote } from '$lib/api';
 	import { debounce } from '$lib/utils/debounce';
 	import type { SearchResult } from '$lib/types';
+	import { isMobile } from '$lib/platform';
 
 	let query = $state('');
 	let results = $state<SearchResult[]>([]);
@@ -82,8 +83,6 @@
 	function escapeHtml(str: string): string {
 		return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 	}
-
-	const isMobile = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
 
 	async function openResult(result: SearchResult) {
 		try {

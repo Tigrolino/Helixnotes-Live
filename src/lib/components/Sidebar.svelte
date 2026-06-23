@@ -26,13 +26,13 @@
 	import { readFile } from '@tauri-apps/plugin-fs';
 	import { convertFileSrc } from '@tauri-apps/api/core';
 	import type { NotebookEntry } from '$lib/types';
+	import { isMobile } from '$lib/platform';
 
 	let { onViewChanged = () => {} }: {
 		onViewChanged?: () => void;
 	} = $props();
 
 	const modKey = navigator.platform.startsWith('Mac') ? '⌘' : 'Ctrl';
-	const isMobile = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
 
 	// Whether any top nav item (All Notes, Quick Access, Tasks, Daily Notes, Trash) is visible.
 	// When all are hidden we drop the empty <nav> and its divider so the tree sits flush.

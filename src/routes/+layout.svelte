@@ -4,12 +4,10 @@
 	import { theme, appConfig, activeNote, activeNotePath, installType, platformIsMobile, checkForUpdate, checkForUpdateMobile, isManagedInstall } from '$lib/stores/app';
 	import { openFile, openUrl, readNote, getInstallType, isMobilePlatform } from '$lib/api';
 	import { get } from 'svelte/store';
-	import { darkThemes } from '$lib/platform';
+	import { darkThemes, isMobile, isAndroid } from '$lib/platform';
 	import ResizeHandles from '$lib/components/ResizeHandles.svelte';
 
 	let { children } = $props();
-
-	const isMobile = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
 
 	// Reactively apply theme class to <html> whenever $theme changes
 	$effect(() => {
@@ -45,8 +43,6 @@
 		}
 		return resolved.join('/');
 	}
-
-	const isAndroid = /android/i.test(navigator.userAgent);
 
 	function openLocalFile(path: string) {
 		if (isAndroid) {

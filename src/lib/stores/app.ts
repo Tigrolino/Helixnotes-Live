@@ -1,4 +1,5 @@
 import { writable, derived, get } from "svelte/store";
+import { isMobile } from "$lib/platform";
 import type {
   AppConfig,
   NoteEntry,
@@ -87,11 +88,8 @@ export const updateAvailable = writable<{
 } | null>(null);
 export const updateObj = writable<any>(null);
 export const installType = writable<string>("native");
-// True only on the Android/iOS build. Defaults to a user-agent guess for the first paint, then
-// gets the authoritative compile-time value from the backend at startup (see +layout). (#63)
-export const platformIsMobile = writable<boolean>(
-  typeof navigator !== "undefined" && /android|iphone|ipad|ipod/i.test(navigator.userAgent),
-);
+// True only on the Android/iOS build. Reconfirmed from the backend at startup (see +layout). (#63)
+export const platformIsMobile = writable<boolean>(isMobile);
 export const androidApkUrl = writable<string | null>(null);
 
 // Install types that handle their own updates (in-app auto-updater, or a

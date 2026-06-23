@@ -15,9 +15,9 @@
 		bindingsEqual,
 		type ActionDef,
 	} from '$lib/keybindings';
+	import { isMobile } from '$lib/platform';
 
 	const modKey = navigator.platform.startsWith('Mac') ? '⌘' : 'Ctrl';
-	const isMobile = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
 
 	// Customizable shortcuts, grouped for display.
 	const actionGroups: { title: string; actions: ActionDef[] }[] = [

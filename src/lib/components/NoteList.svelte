@@ -43,6 +43,7 @@
 	import type { NoteEntry, TrashNotebookEntry, SortMode, TaskItem } from '$lib/types';
 	import TasksView from './TasksView.svelte';
 	import TagSuggestInput from './TagSuggestInput.svelte';
+	import { isMobile, isAndroid } from '$lib/platform';
 
 	let { onNoteSelected = (_path: string, _content: string) => {}, onNoteMoved = () => {}, onBeforeNoteSwitch = () => {}, onNoteCreated = () => {}, onToggleTask = async (_t: TaskItem) => {}, onSetTaskPriority = async (_t: TaskItem, _p: string | null) => {}, onSetTaskDue = async (_t: TaskItem, _d: string | null) => {} }: {
 		onNoteSelected?: (path: string, content: string) => void;
@@ -55,8 +56,6 @@
 	} = $props();
 
 	const modKey = navigator.platform.startsWith('Mac') ? '⌘' : 'Ctrl';
-	const isMobile = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
-	const isAndroid = /android/i.test(navigator.userAgent);
 	let multiSelectMode = $state(false);
 	let trashNotebooks = $state<TrashNotebookEntry[]>([]);
 	let trashBusy = $state<string | null>(null);

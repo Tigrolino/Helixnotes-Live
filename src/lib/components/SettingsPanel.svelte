@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { showSettings, theme, appConfig, updateAvailable as globalUpdateAvailable, updateObj as globalUpdateObj, installType, settingsTab, vaultReady, androidApkUrl, checkForUpdateMobile, notebookSortMode, isManagedInstall } from '$lib/stores/app';
 	import { setTheme, setAccentColor, setFontSize, setFontFamily, setLineHeight, setUiScale, setContentWidth, setGeneralSettings, importObsidian, createBackup, listBackups, restoreBackup, deleteBackup, setBackupSettings, setAiSettings, testAiConnection, setSyncSettings, testSyncConnection, syncNow } from '$lib/api';
-	import { darkThemes } from '$lib/platform';
+	import { darkThemes, isMobile } from '$lib/platform';
 	import { open as openDialog } from '@tauri-apps/plugin-dialog';
 	import { listen } from '@tauri-apps/api/event';
 	import { getVersion } from '@tauri-apps/api/app';
@@ -9,7 +9,6 @@
 	import { openUrl } from '$lib/api';
 	import type { ImportResult, BackupEntry } from '$lib/types';
 
-	const isMobile = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
 	const modKey = navigator.platform.startsWith('Mac') ? '⌘' : 'Ctrl';
 
 	type Tab = 'general' | 'editor' | 'styling' | 'import' | 'backup' | 'ai' | 'sync' | 'updates';
