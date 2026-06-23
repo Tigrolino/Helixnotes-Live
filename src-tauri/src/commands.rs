@@ -1688,9 +1688,9 @@ pub struct OrphanAttachment {
 
 // Conservatively find files in .helixnotes/attachments not referenced by ANY note. Scans every
 // .md in the vault (including .helixnotes/trash, so a restorable trashed note keeps its files)
-// and matches each filename against both the raw note text and a percent-decoded copy (so a
-// URL-encoded path like `my%20file.png` still counts as a reference). When in doubt a file is
-// KEPT: a leftover orphan is harmless, a wrong deletion is not.
+// plus notebook_icons.json, and matches each filename against both the raw text and a
+// percent-decoded copy (so a URL-encoded path like `my%20file.png` still counts as a reference).
+// When in doubt a file is KEPT: a leftover orphan is harmless, a wrong deletion is not.
 fn scan_orphaned_attachments(vault: &str) -> Result<Vec<(String, u64)>, String> {
     let attachments_dir = operations::helixnotes_dir(vault).join("attachments");
     if !attachments_dir.is_dir() {
@@ -1718,6 +1718,12 @@ fn scan_orphaned_attachments(vault: &str) -> Result<Vec<(String, u64)>, String> 
                 haystack.push('\n');
             }
         }
+    }
+    // Folder icons live in attachments but are referenced here, not in notes. (#157)
+    let icons_path = operations::helixnotes_dir(vault).join("notebook_icons.json");
+    if let Ok(content) = std::fs::read_to_string(&icons_path) {
+        haystack.push_str(&content);
+        haystack.push('\n');
     }
     let decoded = percent_decode(&haystack);
     let orphans = files
