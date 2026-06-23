@@ -1323,6 +1323,60 @@
 		},
 	});
 
+	// Dim the inline task metadata tokens (!high / !medium / !med / !low and due:YYYY-MM-DD) inside
+	// task items so they recede visually without disappearing. View-only inline decorations - the
+	// note text is untouched. Token shapes mirror the parser in commands.rs.
+	const taskMetaPluginKey = new PluginKey('taskMetaDim');
+	const TASK_PRIO_RE = /(^|\s)(!(?:high|medium|med|low))\b/gi;
+	const TASK_DUE_RE = /\bdue:\d{4}-\d{2}-\d{2}\b/gi;
+
+	function buildTaskMetaDecorations(doc: any): DecorationSet {
+		const decos: any[] = [];
+		doc.descendants((node: any, pos: number) => {
+			if (!node.isText || !node.text) return;
+			// Only inside task items - elsewhere "!high" / "due:..." are ordinary prose.
+			const rpos = doc.resolve(pos);
+			let inTask = false;
+			for (let d = rpos.depth; d > 0; d--) {
+				if (rpos.node(d).type.name === 'taskItem') { inTask = true; break; }
+			}
+			if (!inTask) return;
+			const text: string = node.text;
+			let m: RegExpExecArray | null;
+			TASK_PRIO_RE.lastIndex = 0;
+			while ((m = TASK_PRIO_RE.exec(text)) !== null) {
+				const start = pos + m.index + m[1].length;
+				decos.push(Decoration.inline(start, start + m[2].length, { class: 'task-meta-dim' }));
+			}
+			TASK_DUE_RE.lastIndex = 0;
+			while ((m = TASK_DUE_RE.exec(text)) !== null) {
+				decos.push(Decoration.inline(pos + m.index, pos + m.index + m[0].length, { class: 'task-meta-dim' }));
+			}
+		});
+		return DecorationSet.create(doc, decos);
+	}
+
+	const TaskMetaDim = Extension.create({
+		name: 'taskMetaDim',
+		addProseMirrorPlugins() {
+			return [
+				new Plugin({
+					key: taskMetaPluginKey,
+					state: {
+						init: (_, state) => buildTaskMetaDecorations(state.doc),
+						apply: (tr, old, _oldState, newState) => {
+							if (!tr.docChanged) return old;
+							return buildTaskMetaDecorations(newState.doc);
+						},
+					},
+					props: {
+						decorations(state) { return taskMetaPluginKey.getState(state); },
+					},
+				}),
+			];
+		},
+	});
+
 	const MoveLineShortcuts = Extension.create({
 		name: 'moveLineShortcuts',
 		addProseMirrorPlugins() {
@@ -3726,6 +3780,7 @@
 				TabIndent,
 				NoteSearchExtension,
 				ColorSwatch,
+				TaskMetaDim,
 				...($appConfig?.enable_wiki_links ? [WikiLink, WikiLinkAutocomplete] : []),
 			],
 			content: html,
@@ -8459,6 +8514,11 @@
 	:global(.tiptap-wrapper .tiptap ul[data-type="taskList"] li[data-checked="true"] > div > p) {
 		text-decoration: line-through;
 		color: var(--text-tertiary);
+	}
+
+	/* Dim inline task metadata (!high / due:YYYY-MM-DD) so it recedes but stays readable. */
+	:global(.tiptap-wrapper .tiptap .task-meta-dim) {
+		opacity: 0.45;
 	}
 
 	:global(.tiptap-wrapper .tiptap hr) {
