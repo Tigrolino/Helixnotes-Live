@@ -2,6 +2,7 @@ import { writable, derived, get } from "svelte/store";
 import { isMobile } from "$lib/platform";
 import type {
   AppConfig,
+  CustomTheme,
   NoteEntry,
   NoteContent,
   NotebookEntry,
@@ -73,6 +74,7 @@ export const readOnly = writable(false);
 
 // Theme
 export const theme = writable<string>("system");
+export const customThemes = derived(appConfig, ($c): CustomTheme[] => $c?.custom_themes ?? []);
 
 // Sync (WebDAV) - global status so the top-bar button reflects any sync,
 // whoever triggered it (manual button, settings, interval, on-change).

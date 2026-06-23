@@ -1,0 +1,21 @@
+{
+  "themes": [
+    {
+      "colors": {
+        "bg_active": "#373a52",
+        "bg_editor": "#1a1b26",
+        "bg_hover": "#2f3145",
+        "bg_primary": "#1a1b26",
+        "bg_secondary": "#1f2029",
+        "bg_tertiary": "#2a2b3d",
+        "border_color": "#2f3145",
+        "text_primary": "#c8cde4",
+        "text_secondary": "#6b7094"
+      },
+      "id": "custom-1782146306429",
+      "is_dark": true,
+      "name": "My theme"
+    }
+  ],
+  "version": 1
+}

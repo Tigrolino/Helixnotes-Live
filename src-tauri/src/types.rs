@@ -57,6 +57,27 @@ pub struct VaultConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomThemeColors {
+    pub bg_primary: String,
+    pub bg_secondary: String,
+    pub bg_tertiary: String,
+    pub bg_hover: String,
+    pub bg_active: String,
+    pub bg_editor: String,
+    pub text_primary: String,
+    pub text_secondary: String,
+    pub border_color: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomTheme {
+    pub id: String,
+    pub name: String,
+    pub is_dark: bool,
+    pub colors: CustomThemeColors,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub vaults: Vec<VaultConfig>,
     pub active_vault: Option<String>,
@@ -168,6 +189,8 @@ pub struct AppConfig {
     pub sync_interval_minutes: u32,
     #[serde(default)]
     pub last_sync_time: Option<String>,
+    #[serde(default)]
+    pub custom_themes: Vec<CustomTheme>,
 }
 
 fn default_true() -> bool {
@@ -265,6 +288,7 @@ impl Default for AppConfig {
             sync_on_change: false,
             sync_interval_minutes: 0,
             last_sync_time: None,
+            custom_themes: Vec::new(),
         }
     }
 }

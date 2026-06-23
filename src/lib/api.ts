@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppConfig,
+  CustomTheme,
   NoteContent,
   NoteEntry,
   NoteMeta,
@@ -34,6 +35,22 @@ export async function setTheme(theme: string): Promise<void> {
 
 export async function setAccentColor(color: string): Promise<void> {
   return invoke("set_accent_color", { color });
+}
+
+export async function saveCustomTheme(theme: CustomTheme): Promise<void> {
+  return invoke("save_custom_theme", { theme });
+}
+
+export async function deleteCustomTheme(id: string): Promise<void> {
+  return invoke("delete_custom_theme", { id });
+}
+
+export async function exportCustomTheme(id: string, path: string): Promise<void> {
+  return invoke("export_custom_theme", { id, path });
+}
+
+export async function importCustomThemes(path: string): Promise<CustomTheme[]> {
+  return invoke("import_custom_themes", { path });
 }
 
 export async function setFontSize(size: number): Promise<void> {

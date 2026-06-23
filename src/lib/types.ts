@@ -46,6 +46,25 @@ export interface VaultConfig {
   name: string;
 }
 
+export interface CustomThemeColors {
+  bg_primary: string;
+  bg_secondary: string;
+  bg_tertiary: string;
+  bg_hover: string;
+  bg_active: string;
+  bg_editor: string;
+  text_primary: string;
+  text_secondary: string;
+  border_color: string;
+}
+
+export interface CustomTheme {
+  id: string;
+  name: string;
+  is_dark: boolean;
+  colors: CustomThemeColors;
+}
+
 export interface AppConfig {
   vaults: VaultConfig[];
   active_vault: string | null;
@@ -103,6 +122,7 @@ export interface AppConfig {
   sync_on_change: boolean;
   sync_interval_minutes: number;
   last_sync_time: string | null;
+  custom_themes: CustomTheme[];
 }
 
 export interface VaultState {

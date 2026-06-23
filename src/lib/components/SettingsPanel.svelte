@@ -1,13 +1,13 @@
 <script lang="ts">
-	import { showSettings, theme, appConfig, updateAvailable as globalUpdateAvailable, updateObj as globalUpdateObj, installType, settingsTab, vaultReady, androidApkUrl, checkForUpdateMobile, notebookSortMode, isManagedInstall } from '$lib/stores/app';
-	import { setTheme, setAccentColor, setFontSize, setFontFamily, setLineHeight, setUiScale, setContentWidth, setGeneralSettings, importObsidian, createBackup, listBackups, restoreBackup, deleteBackup, setBackupSettings, setAiSettings, testAiConnection, setSyncSettings, testSyncConnection, syncNow } from '$lib/api';
+	import { showSettings, theme, appConfig, updateAvailable as globalUpdateAvailable, updateObj as globalUpdateObj, installType, settingsTab, vaultReady, androidApkUrl, checkForUpdateMobile, notebookSortMode, isManagedInstall, customThemes } from '$lib/stores/app';
+	import { setTheme, setAccentColor, setFontSize, setFontFamily, setLineHeight, setUiScale, setContentWidth, setGeneralSettings, importObsidian, createBackup, listBackups, restoreBackup, deleteBackup, setBackupSettings, setAiSettings, testAiConnection, setSyncSettings, testSyncConnection, syncNow, saveCustomTheme, deleteCustomTheme, exportCustomTheme, importCustomThemes } from '$lib/api';
 	import { darkThemes, isMobile, isAndroid } from '$lib/platform';
-	import { open as openDialog } from '@tauri-apps/plugin-dialog';
+	import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 	import { listen } from '@tauri-apps/api/event';
 	import { getVersion } from '@tauri-apps/api/app';
 	import { getCurrentWebview } from '@tauri-apps/api/webview';
 	import { openUrl } from '$lib/api';
-	import type { ImportResult, BackupEntry } from '$lib/types';
+	import type { ImportResult, BackupEntry, CustomTheme, CustomThemeColors } from '$lib/types';
 
 	const modKey = navigator.platform.startsWith('Mac') ? '⌘' : 'Ctrl';
 
@@ -386,7 +386,8 @@
 	}
 
 	let isThemeDark = $derived(
-		darkThemes.includes($theme) || ($theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+		darkThemes.includes($theme) || ($theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) ||
+		($theme.startsWith('custom-') && ($customThemes.find(c => c.id === $theme)?.is_dark ?? false))
 	);
 
 	const themePresets = [
@@ -493,12 +494,178 @@
 	let activeContentWidth = $state<number | null>($appConfig?.content_width ?? null);
 	let themeDropdownOpen = $state(false);
 	let accentDropdownOpen = $state(false);
+	let activeCustomTheme = $derived($customThemes.find(c => c.id === $theme) ?? null);
 	let activeThemePreset = $derived(themePresets.find(p => p.id === $theme) ?? themePresets[0]);
 	let activeAccentPreset = $derived(accentPresets.find(p => p.name === activeAccent) ?? accentPresets[0]);
 	let isCustomAccent = $derived(activeAccent.startsWith('#'));
 	let activeAccentColor = $derived(
 		isCustomAccent ? activeAccent : (isThemeDark ? activeAccentPreset.dark : activeAccentPreset.light)
 	);
+
+	// Custom theme editor state
+	const DEFAULT_DARK_COLORS: CustomThemeColors = {
+		bg_primary: '#1a1b26', bg_secondary: '#1f2029', bg_tertiary: '#2a2b3d',
+		bg_hover: '#2f3145', bg_active: '#373a52', bg_editor: '#1a1b26',
+		text_primary: '#c8cde4', text_secondary: '#6b7094', border_color: '#2f3145',
+	};
+	const DEFAULT_LIGHT_COLORS: CustomThemeColors = {
+		bg_primary: '#ffffff', bg_secondary: '#f8f9fa', bg_tertiary: '#f0f2f5',
+		bg_hover: '#e8eaed', bg_active: '#dde1e7', bg_editor: '#ffffff',
+		text_primary: '#1a1a2e', text_secondary: '#6b7280', border_color: '#e2e5ea',
+	};
+
+	let customThemeEditing = $state<CustomTheme | null>(null);
+	let customThemeEditorOpen = $state(false);
+	let customThemeMessage = $state<{ type: 'success' | 'error'; text: string } | null>(null);
+	let customThemeExportingId = $state<string | null>(null);
+	let customThemeImporting = $state(false);
+
+	function openNewCustomThemeEditor() {
+		const isDark = darkThemes.includes($theme) || ($theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) || $theme.startsWith('custom-') && ($customThemes.find(c => c.id === $theme)?.is_dark ?? false);
+		customThemeEditing = {
+			id: `custom-${Date.now()}`,
+			name: '',
+			is_dark: isDark,
+			colors: isDark ? { ...DEFAULT_DARK_COLORS } : { ...DEFAULT_LIGHT_COLORS },
+		};
+		customThemeEditorOpen = true;
+	}
+
+	function openEditCustomThemeEditor(ct: CustomTheme) {
+		customThemeEditing = { ...ct, colors: { ...ct.colors } };
+		customThemeEditorOpen = true;
+	}
+
+	function closeCustomThemeEditor() {
+		customThemeEditorOpen = false;
+		customThemeEditing = null;
+	}
+
+	function previewCustomTheme() {
+		if (!customThemeEditing) return;
+		const root = document.documentElement;
+		root.style.setProperty('--bg-primary', customThemeEditing.colors.bg_primary);
+		root.style.setProperty('--bg-secondary', customThemeEditing.colors.bg_secondary);
+		root.style.setProperty('--bg-tertiary', customThemeEditing.colors.bg_tertiary);
+		root.style.setProperty('--bg-hover', customThemeEditing.colors.bg_hover);
+		root.style.setProperty('--bg-active', customThemeEditing.colors.bg_active);
+		root.style.setProperty('--bg-editor', customThemeEditing.colors.bg_editor);
+		root.style.setProperty('--text-primary', customThemeEditing.colors.text_primary);
+		root.style.setProperty('--text-secondary', customThemeEditing.colors.text_secondary);
+		root.style.setProperty('--border-color', customThemeEditing.colors.border_color);
+		root.classList.toggle('dark', customThemeEditing.is_dark);
+	}
+
+	function restoreCurrentTheme() {
+		// Re-apply the currently active theme to undo preview
+		const root = document.documentElement;
+		const varsToClear = ['--bg-primary','--bg-secondary','--bg-tertiary','--bg-hover','--bg-active','--bg-editor','--text-primary','--text-secondary','--border-color'];
+		root.classList.remove('dark');
+		root.removeAttribute('data-theme');
+		for (const v of varsToClear) root.style.removeProperty(v);
+		const namedThemes = ['solarized-light','solarized-dark','catppuccin','nord','tokyo-night','github-light','github-dark','dracula','blueberry','forest-green','gruvbox','midnight-tide','cherry-blossom','synthwave','ember','moonlit','light-coffee','dark-coffee','cotton-candy','crimson','cloud','peach','material-dark','material-light','monokai','rose-pine','everforest','horizon','cyberpunk','black','one-dark'];
+		if ($theme.startsWith('custom-')) {
+			const ct = $customThemes.find(c => c.id === $theme);
+			if (ct) {
+				root.style.setProperty('--bg-primary', ct.colors.bg_primary);
+				root.style.setProperty('--bg-secondary', ct.colors.bg_secondary);
+				root.style.setProperty('--bg-tertiary', ct.colors.bg_tertiary);
+				root.style.setProperty('--bg-hover', ct.colors.bg_hover);
+				root.style.setProperty('--bg-active', ct.colors.bg_active);
+				root.style.setProperty('--bg-editor', ct.colors.bg_editor);
+				root.style.setProperty('--text-primary', ct.colors.text_primary);
+				root.style.setProperty('--text-secondary', ct.colors.text_secondary);
+				root.style.setProperty('--border-color', ct.colors.border_color);
+				if (ct.is_dark) root.classList.add('dark');
+			}
+		} else if (namedThemes.includes($theme)) {
+			root.setAttribute('data-theme', $theme);
+			if (darkThemes.includes($theme)) root.classList.add('dark');
+		} else if ($theme === 'dark' || ($theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+			root.classList.add('dark');
+		}
+	}
+
+	async function saveCustomThemeEditor() {
+		if (!customThemeEditing || !customThemeEditing.name.trim()) return;
+		const theme_to_save = { ...customThemeEditing, name: customThemeEditing.name.trim() };
+		try {
+			await saveCustomTheme(theme_to_save);
+			if ($appConfig) {
+				const idx = $appConfig.custom_themes.findIndex(t => t.id === theme_to_save.id);
+				if (idx >= 0) $appConfig.custom_themes[idx] = theme_to_save;
+				else $appConfig.custom_themes = [...$appConfig.custom_themes, theme_to_save];
+				$appConfig = { ...$appConfig };
+			}
+			closeCustomThemeEditor();
+		} catch (e) {
+			customThemeMessage = { type: 'error', text: String(e) };
+		}
+	}
+
+	function cancelCustomThemeEditor() {
+		restoreCurrentTheme();
+		closeCustomThemeEditor();
+	}
+
+	async function selectCustomTheme(ct: CustomTheme) {
+		$theme = ct.id;
+		setTheme(ct.id);
+	}
+
+	async function removeCustomTheme(ct: CustomTheme) {
+		try {
+			await deleteCustomTheme(ct.id);
+			if ($appConfig) {
+				$appConfig.custom_themes = $appConfig.custom_themes.filter(t => t.id !== ct.id);
+				$appConfig = { ...$appConfig };
+			}
+			if ($theme === ct.id) {
+				$theme = 'system';
+			}
+		} catch (e) {
+			customThemeMessage = { type: 'error', text: String(e) };
+		}
+	}
+
+	async function handleExportCustomTheme(ct: CustomTheme) {
+		customThemeExportingId = ct.id;
+		try {
+			const safeName = ct.name.replace(/[^a-z0-9]/gi, '-').toLowerCase();
+			const path = await saveDialog({ filters: [{ name: 'JSON', extensions: ['json'] }], defaultPath: `${safeName}.json` });
+			if (path) {
+				await exportCustomTheme(ct.id, path);
+				customThemeMessage = { type: 'success', text: `"${ct.name}" exported.` };
+			}
+		} catch (e) {
+			customThemeMessage = { type: 'error', text: String(e) };
+		} finally {
+			customThemeExportingId = null;
+		}
+	}
+
+	async function handleImportCustomThemes() {
+		customThemeImporting = true;
+		try {
+			const path = await openDialog({ filters: [{ name: 'JSON', extensions: ['json'] }], multiple: false });
+			if (path) {
+				const imported = await importCustomThemes(path as string);
+				if ($appConfig) {
+					for (const t of imported) {
+						const idx = $appConfig.custom_themes.findIndex(x => x.id === t.id);
+						if (idx >= 0) $appConfig.custom_themes[idx] = t;
+						else $appConfig.custom_themes.push(t);
+					}
+					$appConfig = { ...$appConfig };
+				}
+				customThemeMessage = { type: 'success', text: `Imported ${imported.length} theme${imported.length !== 1 ? 's' : ''}.` };
+			}
+		} catch (e) {
+			customThemeMessage = { type: 'error', text: String(e) };
+		} finally {
+			customThemeImporting = false;
+		}
+	}
 
 	// General settings
 	let compactNotes = $state($appConfig?.compact_notes ?? false);
@@ -1230,6 +1397,166 @@
 								</div>
 							</div>
 							</div>
+
+							<!-- Custom Themes -->
+							<div class="settings-section">
+								<div class="section-header-row">
+									<h3>Custom Themes</h3>
+									<button class="create-theme-btn" onclick={openNewCustomThemeEditor}>
+										<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+										New Theme
+									</button>
+								</div>
+
+								{#if $customThemes.length > 0}
+									<div class="custom-theme-list">
+										{#each $customThemes as ct}
+											<div class="custom-theme-row" class:active={$theme === ct.id}>
+												<button class="custom-theme-swatch-btn" onclick={() => selectCustomTheme(ct)} title="Apply {ct.name}">
+													<span class="custom-theme-swatch" style="background: {ct.colors.bg_primary}; border-color: {ct.colors.border_color}">
+														<span class="swatch-sidebar" style="background: {ct.colors.bg_secondary}"></span>
+													</span>
+													<span class="custom-theme-name">{ct.name}</span>
+													{#if $theme === ct.id}
+														<svg class="dropdown-check" viewBox="0 0 16 16" fill="none"><path d="M3 8l4 4 6-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+													{/if}
+												</button>
+												<div class="custom-theme-actions">
+													<button class="icon-btn" title="Edit" onclick={() => openEditCustomThemeEditor(ct)}>
+														<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 00-3.986-3.987L3.842 16.174a2 2 0 00-.5.83l-1.321 4.352a.5.5 0 00.623.622l4.353-1.32a2 2 0 00.83-.497z"/></svg>
+													</button>
+													{#if !isMobile}
+													<button class="icon-btn" title="Export" disabled={customThemeExportingId === ct.id} onclick={() => handleExportCustomTheme(ct)}>
+														<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+													</button>
+													{/if}
+													<button class="icon-btn danger" title="Delete" onclick={() => removeCustomTheme(ct)}>
+														<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+													</button>
+												</div>
+											</div>
+										{/each}
+									</div>
+								{:else}
+									<p class="setting-hint" style="margin-top: 8px;">No custom themes yet. Create one to define your own colors.</p>
+								{/if}
+
+								{#if !isMobile}
+									<div class="custom-theme-io">
+										<button class="backup-link-btn" onclick={handleImportCustomThemes} disabled={customThemeImporting}>
+											<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+											{customThemeImporting ? 'Importing...' : 'Import theme'}
+										</button>
+									</div>
+								{/if}
+
+								{#if customThemeMessage}
+									<div class="import-result {customThemeMessage.type}" style="margin-top: 10px;">
+										{#if customThemeMessage.type === 'success'}
+											<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+										{:else}
+											<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+										{/if}
+										<span>{customThemeMessage.text}</span>
+									</div>
+								{/if}
+							</div>
+
+							<!-- Custom Theme Editor Modal -->
+							{#if customThemeEditorOpen && customThemeEditing}
+								<!-- svelte-ignore a11y_no_static_element_interactions -->
+								<div class="custom-theme-modal-overlay" onclick={cancelCustomThemeEditor} onkeydown={(e) => e.key === 'Escape' && cancelCustomThemeEditor()}>
+									<!-- svelte-ignore a11y_no_static_element_interactions -->
+									<div class="custom-theme-modal" onclick={(e) => e.stopPropagation()}>
+										<div class="custom-theme-modal-header">
+											<h3>{customThemeEditing.id.startsWith('custom-') && $customThemes.some(c => c.id === customThemeEditing!.id) ? 'Edit Theme' : 'New Custom Theme'}</h3>
+											<button class="close-btn" onclick={cancelCustomThemeEditor}>
+												<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+											</button>
+										</div>
+
+										<div class="custom-theme-modal-body">
+											<div class="ct-field">
+												<label class="ct-label">Theme Name</label>
+												<input class="ct-name-input" type="text" placeholder="My Theme" bind:value={customThemeEditing.name} maxlength={40} />
+											</div>
+
+											<div class="ct-field">
+												<label class="ct-label">Mode</label>
+												<div class="setting-options">
+													<button class="option-btn" class:active={!customThemeEditing.is_dark} onclick={() => { if (customThemeEditing) { customThemeEditing.is_dark = false; previewCustomTheme(); } }}>Light</button>
+													<button class="option-btn" class:active={customThemeEditing.is_dark} onclick={() => { if (customThemeEditing) { customThemeEditing.is_dark = true; previewCustomTheme(); } }}>Dark</button>
+												</div>
+											</div>
+
+											<div class="ct-colors-grid">
+												<div class="ct-color-group">
+													<span class="ct-group-label">Backgrounds</span>
+													{#each [
+														{ key: 'bg_primary', label: 'Primary' },
+														{ key: 'bg_secondary', label: 'Sidebar' },
+														{ key: 'bg_tertiary', label: 'Cards' },
+														{ key: 'bg_editor', label: 'Editor' },
+														{ key: 'bg_hover', label: 'Hover' },
+														{ key: 'bg_active', label: 'Active' },
+													] as field}
+														<label class="ct-color-row">
+															<input
+																type="color"
+																class="ct-color-input"
+																value={customThemeEditing.colors[field.key as keyof CustomThemeColors]}
+																oninput={(e) => { if (customThemeEditing) { (customThemeEditing.colors as any)[field.key] = e.currentTarget.value; previewCustomTheme(); } }}
+															/>
+															<span class="ct-color-label">{field.label}</span>
+														</label>
+													{/each}
+												</div>
+
+												<div class="ct-color-group">
+													<span class="ct-group-label">Text &amp; Borders</span>
+													{#each [
+														{ key: 'text_primary', label: 'Primary Text' },
+														{ key: 'text_secondary', label: 'Secondary Text' },
+														{ key: 'border_color', label: 'Borders' },
+													] as field}
+														<label class="ct-color-row">
+															<input
+																type="color"
+																class="ct-color-input"
+																value={customThemeEditing.colors[field.key as keyof CustomThemeColors]}
+																oninput={(e) => { if (customThemeEditing) { (customThemeEditing.colors as any)[field.key] = e.currentTarget.value; previewCustomTheme(); } }}
+															/>
+															<span class="ct-color-label">{field.label}</span>
+														</label>
+													{/each}
+												</div>
+											</div>
+
+											<div class="ct-preview">
+												<span class="ct-preview-label">Preview</span>
+												<div class="ct-preview-window" style="--p-bg: {customThemeEditing.colors.bg_primary}; --p-sidebar: {customThemeEditing.colors.bg_secondary}; --p-card: {customThemeEditing.colors.bg_tertiary}; --p-text: {customThemeEditing.colors.text_primary}; --p-text2: {customThemeEditing.colors.text_secondary}; --p-border: {customThemeEditing.colors.border_color}; --p-hover: {customThemeEditing.colors.bg_hover};">
+													<div class="ct-preview-sidebar">
+														<div class="ct-preview-item active"></div>
+														<div class="ct-preview-item"></div>
+														<div class="ct-preview-item"></div>
+													</div>
+													<div class="ct-preview-main">
+														<div class="ct-preview-title"></div>
+														<div class="ct-preview-line long"></div>
+														<div class="ct-preview-line medium"></div>
+														<div class="ct-preview-line short"></div>
+													</div>
+												</div>
+											</div>
+										</div>
+
+										<div class="custom-theme-modal-footer">
+											<button class="cancel-btn" onclick={cancelCustomThemeEditor}>Cancel</button>
+											<button class="save-btn" onclick={saveCustomThemeEditor} disabled={!customThemeEditing.name.trim()}>Save Theme</button>
+										</div>
+									</div>
+								</div>
+							{/if}
 
 							<div class="settings-section">
 								<h3>Font Size</h3>
@@ -2963,6 +3290,365 @@
 
 	.settings-panel.mobile .font-size-btn {
 		padding: 12px 6px;
+	}
+
+	/* ── Custom Themes ── */
+	.section-header-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 12px;
+	}
+
+	.section-header-row h3 {
+		margin: 0;
+	}
+
+	.create-theme-btn {
+		display: flex;
+		align-items: center;
+		gap: 5px;
+		padding: 5px 10px;
+		background: var(--accent-light);
+		color: var(--text-accent);
+		border: 1px solid transparent;
+		border-radius: 6px;
+		font-size: 12px;
+		font-weight: 500;
+		cursor: pointer;
+		transition: background 0.15s;
+	}
+
+	.create-theme-btn:hover {
+		background: var(--accent);
+		color: #fff;
+	}
+
+	.custom-theme-list {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		margin-bottom: 10px;
+	}
+
+	.custom-theme-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		border-radius: 8px;
+		border: 1px solid transparent;
+		padding: 2px 4px 2px 0;
+	}
+
+	.custom-theme-row.active {
+		background: var(--accent-light);
+		border-color: var(--accent);
+	}
+
+	.custom-theme-swatch-btn {
+		display: flex;
+		align-items: center;
+		gap: 9px;
+		flex: 1;
+		background: none;
+		border: none;
+		cursor: pointer;
+		padding: 5px 6px;
+		border-radius: 6px;
+		color: var(--text-primary);
+		font-size: 13px;
+		text-align: left;
+	}
+
+	.custom-theme-swatch-btn:hover {
+		background: var(--bg-hover);
+	}
+
+	.custom-theme-swatch {
+		width: 32px;
+		height: 22px;
+		border-radius: 5px;
+		border: 1px solid;
+		display: flex;
+		overflow: hidden;
+		flex-shrink: 0;
+	}
+
+	.swatch-sidebar {
+		width: 35%;
+		height: 100%;
+	}
+
+	.custom-theme-name {
+		flex: 1;
+	}
+
+	.custom-theme-actions {
+		display: flex;
+		gap: 2px;
+	}
+
+	.icon-btn {
+		background: none;
+		border: none;
+		color: var(--text-secondary);
+		cursor: pointer;
+		padding: 5px;
+		border-radius: 5px;
+		display: flex;
+		align-items: center;
+	}
+
+	.icon-btn:hover {
+		background: var(--bg-hover);
+		color: var(--text-primary);
+	}
+
+	.icon-btn.danger:hover {
+		background: rgba(220, 38, 38, 0.1);
+		color: var(--danger);
+	}
+
+	.custom-theme-io {
+		display: flex;
+		gap: 8px;
+		margin-top: 10px;
+		flex-wrap: wrap;
+	}
+
+	/* ── Custom Theme Modal ── */
+	.custom-theme-modal-overlay {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.5);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 3000;
+	}
+
+	.custom-theme-modal {
+		background: var(--bg-primary);
+		border: 1px solid var(--border-color);
+		border-radius: 14px;
+		box-shadow: var(--shadow-lg);
+		width: 480px;
+		max-height: 85vh;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+
+	.custom-theme-modal-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 18px 20px 14px;
+		border-bottom: 1px solid var(--border-light);
+	}
+
+	.custom-theme-modal-header h3 {
+		font-size: 15px;
+		font-weight: 600;
+		color: var(--text-primary);
+		margin: 0;
+	}
+
+	.custom-theme-modal-body {
+		overflow-y: auto;
+		padding: 16px 20px;
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+	}
+
+	.custom-theme-modal-footer {
+		display: flex;
+		justify-content: flex-end;
+		gap: 8px;
+		padding: 14px 20px;
+		border-top: 1px solid var(--border-light);
+	}
+
+	.ct-field {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+
+	.ct-label {
+		font-size: 12px;
+		font-weight: 500;
+		color: var(--text-secondary);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+
+	.ct-name-input {
+		background: var(--bg-secondary);
+		border: 1px solid var(--border-color);
+		border-radius: 7px;
+		color: var(--text-primary);
+		font-size: 14px;
+		padding: 8px 10px;
+		width: 100%;
+		box-sizing: border-box;
+		outline: none;
+	}
+
+	.ct-name-input:focus {
+		border-color: var(--accent);
+	}
+
+	.ct-colors-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 16px;
+	}
+
+	.ct-color-group {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+
+	.ct-group-label {
+		font-size: 11px;
+		font-weight: 600;
+		color: var(--text-secondary);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		margin-bottom: 2px;
+	}
+
+	.ct-color-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		cursor: pointer;
+	}
+
+	.ct-color-input {
+		width: 30px;
+		height: 24px;
+		border: 1px solid var(--border-color);
+		border-radius: 5px;
+		padding: 1px;
+		cursor: pointer;
+		background: none;
+		flex-shrink: 0;
+	}
+
+	.ct-color-label {
+		font-size: 13px;
+		color: var(--text-primary);
+	}
+
+	/* Theme preview */
+	.ct-preview {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+
+	.ct-preview-label {
+		font-size: 11px;
+		font-weight: 600;
+		color: var(--text-secondary);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.ct-preview-window {
+		display: flex;
+		border-radius: 8px;
+		overflow: hidden;
+		border: 1px solid var(--p-border);
+		height: 80px;
+		background: var(--p-bg);
+	}
+
+	.ct-preview-sidebar {
+		width: 80px;
+		background: var(--p-sidebar);
+		border-right: 1px solid var(--p-border);
+		padding: 8px 6px;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.ct-preview-item {
+		height: 10px;
+		border-radius: 3px;
+		background: var(--p-text2);
+		opacity: 0.4;
+	}
+
+	.ct-preview-item.active {
+		background: var(--p-hover);
+		opacity: 1;
+	}
+
+	.ct-preview-main {
+		flex: 1;
+		padding: 10px 12px;
+		display: flex;
+		flex-direction: column;
+		gap: 5px;
+	}
+
+	.ct-preview-title {
+		height: 10px;
+		border-radius: 3px;
+		background: var(--p-text);
+		width: 60%;
+		opacity: 0.8;
+	}
+
+	.ct-preview-line {
+		height: 7px;
+		border-radius: 3px;
+		background: var(--p-text2);
+		opacity: 0.5;
+	}
+
+	.ct-preview-line.long { width: 90%; }
+	.ct-preview-line.medium { width: 70%; }
+	.ct-preview-line.short { width: 45%; }
+
+	.cancel-btn {
+		padding: 7px 14px;
+		background: var(--bg-secondary);
+		border: 1px solid var(--border-color);
+		border-radius: 7px;
+		color: var(--text-primary);
+		font-size: 13px;
+		cursor: pointer;
+	}
+
+	.cancel-btn:hover {
+		background: var(--bg-hover);
+	}
+
+	.save-btn {
+		padding: 7px 16px;
+		background: var(--accent);
+		border: none;
+		border-radius: 7px;
+		color: #fff;
+		font-size: 13px;
+		font-weight: 500;
+		cursor: pointer;
+	}
+
+	.save-btn:hover:not(:disabled) {
+		opacity: 0.9;
+	}
+
+	.save-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 
 </style>

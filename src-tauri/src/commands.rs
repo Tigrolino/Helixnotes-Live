@@ -91,6 +91,58 @@ pub fn set_accent_color(state: State<'_, AppState>, color: String) -> Result<(),
 }
 
 #[tauri::command]
+pub fn save_custom_theme(state: State<'_, AppState>, theme: crate::types::CustomTheme) -> Result<(), String> {
+    let mut config = state.config.lock().map_err(|e| e.to_string())?;
+    if let Some(pos) = config.custom_themes.iter().position(|t| t.id == theme.id) {
+        config.custom_themes[pos] = theme;
+    } else {
+        config.custom_themes.push(theme);
+    }
+    save_app_config(&config)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_custom_theme(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let mut config = state.config.lock().map_err(|e| e.to_string())?;
+    config.custom_themes.retain(|t| t.id != id);
+    if config.theme == id {
+        config.theme = "system".to_string();
+    }
+    save_app_config(&config)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn export_custom_theme(state: State<'_, AppState>, id: String, path: String) -> Result<(), String> {
+    let config = state.config.lock().map_err(|e| e.to_string())?;
+    let theme = config.custom_themes.iter().find(|t| t.id == id)
+        .ok_or_else(|| "Theme not found".to_string())?;
+    let export = serde_json::json!({ "version": 1, "themes": [theme] });
+    let data = serde_json::to_string_pretty(&export).map_err(|e| e.to_string())?;
+    std::fs::write(&path, data).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn import_custom_themes(state: State<'_, AppState>, path: String) -> Result<Vec<crate::types::CustomTheme>, String> {
+    let data = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let parsed: serde_json::Value = serde_json::from_str(&data).map_err(|e| e.to_string())?;
+    let themes: Vec<crate::types::CustomTheme> = serde_json::from_value(parsed["themes"].clone())
+        .map_err(|e| format!("Invalid theme file: {}", e))?;
+    let mut config = state.config.lock().map_err(|e| e.to_string())?;
+    for theme in &themes {
+        if let Some(pos) = config.custom_themes.iter().position(|t| t.id == theme.id) {
+            config.custom_themes[pos] = theme.clone();
+        } else {
+            config.custom_themes.push(theme.clone());
+        }
+    }
+    save_app_config(&config)?;
+    Ok(themes)
+}
+
+#[tauri::command]
 pub fn set_font_size(state: State<'_, AppState>, size: u32) -> Result<(), String> {
     let mut config = state.config.lock().map_err(|e| e.to_string())?;
     config.font_size = Some(size);
