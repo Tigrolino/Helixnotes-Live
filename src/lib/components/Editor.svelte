@@ -8984,16 +8984,32 @@
 		list-style-type: square;
 	}
 
+	/* Ordered lists render their number via a counter in normal content flow
+	   instead of the native outside marker. WebKitGTK (Linux) clips the native
+	   marker against the editor's overflow:hidden box, so two-digit numbers
+	   showed only the last digit (11 -> 1). The built-in `list-item` counter
+	   still respects the <ol start> attribute and per-level nesting. */
 	:global(.tiptap-wrapper .tiptap ol) {
-		list-style-type: decimal;
+		list-style: none;
+		padding-left: 0;
 	}
-
-	:global(.tiptap-wrapper .tiptap ol ol) {
-		list-style-type: lower-alpha;
+	:global(.tiptap-wrapper .tiptap ol > li) {
+		position: relative;
+		padding-left: 2.4em;
 	}
-
-	:global(.tiptap-wrapper .tiptap ol ol ol) {
-		list-style-type: lower-roman;
+	:global(.tiptap-wrapper .tiptap ol > li::before) {
+		content: counter(list-item) ".";
+		position: absolute;
+		left: 0;
+		width: 2em;
+		text-align: right;
+		white-space: nowrap;
+	}
+	:global(.tiptap-wrapper .tiptap ol ol > li::before) {
+		content: counter(list-item, lower-alpha) ".";
+	}
+	:global(.tiptap-wrapper .tiptap ol ol ol > li::before) {
+		content: counter(list-item, lower-roman) ".";
 	}
 
 	:global(.tiptap-wrapper .tiptap li) {
