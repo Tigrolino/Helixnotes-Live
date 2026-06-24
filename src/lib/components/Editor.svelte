@@ -46,6 +46,7 @@
 	import { debounce } from '$lib/utils/debounce';
 	import { encryptSecretText, decryptSecretText, readSecretTitle } from '$lib/utils/secrets';
 	import { WrapSelectedText } from '$lib/editor/extensions/wrapSelectedText';
+	import { calloutGroup, calloutIcon, calloutLabel, CALLOUT_MENU, transformCalloutBlockquotes, serializeCallout } from '$lib/editor/callouts';
 	import { wrapTextareaSelection } from '$lib/editor/source/selectionPairs';
 	import GraphView from './GraphView.svelte';
 	import TagSuggestInput from './TagSuggestInput.svelte';
@@ -246,6 +247,7 @@
 			{ label: 'Secret', aliases: ['secret', 'encrypt', 'password', 'private'], icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>', action: () => openSecretInsert() },
 			{ label: 'Blockquote', aliases: ['quote', 'blockquote', 'citation'], icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"/></svg>', action: () => editor?.chain().focus().toggleBlockquote().run() },
 			{ label: 'Collapsible Section', aliases: ['details', 'accordion', 'collapse', 'toggle', 'summary'], icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="10 8 14 12 10 16"/></svg>', action: () => insertDetails() },
+			{ label: 'Callout', aliases: ['callout', 'admonition', 'note', 'info', 'tip', 'warning', 'caution', 'danger', 'success', 'question', 'quote', 'aside', 'box'], icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><line x1="7" y1="5" x2="7" y2="19"/></svg>', action: () => insertCallout('note') },
 			{ label: 'Table', aliases: ['table', 'grid'], icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>', action: () => { slashTablePicker = true; slashTableHover = { rows: 0, cols: 0 }; } },
 			{ label: 'Horizontal Rule', aliases: ['hr', 'divider', 'line', 'separator', 'rule'], icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="2" y1="12" x2="22" y2="12"/></svg>', action: () => editor?.chain().focus().setHorizontalRule().run() },
 			{ label: 'Page Break', aliases: ['pagebreak', 'page', 'break', 'newpage', 'print'], icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="9" x2="22" y2="9" stroke-dasharray="4 2"/><line x1="2" y1="15" x2="22" y2="15" stroke-dasharray="4 2"/><path d="M6 5v4M18 5v4M6 15v4M18 15v4"/></svg>', action: () => editor?.chain().focus().insertContent({ type: 'pageBreak' }).run() },
@@ -826,6 +828,143 @@
 					if (pos !== null && pos !== undefined) openMathEdit(pos, 'inline', node.attrs.tex);
 				});
 				return { dom, destroy() { mathObserver?.unobserve(dom); mathPending.delete(dom); } };
+			};
+		},
+	});
+
+	const Callout = TiptapNode.create({
+		name: 'callout',
+		group: 'block',
+		content: 'block+',
+		defining: true,
+		addAttributes() {
+			return {
+				type: {
+					default: 'note',
+					parseHTML: (el: HTMLElement) => (el.getAttribute('data-callout') || 'note').toLowerCase(),
+					renderHTML: (a: Record<string, any>) => ({ 'data-callout': a.type }),
+				},
+				title: {
+					default: '',
+					parseHTML: (el: HTMLElement) => el.getAttribute('data-callout-title') || '',
+					renderHTML: (a: Record<string, any>) => (a.title ? { 'data-callout-title': a.title } : {}),
+				},
+				foldable: {
+					default: false,
+					parseHTML: (el: HTMLElement) => el.getAttribute('data-callout-foldable') === 'true',
+					renderHTML: (a: Record<string, any>) => ({ 'data-callout-foldable': a.foldable ? 'true' : 'false' }),
+				},
+				folded: {
+					default: false,
+					parseHTML: (el: HTMLElement) => el.getAttribute('data-callout-folded') === 'true',
+					renderHTML: (a: Record<string, any>) => ({ 'data-callout-folded': a.folded ? 'true' : 'false' }),
+				},
+			};
+		},
+		parseHTML() {
+			return [{ tag: 'div[data-callout]' }];
+		},
+		renderHTML({ node, HTMLAttributes }) {
+			return ['div', mergeAttributes(HTMLAttributes, { class: 'callout', 'data-callout-group': calloutGroup(node.attrs.type) }), 0];
+		},
+		addNodeView() {
+			return ({ node, getPos, editor }) => {
+				const dom = document.createElement('div');
+				const apply = (n: any) => {
+					dom.className = 'callout';
+					dom.classList.toggle('is-foldable', !!n.attrs.foldable);
+					dom.classList.toggle('is-folded', !!n.attrs.folded);
+					dom.setAttribute('data-callout', n.attrs.type || 'note');
+					dom.setAttribute('data-callout-group', calloutGroup(n.attrs.type));
+				};
+				apply(node);
+
+				const header = document.createElement('div');
+				header.className = 'callout-header';
+				header.contentEditable = 'false';
+
+				const iconBtn = document.createElement('button');
+				iconBtn.type = 'button';
+				iconBtn.className = 'callout-icon';
+				iconBtn.title = 'Change type';
+				iconBtn.innerHTML = calloutIcon(node.attrs.type);
+
+				const titleInput = document.createElement('input');
+				titleInput.className = 'callout-title';
+				titleInput.value = node.attrs.title || '';
+				titleInput.placeholder = calloutLabel(node.attrs.type);
+				titleInput.spellcheck = false;
+				titleInput.readOnly = !editor.isEditable;
+
+				const foldBtn = document.createElement('button');
+				foldBtn.type = 'button';
+				foldBtn.className = 'callout-fold';
+				foldBtn.title = 'Fold / unfold';
+				foldBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+
+				const content = document.createElement('div');
+				content.className = 'callout-content';
+
+				header.append(iconBtn, titleInput, foldBtn);
+				dom.append(header, content);
+
+				const updateAttr = (attrs: Record<string, any>) => {
+					if (typeof getPos !== 'function') return;
+					const pos = getPos();
+					if (pos == null) return;
+					const cur = editor.state.doc.nodeAt(pos);
+					if (!cur) return;
+					editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, ...attrs }));
+				};
+
+				let titleDirty = false;
+				const commitTitle = () => { if (titleDirty) { updateAttr({ title: titleInput.value }); titleDirty = false; } };
+				titleInput.addEventListener('input', () => { titleDirty = true; });
+				titleInput.addEventListener('change', commitTitle);
+				titleInput.addEventListener('blur', commitTitle);
+				titleInput.addEventListener('keydown', (e) => {
+					if (e.key === 'Enter') { e.preventDefault(); commitTitle(); titleInput.blur(); editor.commands.focus(); }
+				});
+
+				foldBtn.addEventListener('mousedown', (e) => e.preventDefault());
+				foldBtn.addEventListener('click', (e) => {
+					e.preventDefault();
+					const nowFolded = !dom.classList.contains('is-folded');
+					if (editor.isEditable) {
+						updateAttr({ folded: nowFolded, foldable: true });
+					} else {
+						dom.classList.toggle('is-folded', nowFolded);
+						dom.classList.add('is-foldable');
+					}
+				});
+
+				iconBtn.addEventListener('mousedown', (e) => e.preventDefault());
+				iconBtn.addEventListener('click', (e) => {
+					e.preventDefault();
+					if (!editor.isEditable) return;
+					openCalloutTypeMenu(iconBtn, (newType) => updateAttr({ type: newType }));
+				});
+
+				return {
+					dom,
+					contentDOM: content,
+					update(updated: any) {
+						if (updated.type.name !== 'callout') return false;
+						apply(updated);
+						iconBtn.innerHTML = calloutIcon(updated.attrs.type);
+						titleInput.placeholder = calloutLabel(updated.attrs.type);
+						titleInput.readOnly = !editor.isEditable;
+						if (document.activeElement !== titleInput) titleInput.value = updated.attrs.title || '';
+						return true;
+					},
+					ignoreMutation(mutation: any) {
+						if (mutation.type === 'selection') return false;
+						return !content.contains(mutation.target as Node);
+					},
+					stopEvent(event: any) {
+						return header.contains(event.target as Node);
+					},
+				};
 			};
 		},
 	});
@@ -2813,6 +2952,8 @@
 				});
 				return blocks.join('\n>\n') + '\n';
 			}
+			case 'callout':
+				return serializeCallout(node, serializeNode);
 			case 'bulletList': {
 				const items: string[] = [];
 				node.forEach((child: any) => items.push('- ' + serializeListItem(child)));
@@ -3565,6 +3706,14 @@
 			return `<img src="${resolveImageSrc(imgSrc)}" alt="${alt}" data-size="${size}">`;
 		});
 
+		// Post-process: turn Obsidian callout blockquotes (> [!type] ...) into callout blocks.
+		if (html.includes('[!')) {
+			const tmp = document.createElement('div');
+			tmp.innerHTML = html;
+			transformCalloutBlockquotes(tmp);
+			html = tmp.innerHTML;
+		}
+
 		return html;
 	}
 
@@ -3687,6 +3836,7 @@
 				MathBlock,
 				MathInline,
 				PageBreak,
+				Callout,
 				Details.configure({ persist: true, HTMLAttributes: { class: 'editor-details' } }),
 				DetailsSummary,
 				DetailsContent,
@@ -4360,6 +4510,71 @@
 		}
 	}
 
+	function insertCallout(type = 'note') {
+		if (!editor) return;
+		editor.chain().focus().wrapIn('callout', { type, title: '', foldable: false, folded: false }).run();
+	}
+
+	function openCalloutTypeMenu(anchor: HTMLElement, onPick: (type: string) => void) {
+		document.querySelectorAll('.callout-type-menu').forEach((el) => el.remove());
+		const menu = document.createElement('div');
+		menu.className = 'callout-type-menu';
+		const close = () => {
+			menu.remove();
+			document.removeEventListener('mousedown', onDoc, true);
+			document.removeEventListener('keydown', onKey, true);
+			window.removeEventListener('scroll', close, true);
+		};
+		const onDoc = (e: MouseEvent) => { if (!menu.contains(e.target as Node)) close(); };
+		const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+		for (const item of CALLOUT_MENU) {
+			const btn = document.createElement('button');
+			btn.type = 'button';
+			btn.className = 'callout-type-option';
+			btn.innerHTML = `<span class="callout-type-icon" style="color: rgb(var(--callout-${item.type}))">${calloutIcon(item.type, 16)}</span><span>${item.label}</span>`;
+			btn.addEventListener('mousedown', (e) => e.preventDefault());
+			btn.addEventListener('click', () => { onPick(item.type); close(); });
+			menu.appendChild(btn);
+		}
+		// "Custom…" fills the last grid slot: name any callout type (Obsidian round-trips it).
+		const customBtn = document.createElement('button');
+		customBtn.type = 'button';
+		customBtn.className = 'callout-type-option';
+		customBtn.innerHTML = '<span class="callout-type-icon" style="color: var(--text-secondary)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg></span><span>Custom…</span>';
+		customBtn.addEventListener('mousedown', (e) => e.preventDefault());
+		customBtn.addEventListener('click', () => {
+			menu.classList.add('is-custom');
+			menu.innerHTML = '';
+			const input = document.createElement('input');
+			input.className = 'callout-type-custom-input';
+			input.placeholder = 'Type name, then Enter';
+			input.spellcheck = false;
+			input.addEventListener('keydown', (e) => {
+				if (e.key === 'Enter') {
+					e.preventDefault();
+					const v = input.value.trim().toLowerCase().replace(/[^\w-]/g, '');
+					if (v) onPick(v);
+					close();
+				} else if (e.key === 'Escape') {
+					e.preventDefault();
+					close();
+				}
+			});
+			menu.appendChild(input);
+			input.focus();
+		});
+		menu.appendChild(customBtn);
+		document.body.appendChild(menu);
+		const r = anchor.getBoundingClientRect();
+		menu.style.top = `${Math.min(r.bottom + 4, window.innerHeight - menu.offsetHeight - 8)}px`;
+		menu.style.left = `${Math.min(r.left, window.innerWidth - menu.offsetWidth - 8)}px`;
+		setTimeout(() => {
+			document.addEventListener('mousedown', onDoc, true);
+			document.addEventListener('keydown', onKey, true);
+			window.addEventListener('scroll', close, true);
+		}, 0);
+	}
+
 	function insertDetails() {
 		if (!editor) return;
 		editor.chain().focus().setDetails().run();
@@ -4377,6 +4592,11 @@
 
 	function ctxDetails() {
 		insertDetails();
+		closeTextContextMenu();
+	}
+
+	function ctxCallout() {
+		insertCallout('note');
 		closeTextContextMenu();
 	}
 
@@ -5575,6 +5795,10 @@
 								<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="13" height="7" x="8" y="3" rx="1"/><path d="m2 9 3 3-3 3"/><rect width="13" height="7" x="8" y="14" rx="1"/></svg>
 								Collapsible Section
 							</button>
+							<button onclick={() => { insertDropdown = false; insertCallout('note'); }}>
+								<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><line x1="7" y1="5" x2="7" y2="19"/></svg>
+								Callout
+							</button>
 							<button onclick={() => { insertDropdown = false; editor?.chain().focus().setHorizontalRule().run(); }}>
 								<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg>
 								Horizontal Rule
@@ -5859,6 +6083,11 @@
 				<!-- Collapsible Section -->
 				<button class="fmt-btn" class:active={(editorState, editor.isActive('details'))} onclick={() => insertDetails()} title="Collapsible Section">
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="13" height="7" x="8" y="3" rx="1"/><path d="m2 9 3 3-3 3"/><rect width="13" height="7" x="8" y="14" rx="1"/></svg>
+				</button>
+
+				<!-- Callout -->
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('callout'))} onclick={() => insertCallout('note')} title="Callout">
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><line x1="7" y1="5" x2="7" y2="19"/></svg>
 				</button>
 
 				<!-- Table -->
@@ -6177,6 +6406,10 @@
 			<button onclick={ctxDetails}>
 				<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="10 8 14 12 10 16"/></svg>
 				Collapsible Section
+			</button>
+			<button onclick={ctxCallout}>
+				<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><line x1="7" y1="5" x2="7" y2="19"/></svg>
+				Callout
 			</button>
 			<button onclick={ctxTimestamp}>
 				<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/><circle cx="18" cy="17" r="4"/><path d="M18 15.5v1.5l1 1"/></svg>
@@ -8341,6 +8574,148 @@
 		padding-left: 16px;
 		margin: 1em 0;
 		color: var(--text-secondary);
+	}
+
+	/* Callouts (Obsidian-style) */
+	:global(.tiptap-wrapper .tiptap .callout) {
+		--cc: var(--callout-note);
+		margin: 1em 0;
+		border: 1px solid rgba(var(--cc), 0.3);
+		border-left: 3px solid rgb(var(--cc));
+		border-radius: 8px;
+		background: rgba(var(--cc), 0.06);
+		overflow: hidden;
+	}
+	:global(.tiptap-wrapper .tiptap .callout[data-callout-group="note"]) { --cc: var(--callout-note); }
+	:global(.tiptap-wrapper .tiptap .callout[data-callout-group="abstract"]) { --cc: var(--callout-abstract); }
+	:global(.tiptap-wrapper .tiptap .callout[data-callout-group="info"]) { --cc: var(--callout-info); }
+	:global(.tiptap-wrapper .tiptap .callout[data-callout-group="todo"]) { --cc: var(--callout-todo); }
+	:global(.tiptap-wrapper .tiptap .callout[data-callout-group="tip"]) { --cc: var(--callout-tip); }
+	:global(.tiptap-wrapper .tiptap .callout[data-callout-group="success"]) { --cc: var(--callout-success); }
+	:global(.tiptap-wrapper .tiptap .callout[data-callout-group="question"]) { --cc: var(--callout-question); }
+	:global(.tiptap-wrapper .tiptap .callout[data-callout-group="warning"]) { --cc: var(--callout-warning); }
+	:global(.tiptap-wrapper .tiptap .callout[data-callout-group="failure"]) { --cc: var(--callout-failure); }
+	:global(.tiptap-wrapper .tiptap .callout[data-callout-group="danger"]) { --cc: var(--callout-danger); }
+	:global(.tiptap-wrapper .tiptap .callout[data-callout-group="bug"]) { --cc: var(--callout-bug); }
+	:global(.tiptap-wrapper .tiptap .callout[data-callout-group="example"]) { --cc: var(--callout-example); }
+	:global(.tiptap-wrapper .tiptap .callout[data-callout-group="quote"]) { --cc: var(--callout-quote); }
+	:global(.tiptap-wrapper .tiptap .callout[data-callout-group="custom"]) { --cc: var(--callout-custom); }
+
+	:global(.tiptap-wrapper .tiptap .callout-header) {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 8px 12px;
+		font-weight: 600;
+		color: rgb(var(--cc));
+		background: rgba(var(--cc), 0.1);
+		user-select: none;
+	}
+	:global(.tiptap-wrapper .tiptap .callout-icon),
+	:global(.tiptap-wrapper .tiptap .callout-fold) {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 22px;
+		height: 22px;
+		flex: 0 0 auto;
+		padding: 0;
+		border: none;
+		background: none;
+		cursor: pointer;
+		color: rgb(var(--cc));
+		border-radius: 4px;
+		transition: background 0.15s, transform 0.2s;
+	}
+	:global(.tiptap-wrapper .tiptap .callout-icon:hover),
+	:global(.tiptap-wrapper .tiptap .callout-fold:hover) {
+		background: rgba(var(--cc), 0.18);
+	}
+	:global(.tiptap-wrapper .tiptap .callout.is-folded .callout-fold) {
+		transform: rotate(-90deg);
+	}
+	:global(.tiptap-wrapper .tiptap .callout-title) {
+		flex: 1 1 auto;
+		min-width: 0;
+		border: none;
+		background: none;
+		outline: none;
+		font: inherit;
+		font-weight: 600;
+		color: rgb(var(--cc));
+		padding: 2px 0;
+	}
+	:global(.tiptap-wrapper .tiptap .callout-title::placeholder) {
+		color: rgb(var(--cc));
+		opacity: 0.7;
+	}
+	:global(.tiptap-wrapper .tiptap .callout-content) {
+		padding: 8px 14px 10px;
+	}
+	:global(.tiptap-wrapper .tiptap .callout.is-folded .callout-content) {
+		display: none;
+	}
+	:global(.tiptap-wrapper .tiptap .callout-content > p:first-child) { margin-top: 0; }
+	:global(.tiptap-wrapper .tiptap .callout-content > p:last-child) { margin-bottom: 0; }
+
+	/* Callout type picker (rendered into <body>) */
+	:global(.callout-type-menu) {
+		position: fixed;
+		z-index: 9999;
+		background: var(--bg-primary);
+		border: 1px solid var(--border-color);
+		border-radius: 8px;
+		box-shadow: var(--shadow-lg);
+		padding: 4px;
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 2px;
+		max-height: 60vh;
+		overflow: auto;
+	}
+	:global(.callout-type-option) {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 6px 10px;
+		border: none;
+		background: none;
+		border-radius: 5px;
+		cursor: pointer;
+		font: inherit;
+		font-size: 13px;
+		color: var(--text-primary);
+		text-align: left;
+		white-space: nowrap;
+	}
+	:global(.callout-type-option:hover) {
+		background: var(--bg-hover);
+	}
+	:global(.callout-type-icon) {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 18px;
+		height: 18px;
+		flex: 0 0 auto;
+	}
+	:global(.callout-type-menu.is-custom) {
+		display: block;
+	}
+	:global(.callout-type-custom-input) {
+		width: 200px;
+		max-width: 60vw;
+		border: 1px solid var(--border-color);
+		border-radius: 5px;
+		background: var(--bg-secondary);
+		color: var(--text-primary);
+		padding: 7px 9px;
+		font: inherit;
+		font-size: 13px;
+		outline: none;
+	}
+	:global(.callout-type-custom-input:focus) {
+		border-color: var(--accent);
 	}
 
 	:global(.tiptap-wrapper .tiptap [data-type="details"]) {
