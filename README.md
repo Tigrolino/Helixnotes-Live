@@ -104,7 +104,9 @@ sudo eopkg it helixnotes
 
 ### macOS
 
-[Download .dmg](https://codeberg.org/ArkHost/HelixNotes/releases/download/v1.3.2/HelixNotes_1.3.2_x64.dmg) (Intel, runs on Apple Silicon via Rosetta)
+[Download .dmg (Apple Silicon)](https://codeberg.org/ArkHost/HelixNotes/releases/download/v1.3.2/HelixNotes_1.3.2_aarch64.dmg) (M-series Macs)
+
+[Download .dmg (Intel)](https://codeberg.org/ArkHost/HelixNotes/releases/download/v1.3.2/HelixNotes_1.3.2_x64.dmg) (older Macs, or Apple Silicon via Rosetta)
 
 ### Android
 
