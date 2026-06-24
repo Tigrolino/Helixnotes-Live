@@ -129,6 +129,7 @@ export interface VaultState {
   last_open_note: string | null;
   sidebar_width: number;
   notelist_width: number;
+  outline_width?: number;
   sidebar_collapsed: boolean;
   notelist_collapsed: boolean;
   collapsed_notebooks: string[];

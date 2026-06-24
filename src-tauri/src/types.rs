@@ -197,6 +197,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_outline_width() -> f64 {
+    220.0
+}
+
 fn default_pdf_height() -> u32 {
     600
 }
@@ -298,6 +302,8 @@ pub struct VaultState {
     pub last_open_note: Option<String>,
     pub sidebar_width: f64,
     pub notelist_width: f64,
+    #[serde(default = "default_outline_width")]
+    pub outline_width: f64,
     pub sidebar_collapsed: bool,
     #[serde(default)]
     pub notelist_collapsed: bool,
@@ -333,6 +339,7 @@ impl Default for VaultState {
             last_open_note: None,
             sidebar_width: 220.0,
             notelist_width: 280.0,
+            outline_width: default_outline_width(),
             sidebar_collapsed: false,
             notelist_collapsed: false,
             collapsed_notebooks: Vec::new(),

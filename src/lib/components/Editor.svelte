@@ -39,7 +39,7 @@
 	import { readFile } from '@tauri-apps/plugin-fs';
 	import { openFile, openUrl, copyFileTo, copyImageToClipboard as copyImageToClipboardCmd, writeBytesTo, copyPngToClipboard } from '$lib/api';
 	import { save as saveDialog } from '@tauri-apps/plugin-dialog';
-	import { activeNote, activeNotePath, appConfig, editorDirty, sourceMode, focusMode, readOnly, quickAccessPaths, notes, navHistory, canGoBack, canGoForward, viewerNote, notebooks } from '$lib/stores/app';
+	import { activeNote, activeNotePath, appConfig, editorDirty, sourceMode, focusMode, readOnly, quickAccessPaths, notes, navHistory, canGoBack, canGoForward, viewerNote, notebooks, outlineWidth } from '$lib/stores/app';
 	import { saveNote, saveImage, saveAttachment, readClipboardImage, addQuickAccess, removeQuickAccess, getQuickAccess, getNoteVersions, getNoteVersionContent, createVersion, aiAsk, getAllNoteTitles, readNote, renameNote } from '$lib/api';
 	import type { VersionEntry, AiStreamEvent, NoteTitleEntry } from '$lib/types';
 	import { listen } from '@tauri-apps/api/event';
@@ -50,6 +50,7 @@
 	import GraphView from './GraphView.svelte';
 	import TagSuggestInput from './TagSuggestInput.svelte';
 	import { isMobile, isAndroid } from '$lib/platform';
+	import ResizeHandle from './ResizeHandle.svelte';
 
 	const modKey = navigator.platform.startsWith('Mac') ? '⌘' : 'Ctrl';
 
@@ -176,6 +177,10 @@
 			}
 		});
 		outlineHeadings = headings;
+	}
+
+	function handleOutlineResize(delta: number) {
+		$outlineWidth = Math.max(160, Math.min(500, $outlineWidth - delta));
 	}
 
 	function scrollToHeading(pos: number) {
@@ -5502,7 +5507,8 @@
 				</div>
 			{/if}
 			{#if showOutline}
-				<div class="outline-panel">
+				<ResizeHandle onResize={handleOutlineResize} />
+				<div class="outline-panel" style="width: {$outlineWidth}px">
 					<div class="outline-header">
 						<h3>Outline</h3>
 						<button class="outline-close" onclick={() => { showOutline = false; }}>
@@ -7475,7 +7481,7 @@
 
 	.outline-empty {
 		padding: 16px 14px;
-		font-size: 12px;
+		font-size: var(--editor-font-size, 14px);
 		color: var(--text-tertiary);
 		line-height: 1.5;
 	}
@@ -7493,7 +7499,7 @@
 		background: none;
 		border: none;
 		padding: 4px 14px;
-		font-size: 12px;
+		font-size: var(--editor-font-size, 14px);
 		color: var(--text-secondary);
 		cursor: pointer;
 		white-space: nowrap;

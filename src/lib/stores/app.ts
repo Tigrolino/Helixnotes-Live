@@ -26,6 +26,7 @@ export const sidebarCollapsed = writable(false);
 export const notelistCollapsed = writable(false);
 export const sidebarWidth = writable(220);
 export const notelistWidth = writable(280);
+export const outlineWidth = writable(220);
 export const searchQuery = writable("");
 export const showCommandPalette = writable(false);
 export const showSearch = writable(false);
@@ -227,6 +228,7 @@ export const vaultState = derived(
     activeNotePath,
     sidebarWidth,
     notelistWidth,
+    outlineWidth,
     sidebarCollapsed,
     notelistCollapsed,
     collapsedNotebooks,
@@ -238,6 +240,7 @@ export const vaultState = derived(
     $activeNotePath,
     $sidebarWidth,
     $notelistWidth,
+    $outlineWidth,
     $sidebarCollapsed,
     $notelistCollapsed,
     $collapsedNotebooks,
@@ -249,6 +252,7 @@ export const vaultState = derived(
       last_open_note: $activeNotePath,
       sidebar_width: $sidebarWidth,
       notelist_width: $notelistWidth,
+      outline_width: $outlineWidth,
       sidebar_collapsed: $sidebarCollapsed,
       notelist_collapsed: $notelistCollapsed,
       collapsed_notebooks: $collapsedNotebooks,

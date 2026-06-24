@@ -14,6 +14,7 @@
 	import {
 		sidebarWidth,
 		notelistWidth,
+		outlineWidth,
 		sidebarCollapsed,
 		notelistCollapsed,
 		collapsedNotebooks,
@@ -201,6 +202,7 @@
 			last_open_note: $activeNotePath,
 			sidebar_width: $sidebarWidth,
 			notelist_width: $notelistWidth,
+			outline_width: $outlineWidth,
 			sidebar_collapsed: $sidebarCollapsed,
 			notelist_collapsed: $notelistCollapsed,
 			collapsed_notebooks: $collapsedNotebooks,
@@ -534,6 +536,7 @@
 	$effect(() => {
 		$sidebarCollapsed;
 		$notelistCollapsed;
+		$outlineWidth;
 		persistState();
 	});
 
@@ -573,6 +576,7 @@
 			const state = await loadVaultState();
 			$sidebarWidth = state.sidebar_width;
 			$notelistWidth = state.notelist_width;
+			if (typeof state.outline_width === 'number') $outlineWidth = state.outline_width;
 			$sidebarCollapsed = state.sidebar_collapsed;
 			$notelistCollapsed = state.notelist_collapsed ?? false;
 			$collapsedNotebooks = state.collapsed_notebooks ?? [];
