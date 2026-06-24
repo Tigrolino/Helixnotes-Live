@@ -425,6 +425,13 @@
 			editor?.addLinkFromToolbar();
 		}
 
+		// Ctrl/Cmd+Shift+Delete: move the open note to the trash.
+		if (mod && e.shiftKey && code === 'Delete' && $activeNotePath) {
+			e.preventDefault();
+			noteList?.trashActiveNote();
+			return;
+		}
+
 		const action = matchAction(e, $keybindings);
 		if (action) {
 			e.preventDefault();
