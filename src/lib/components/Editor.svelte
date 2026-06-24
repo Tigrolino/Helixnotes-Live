@@ -200,6 +200,13 @@
 	let historySelected = $state<VersionEntry | null>(null);
 	let historyLoading = $state(false);
 
+	// Info panel
+	let showInfo = $state(false);
+	let infoPanelEl = $state<HTMLElement | null>(null);
+	let infoToggleBtnEl = $state<HTMLElement | null>(null);
+	let wordCount = $state(0);
+	let charCount = $state(0);
+
 	// In-note search
 	let noteSearchOpen = $state(false);
 	let noteSearchQuery = $state('');
@@ -2609,6 +2616,41 @@
 		});
 	});
 
+	function countWords(text: string): number {
+		return text.trim() ? text.trim().split(/\s+/).filter(Boolean).length : 0;
+	}
+
+	function updateCounts() {
+		let text = '';
+		if (get(sourceMode)) {
+			text = sourceContent
+				.replace(/^---[\s\S]*?---\n?/, '')
+				.replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+				.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+				.replace(/^#{1,6}\s+/gm, '')
+				.replace(/[*_~`]+/g, '')
+				.replace(/^>\s*/gm, '')
+				.replace(/^[-*+]\s+/gm, '');
+		} else if (editor) {
+			text = editor.state.doc.textContent;
+		}
+		wordCount = countWords(text);
+		charCount = text.replace(/\s/g, '').length;
+	}
+
+	async function toggleInfo() {
+		if (!showInfo && $activeNote) {
+			historyLoading = true;
+			try {
+				historyVersions = await getNoteVersions($activeNote.meta.id);
+			} catch {
+				historyVersions = [];
+			}
+			historyLoading = false;
+		}
+		showInfo = !showInfo;
+	}
+
 	async function toggleHistory() {
 		showHistory = !showHistory;
 		historyPreview = null;
@@ -2756,6 +2798,7 @@
 			resetSourceHistory(sourceContent);
 			if (editorBody) editorBody.scrollTop = 0;
 			isLoadingNote = false;
+			updateCounts();
 		} else if (editorElement && editor) {
 			// Editor already exists, just swap content
 			const html = markdownToHtml(content);
@@ -2763,6 +2806,9 @@
 			editor.commands.setContent(html);
 			// Clear undo/redo history so it doesn't bleed across notes
 			clearEditorHistory();
+			const text = editor.state.doc.textContent;
+			wordCount = countWords(text);
+			charCount = text.replace(/\s/g, '').length;
 			// Reset scroll and cursor after all ProseMirror/Svelte DOM updates settle
 			tick().then(() => {
 				if (editorBody) editorBody.scrollTop = 0;
@@ -3728,6 +3774,11 @@
 			if (pendingContent !== null) {
 				createEditor(pendingContent);
 				pendingContent = null;
+				if (editor) {
+					const text = (editor as any).state.doc.textContent;
+					wordCount = countWords(text);
+					charCount = text.replace(/\s/g, '').length;
+				}
 			} else if (isMobile && !lastSourceMode) {
 				createEditor('');
 			}
@@ -3745,6 +3796,26 @@
 		}
 		document.addEventListener('mousedown', onClickAway);
 		return () => document.removeEventListener('mousedown', onClickAway);
+	});
+
+	// Live word/char count in source mode
+	$effect(() => {
+		if ($sourceMode) updateCounts();
+	});
+
+	// Auto-close info panel on click outside
+	$effect(() => {
+		if (!showInfo) return;
+		function onInfoClickAway(e: MouseEvent) {
+			if (
+				infoPanelEl && !infoPanelEl.contains(e.target as Node) &&
+				infoToggleBtnEl && !infoToggleBtnEl.contains(e.target as Node)
+			) {
+				showInfo = false;
+			}
+		}
+		document.addEventListener('mousedown', onInfoClickAway);
+		return () => document.removeEventListener('mousedown', onInfoClickAway);
 	});
 
 	// Close in-note search when switching notes
@@ -4078,6 +4149,11 @@
 				$editorDirty = true;
 				autoSave();
 				if (!isMobile && showOutline) updateOutline();
+				if (editor) {
+					const text = editor.state.doc.textContent;
+					wordCount = countWords(text);
+					charCount = text.replace(/\s/g, '').length;
+				}
 			},
 		});
 		editorReady = true;
@@ -5418,6 +5494,19 @@
 						<polyline points="12 6 12 12 16 14"/>
 					</svg>
 				</button>
+				<button
+					bind:this={infoToggleBtnEl}
+					class="icon-btn"
+					class:active={showInfo}
+					onclick={toggleInfo}
+					title="Note info"
+				>
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<circle cx="12" cy="12" r="10"/>
+						<line x1="12" y1="8" x2="12" y2="8" stroke-width="3" stroke-linecap="round"/>
+						<line x1="12" y1="12" x2="12" y2="16"/>
+					</svg>
+				</button>
 				{#if $appConfig?.enable_wiki_links}
 				<button
 					class="icon-btn"
@@ -5752,6 +5841,92 @@
 							{/each}
 						</div>
 					{/if}
+				</div>
+			{/if}
+			{#if showInfo && $activeNote}
+				<div class="info-panel" bind:this={infoPanelEl}>
+					<div class="info-panel-header">
+						<span class="info-panel-title">Note Info</span>
+						<button class="info-close-btn" onclick={() => showInfo = false}>
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+							</svg>
+						</button>
+					</div>
+
+					<div class="info-section">
+						<div class="info-section-label">Statistics</div>
+						<div class="info-row">
+							<span class="info-key">Words</span>
+							<span class="info-value">{wordCount.toLocaleString()}</span>
+						</div>
+						<div class="info-row">
+							<span class="info-key">Characters</span>
+							<span class="info-value">{charCount.toLocaleString()}</span>
+						</div>
+						<div class="info-row">
+							<span class="info-key">Reading time</span>
+							<span class="info-value">{wordCount < 200 ? '< 1 min' : `${Math.ceil(wordCount / 200)} min`}</span>
+						</div>
+					</div>
+
+					<div class="info-section">
+						<div class="info-section-label">Details</div>
+						<div class="info-row">
+							<span class="info-key">Modified</span>
+							<span class="info-value" title={$activeNote.meta.modified}>{formatVersionDate($activeNote.meta.modified)}</span>
+						</div>
+						<div class="info-row">
+							<span class="info-key">Created</span>
+							<span class="info-value" title={$activeNote.meta.created}>{formatVersionDate($activeNote.meta.created)}</span>
+						</div>
+						{#if noteFolder}
+						<div class="info-row">
+							<span class="info-key">Location</span>
+							<span class="info-value info-value-path" title={noteFolder}>{noteFolder}</span>
+						</div>
+						{/if}
+						{#if $activeNote.meta.tags?.length > 0}
+						<div class="info-row info-row-tags">
+							<span class="info-key">Tags</span>
+							<span class="info-value info-tags">
+								{#each $activeNote.meta.tags as tag}
+									<span class="info-tag">#{tag}</span>
+								{/each}
+							</span>
+						</div>
+						{/if}
+					</div>
+
+					<div class="info-section info-section-versions">
+						<div class="info-section-header">
+							<div class="info-section-label">Snapshots</div>
+							<button class="info-snapshot-btn" onclick={handleCreateVersion} title="Save snapshot">
+								<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+									<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+								</svg>
+								Save now
+							</button>
+						</div>
+						{#if historyLoading}
+							<div class="info-empty">Loading...</div>
+						{:else if historyVersions.length === 0}
+							<div class="info-empty">No snapshots yet. They're created automatically as you edit.</div>
+						{:else}
+							<div class="info-versions-list">
+								{#each historyVersions as v}
+									<button
+										class="info-version-item"
+										class:active={historySelected?.timestamp === v.timestamp}
+										onclick={() => { previewVersion(v); showHistory = true; showInfo = false; }}
+									>
+										<span class="info-version-date">{formatVersionDate(v.timestamp)}</span>
+										<span class="info-version-size">{formatVersionSize(v.size)}</span>
+									</button>
+								{/each}
+							</div>
+						{/if}
+					</div>
 				</div>
 			{/if}
 			</div>
@@ -10589,5 +10764,199 @@
 	.ai-menu.mobile .ai-error {
 		padding: 12px 16px;
 		font-size: 14px;
+	}
+
+	/* ═══ Info Panel ═══ */
+	.info-panel {
+		width: 260px;
+		border-left: 1px solid var(--border-light);
+		background: var(--bg-secondary);
+		display: flex;
+		flex-direction: column;
+		overflow-y: auto;
+		flex-shrink: 0;
+	}
+
+	.info-panel-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 12px 14px;
+		border-bottom: 1px solid var(--border-light);
+		flex-shrink: 0;
+	}
+
+	.info-panel-title {
+		font-size: 12px;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--text-tertiary);
+	}
+
+	.info-close-btn {
+		background: none;
+		border: none;
+		color: var(--text-tertiary);
+		cursor: pointer;
+		padding: 2px;
+		border-radius: 4px;
+		display: flex;
+		align-items: center;
+	}
+
+	.info-close-btn:hover {
+		background: var(--bg-hover);
+		color: var(--text-primary);
+	}
+
+	.info-section {
+		padding: 12px 14px;
+		border-bottom: 1px solid var(--border-light);
+	}
+
+	.info-section:last-child {
+		border-bottom: none;
+		flex: 1;
+	}
+
+	.info-section-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 8px;
+	}
+
+	.info-section-label {
+		font-size: 11px;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--text-tertiary);
+		margin-bottom: 8px;
+	}
+
+	.info-section-header .info-section-label {
+		margin-bottom: 0;
+	}
+
+	.info-snapshot-btn {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		background: none;
+		border: 1px solid var(--border-color);
+		border-radius: 4px;
+		color: var(--text-secondary);
+		cursor: pointer;
+		padding: 3px 7px;
+		font-size: 11px;
+	}
+
+	.info-snapshot-btn:hover {
+		background: var(--bg-hover);
+		color: var(--text-primary);
+	}
+
+	.info-row {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 8px;
+		padding: 3px 0;
+	}
+
+	.info-row-tags {
+		align-items: flex-start;
+	}
+
+	.info-key {
+		font-size: 12px;
+		color: var(--text-tertiary);
+		flex-shrink: 0;
+	}
+
+	.info-value {
+		font-size: 12px;
+		color: var(--text-primary);
+		text-align: right;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.info-value-path {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		max-width: 140px;
+	}
+
+	.info-tags {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px;
+		justify-content: flex-end;
+	}
+
+	.info-tag {
+		font-size: 11px;
+		color: var(--text-secondary);
+		background: var(--bg-tertiary);
+		border-radius: 3px;
+		padding: 1px 5px;
+	}
+
+	.info-empty {
+		font-size: 12px;
+		color: var(--text-tertiary);
+		line-height: 1.5;
+		padding: 4px 0;
+	}
+
+	.info-versions-list {
+		display: flex;
+		flex-direction: column;
+		gap: 1px;
+		margin-top: 4px;
+	}
+
+	.info-version-item {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 6px 8px;
+		border-radius: 5px;
+		background: none;
+		border: none;
+		cursor: pointer;
+		text-align: left;
+		width: 100%;
+	}
+
+	.info-version-item:hover {
+		background: var(--bg-hover);
+	}
+
+	.info-version-item.active {
+		background: var(--bg-active);
+	}
+
+	.info-version-date {
+		font-size: 12px;
+		color: var(--text-primary);
+	}
+
+	.info-version-size {
+		font-size: 11px;
+		color: var(--text-tertiary);
+	}
+
+	.editor-container.mobile .editor-body-row:has(.info-panel) > .editor-body {
+		display: none;
+	}
+
+	.editor-container.mobile .info-panel {
+		width: 100%;
+		border-left: none;
+		border-top: 1px solid var(--border-light);
 	}
 </style>
