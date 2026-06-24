@@ -9,6 +9,7 @@
 		activeNotebook,
 		activeTag,
 		sortMode,
+		groupNotesByDate,
 		editorDirty,
 		quickAccessPaths,
 		appConfig,
@@ -37,7 +38,7 @@
 		getAllTags,
 		createDailyNote
 	} from '$lib/api';
-	import { formatRelativeTime, formatDate } from '$lib/utils/time';
+	import { formatRelativeTime, formatDate, dateBucketLabel } from '$lib/utils/time';
 	import { openNoteWindow } from '$lib/utils/window';
 	import { revealItemInDir } from '@tauri-apps/plugin-opener';
 	import type { NoteEntry, TrashNotebookEntry, SortMode, TaskItem } from '$lib/types';
@@ -211,6 +212,24 @@
 	let noteDragHalf = $state<'top' | 'bottom'>('bottom');
 	const customOrderViews = new Set(['all', 'notebook', 'tag']);
 	let canCustomReorder = $derived($sortMode === 'custom' && customOrderViews.has($viewMode));
+
+	// Relative-date grouping (All Notes + date sorts only). Pinned notes form their own leading group.
+	let groupingActive = $derived($groupNotesByDate && $viewMode === 'all' && ($sortMode === 'created' || $sortMode === 'modified'));
+	let noteGroups = $derived.by(() => {
+		if (!groupingActive) return [] as { label: string; notes: NoteEntry[] }[];
+		const pinned: NoteEntry[] = [];
+		const rest: NoteEntry[] = [];
+		for (const n of $sortedNotes) (n.meta.pinned ? pinned : rest).push(n);
+		const groups: { label: string; notes: NoteEntry[] }[] = [];
+		if (pinned.length) groups.push({ label: 'Pinned', notes: pinned });
+		let cur: { label: string; notes: NoteEntry[] } | null = null;
+		for (const n of rest) {
+			const label = dateBucketLabel($sortMode === 'created' ? n.meta.created : n.meta.modified);
+			if (!cur || cur.label !== label) { cur = { label, notes: [] }; groups.push(cur); }
+			cur.notes.push(n);
+		}
+		return groups;
+	});
 
 	// Virtual scroll
 	let listContainer = $state<HTMLDivElement>(null!);
@@ -955,6 +974,13 @@
 					<line x1="4" y1="6" x2="11" y2="6" /><line x1="4" y1="12" x2="15" y2="12" /><line x1="4" y1="18" x2="20" y2="18" />
 				</svg>
 			</button>
+			{#if $viewMode === 'all' && ($sortMode === 'created' || $sortMode === 'modified')}
+				<button class="icon-btn" class:active-toggle={$groupNotesByDate} onclick={() => { $groupNotesByDate = !$groupNotesByDate; }} title="Group by date">
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" />
+					</svg>
+				</button>
+			{/if}
 			{#if $viewMode !== 'trash'}
 				<button class={isMobile ? 'mobile-create-btn' : 'icon-btn'} onclick={handleCreateNote} title={`New note (${modKey}+N)`}>
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width={isMobile ? '3' : '2'} stroke-linecap="round" stroke-linejoin="round">
@@ -1133,9 +1159,7 @@
 			{/each}
 		{/if}
 
-		<div style="height: {topPad}px"></div>
-		{#each visibleNotes as note, i (note.path)}
-			{@const noteIndex = startIndex + i}
+		{#snippet noteRow(note: NoteEntry, noteIndex: number)}
 			{#if editingNote === note.path}
 				<div class="note-item active">
 					<input
@@ -1289,8 +1313,22 @@
 					{/if}
 				</button>
 			{/if}
-		{/each}
-		<div style="height: {bottomPad}px"></div>
+		{/snippet}
+
+		{#if groupingActive}
+			{#each noteGroups as group (group.label)}
+				<div class="note-list-section">{group.label}</div>
+				{#each group.notes as note (note.path)}
+					{@render noteRow(note, -1)}
+				{/each}
+			{/each}
+		{:else}
+			<div style="height: {topPad}px"></div>
+			{#each visibleNotes as note, i (note.path)}
+				{@render noteRow(note, startIndex + i)}
+			{/each}
+			<div style="height: {bottomPad}px"></div>
+		{/if}
 	</div>
 </div>
 
@@ -1598,6 +1636,21 @@
 
 	.list-content::-webkit-scrollbar-thumb:hover {
 		background: var(--text-secondary);
+	}
+
+	.note-list-section {
+		padding: 14px 12px 4px;
+		font-size: 0.7rem;
+		font-weight: 700;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--accent);
+		border-bottom: 1px solid var(--border-light);
+		margin-bottom: 2px;
+		user-select: none;
+	}
+	.note-list-section:first-child {
+		padding-top: 6px;
 	}
 
 	.note-item {

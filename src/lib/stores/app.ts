@@ -18,6 +18,8 @@ export const vaultReady = writable(false);
 // UI state
 export const viewMode = writable<ViewMode>("all");
 export const sortMode = writable<SortMode>("modified");
+// Group the notes list under relative-date headers (All Notes, date sorts only). Persisted per vault.
+export const groupNotesByDate = writable<boolean>(false);
 export const tasksLayout = writable<"list" | "calendar">("list");
 export const tasksHideCompleted = writable<boolean>(true);
 export const tasksOnlyFlagged = writable<boolean>(false);

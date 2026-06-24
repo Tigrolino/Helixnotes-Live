@@ -137,6 +137,7 @@ export interface VaultState {
   notebook_order?: Record<string, number>;
   note_order?: Record<string, number>;
   sort_mode?: string;
+  group_notes_by_date?: boolean;
   last_view_mode?: string;
   last_notebook?: string | null;
   last_tag?: string | null;
