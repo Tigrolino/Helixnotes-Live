@@ -52,11 +52,10 @@ pub fn scan_notebooks(vault_path: &str) -> Result<Vec<NotebookEntry>, String> {
 }
 
 fn scan_dir_recursive(dir: &Path, vault_root: &str) -> Vec<NotebookEntry> {
-    let mut entries = Vec::new();
     let root = Path::new(vault_root);
 
     let Ok(read_dir) = fs::read_dir(dir) else {
-        return entries;
+        return Vec::new();
     };
 
     // Collect subdirs (root level only lists directories, note counts come from scan_dir_with_count)
@@ -76,29 +75,29 @@ fn scan_dir_recursive(dir: &Path, vault_root: &str) -> Vec<NotebookEntry> {
             .cmp(&b.file_name().to_string_lossy().to_lowercase())
     });
 
-    // Store note_count for the parent directory (used when this is the top-level call)
-    // Each directory pushes its own entry with its own note_count
-    for dir_entry in dirs {
-        let path = dir_entry.path();
-        let name = dir_entry.file_name().to_string_lossy().to_string();
-        let relative = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .to_string();
-
-        let (children, child_note_count) = scan_dir_with_count(&path, vault_root);
-
-        entries.push(NotebookEntry {
-            name,
-            path: path.to_string_lossy().to_string(),
-            relative_path: relative,
-            children,
-            note_count: child_note_count,
-        });
-    }
-
-    entries
+    // Scan sibling notebooks in parallel: each subtree is independent, so
+    // overlapping the per-directory read_dir calls hides FUSE latency on Android.
+    // par_iter().collect() preserves the (already-sorted) order.
+    let paths: Vec<PathBuf> = dirs.iter().map(|e| e.path()).collect();
+    paths
+        .par_iter()
+        .map(|path| {
+            let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let relative = path
+                .strip_prefix(root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .to_string();
+            let (children, child_note_count) = scan_dir_with_count(path, vault_root);
+            NotebookEntry {
+                name,
+                path: path.to_string_lossy().to_string(),
+                relative_path: relative,
+                children,
+                note_count: child_note_count,
+            }
+        })
+        .collect()
 }
 
 /// Combined scan: returns (children, note_count) in a single read_dir pass.
@@ -130,26 +129,26 @@ fn scan_dir_with_count(dir: &Path, vault_root: &str) -> (Vec<NotebookEntry>, usi
             .cmp(&b.file_name().to_string_lossy().to_lowercase())
     });
 
-    let mut entries = Vec::new();
-    for dir_entry in subdirs {
-        let path = dir_entry.path();
-        let name = dir_entry.file_name().to_string_lossy().to_string();
-        let relative = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .to_string();
-
-        let (children, child_note_count) = scan_dir_with_count(&path, vault_root);
-
-        entries.push(NotebookEntry {
-            name,
-            path: path.to_string_lossy().to_string(),
-            relative_path: relative,
-            children,
-            note_count: child_note_count,
-        });
-    }
+    let paths: Vec<PathBuf> = subdirs.iter().map(|e| e.path()).collect();
+    let entries: Vec<NotebookEntry> = paths
+        .par_iter()
+        .map(|path| {
+            let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let relative = path
+                .strip_prefix(root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .to_string();
+            let (children, child_note_count) = scan_dir_with_count(path, vault_root);
+            NotebookEntry {
+                name,
+                path: path.to_string_lossy().to_string(),
+                relative_path: relative,
+                children,
+                note_count: child_note_count,
+            }
+        })
+        .collect();
 
     (entries, note_count)
 }
@@ -197,47 +196,36 @@ pub fn scan_notes(vault_path: &str, notebook_path: Option<&str>) -> Result<Vec<N
     // On mobile, use metadata-only scan (no file reads) for fast listing on sandboxed FS
     #[cfg(mobile)]
     {
-        let mut notes = Vec::new();
-        // Log what read_dir sees
-        if let Ok(rd) = fs::read_dir(root) {
-            let items: Vec<_> = rd.filter_map(|e| e.ok()).collect();
-            log::info!("scan_notes: read_dir found {} entries in {:?}", items.len(), root);
-            for (i, entry) in items.iter().enumerate().take(5) {
-                let ft = entry.file_type().map(|ft| if ft.is_file() { "file" } else if ft.is_dir() { "dir" } else { "other" }).unwrap_or("err");
-                log::info!("  [{}] {:?} type={}", i, entry.file_name(), ft);
-            }
-        } else {
-            log::info!("scan_notes: read_dir FAILED for {:?}", root);
-        }
-
-        if notebook_path.is_some() {
-            if let Ok(rd) = fs::read_dir(root) {
-                for entry in rd.filter_map(|e| e.ok()) {
-                    let is_file = entry.file_type().map(|ft| ft.is_file()).unwrap_or(false);
-                    if is_file && entry.path().extension().and_then(|x| x.to_str()) == Some("md") {
-                        if let Ok(note) = read_note_entry_metadata_only(&entry.path(), vault_root) {
-                            notes.push(note);
-                        }
-                    }
-                }
+        // Collect candidate .md paths first, then read their metadata in parallel.
+        // Overlapping the per-file reads hides FUSE latency on Android (matches the
+        // desktop path below). The previous version also did an extra read_dir purely
+        // for debug logging, which doubled the directory I/O on the sandboxed FS.
+        let paths: Vec<PathBuf> = if notebook_path.is_some() {
+            match fs::read_dir(root) {
+                Ok(rd) => rd
+                    .filter_map(|e| e.ok())
+                    .map(|e| e.path())
+                    .filter(|p| p.is_file() && p.extension().and_then(|x| x.to_str()) == Some("md"))
+                    .collect(),
+                Err(_) => Vec::new(),
             }
         } else {
             let hn_dir = helixnotes_dir(vault_path);
-            for entry in WalkDir::new(root)
+            WalkDir::new(root)
                 .into_iter()
                 // filter_entry skips descending into hidden dirs (unlike filter)
                 .filter_entry(|e| !is_hidden(e.path()) && !e.path().starts_with(&hn_dir))
                 .filter_map(|e| e.ok())
-                .filter(|e| {
-                    e.file_type().is_file()
-                        && e.path().extension().and_then(|x| x.to_str()) == Some("md")
-                })
-            {
-                if let Ok(note) = read_note_entry_metadata_only(entry.path(), vault_root) {
-                    notes.push(note);
-                }
-            }
-        }
+                .map(|e| e.path().to_path_buf())
+                .filter(|p| p.is_file() && p.extension().and_then(|x| x.to_str()) == Some("md"))
+                .collect()
+        };
+
+        let mut notes: Vec<NoteEntry> = paths
+            .par_iter()
+            .filter_map(|path| read_note_entry_metadata_only(path, vault_root).ok())
+            .collect();
+
         log::info!("scan_notes: mobile scan found {} notes", notes.len());
         notes.sort_by(|a, b| b.meta.modified.cmp(&a.meta.modified));
         return Ok(notes);
