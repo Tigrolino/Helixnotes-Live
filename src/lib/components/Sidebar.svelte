@@ -53,6 +53,7 @@
 	let dropTargetPath = $state<string | null>(null);
 	let dropPosition = $state<'above' | 'into' | 'below' | null>(null);
 	let draggedNotebookPath = $state<string | null>(null);
+	let nbPointer: { id: number; src: string } | null = null;
 
 	// Apply manual ordering recursively when in 'manual' sort mode.
 	// In 'alphabetical' mode the Rust scanner already sorts, so we pass through unchanged.
@@ -360,9 +361,13 @@
 
 	async function handleNotebookDrop(e: DragEvent, destPath: string) {
 		e.preventDefault();
-		dropTargetPath = null;
 		const srcPath = e.dataTransfer?.getData('text/plain');
-		if (!srcPath) return;
+		if (srcPath) await nestNotebook(srcPath, destPath);
+	}
+
+	async function nestNotebook(srcPath: string, destPath: string) {
+		dropTargetPath = null;
+		dropPosition = null;
 		draggedNotebookPath = null;
 		// Don't move onto self or descendant
 		if (destPath === srcPath || destPath.startsWith(srcPath + '/')) return;
@@ -393,6 +398,61 @@
 		} catch (e) {
 			console.error('Failed to move notebook:', e);
 		}
+	}
+
+	function nbHandleDown(e: PointerEvent, nb: NotebookEntry) {
+		if (e.pointerType === 'mouse' && e.button !== 0) return;
+		e.stopPropagation();
+		e.preventDefault();
+		nbPointer = { id: e.pointerId, src: nb.path };
+		draggedNotebookPath = nb.path;
+		try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch {}
+	}
+
+	function nbPointerMove(e: PointerEvent) {
+		if (!nbPointer || e.pointerId !== nbPointer.id) return;
+		e.preventDefault();
+		const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+		if (el?.closest('[data-nb-root]')) { dropTargetPath = '__root__'; dropPosition = null; return; }
+		const row = el?.closest('[data-nb-path]') as HTMLElement | null;
+		const path = row?.getAttribute('data-nb-path');
+		if (!path) { dropTargetPath = null; dropPosition = null; return; }
+		const src = nbPointer.src;
+		if (path === src || path.startsWith(src + '/')) { dropTargetPath = null; dropPosition = null; return; }
+		const rect = row!.getBoundingClientRect();
+		const relY = (e.clientY - rect.top) / rect.height;
+		const pos: 'above' | 'into' | 'below' = relY < 0.3 ? 'above' : relY > 0.7 ? 'below' : 'into';
+		if (pos === 'into' && src.substring(0, src.lastIndexOf('/')) === path) { dropTargetPath = null; dropPosition = null; return; }
+		dropTargetPath = path;
+		dropPosition = pos;
+	}
+
+	function nbPointerUp(e: PointerEvent) {
+		if (!nbPointer || e.pointerId !== nbPointer.id) return;
+		const src = nbPointer.src;
+		const target = dropTargetPath;
+		const pos = dropPosition;
+		nbPointer = null;
+		draggedNotebookPath = null;
+		dropTargetPath = null;
+		dropPosition = null;
+		if (!target) return;
+		if (target === '__root__') {
+			const vaultRoot = $appConfig?.active_vault;
+			if (vaultRoot) nestNotebook(src, vaultRoot);
+		} else if (pos === 'above' || pos === 'below') {
+			handleNotebookReorder(src, target, pos);
+		} else if (pos === 'into') {
+			nestNotebook(src, target);
+		}
+	}
+
+	function nbPointerCancel(e: PointerEvent) {
+		if (!nbPointer || e.pointerId !== nbPointer.id) return;
+		nbPointer = null;
+		draggedNotebookPath = null;
+		dropTargetPath = null;
+		dropPosition = null;
 	}
 
 	function findSiblingsOfPath(tree: NotebookEntry[], parentPath: string, vaultRoot: string): NotebookEntry[] {
@@ -680,6 +740,7 @@
 			<div
 				class="section-header"
 				class:drop-target={dropTargetPath === '__root__'}
+				data-nb-root
 				ondragover={(e) => {
 					if (draggedNotebookPath) {
 						e.preventDefault();
@@ -903,7 +964,7 @@
 			class:drop-above={dropTargetPath === nb.path && dropPosition === 'above'}
 			class:drop-below={dropTargetPath === nb.path && dropPosition === 'below'}
 			style="padding-left: {8 + depth * 16}px"
-			draggable="true"
+			data-nb-path={nb.path}
 			onclick={() => selectNotebook(nb)}
 			onkeydown={(e) => {
 				if (e.key === 'F2') {
@@ -912,8 +973,6 @@
 				}
 			}}
 			oncontextmenu={(e) => onContextMenu(e, nb)}
-			ondragstart={(e) => { draggedNotebookPath = nb.path; e.dataTransfer!.setData('text/plain', nb.path); e.dataTransfer!.effectAllowed = 'move'; }}
-			ondragend={() => { draggedNotebookPath = null; dropPosition = null; }}
 			ondragover={(e) => {
 				e.preventDefault();
 				if (draggedNotebookPath) {
@@ -978,6 +1037,20 @@
 				</svg>
 			{/if}
 			<span class="notebook-name">{nb.name} <span class="notebook-count">{nb.note_count}</span></span>
+			{#if $notebookSortMode === 'manual'}
+				<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+				<span
+					class="nb-drag-handle"
+					title="Drag to reorder"
+					onpointerdown={(e) => nbHandleDown(e, nb)}
+					onpointermove={nbPointerMove}
+					onpointerup={nbPointerUp}
+					onpointercancel={nbPointerCancel}
+					onclick={(e) => e.stopPropagation()}
+				>
+					<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="5" r="1.6"/><circle cx="15" cy="5" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="19" r="1.6"/><circle cx="15" cy="19" r="1.6"/></svg>
+				</span>
+			{/if}
 		</button>
 	{/if}
 	{#if hasChildren && !isCollapsed}
@@ -1305,6 +1378,27 @@
 		font-size: 11px;
 		color: var(--text-tertiary);
 		margin-left: 2px;
+	}
+
+	.nb-drag-handle {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex: 0 0 auto;
+		padding: 2px;
+		margin-left: 2px;
+		color: var(--text-tertiary);
+		opacity: 0.45;
+		cursor: grab;
+		touch-action: none;
+	}
+
+	.nb-drag-handle:hover {
+		opacity: 1;
+	}
+
+	.nb-drag-handle:active {
+		cursor: grabbing;
 	}
 
 	.tag-list {
