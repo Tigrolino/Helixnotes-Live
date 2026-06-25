@@ -73,12 +73,6 @@
 	let trashContextMenu = $state<{ x: number; y: number } | null>(null);
 	let tagsCollapsed = $state(true);
 	let deleteConfirm = $state<NotebookEntry | null>(null);
-	function expandNotebook(nb: NotebookEntry) {
-		if ($collapsedNotebooks.includes(nb.path)) {
-			$collapsedNotebooks = $collapsedNotebooks.filter(p => p !== nb.path);
-		}
-	}
-
 	function toggleCollapse(nb: NotebookEntry, e: Event) {
 		e.stopPropagation();
 		if ($collapsedNotebooks.includes(nb.path)) {
@@ -154,22 +148,11 @@
 	}
 
 	async function selectNotebook(nb: NotebookEntry) {
-		const hasVisibleChildren = nb.children.length > 0;
-		const wasCollapsed = $collapsedNotebooks.includes(nb.path);
-		// Deselect if clicking the already-active notebook
+		// Deselect if clicking the already-active notebook; expand/collapse is the chevron's job
 		if ($viewMode === 'notebook' && $activeNotebook?.path === nb.path) {
-			if (hasVisibleChildren) {
-				if (wasCollapsed) {
-					await expandNotebook(nb);
-				} else {
-					$collapsedNotebooks = [...$collapsedNotebooks, nb.path];
-				}
-				return;
-			}
 			selectAllNotes();
 			return;
 		}
-		if (hasVisibleChildren) await expandNotebook(nb);
 		$viewMode = 'notebook';
 		$activeNotebook = nb;
 		$activeTag = null;
