@@ -664,6 +664,7 @@ fn extract_title_fast(raw: &str) -> Option<String> {
 
 #[tauri::command]
 pub fn get_tasks(state: State<'_, AppState>) -> Result<Vec<crate::types::TaskItem>, String> {
+    use rayon::prelude::*;
     let config = state.config.lock().map_err(|e| e.to_string())?;
     let vault_path = config.active_vault.as_ref().ok_or("No active vault")?;
     let vault = std::path::Path::new(vault_path);
@@ -673,57 +674,57 @@ pub fn get_tasks(state: State<'_, AppState>) -> Result<Vec<crate::types::TaskIte
     let due_re = regex::Regex::new(r"\bdue:(\d{4}-\d{2}-\d{2})\b").unwrap();
     let prio_re = regex::Regex::new(r"(?i)(?:^|\s)!(high|medium|med|low)\b").unwrap();
 
-    let mut tasks = Vec::new();
-    for entry in walkdir::WalkDir::new(vault)
+    let paths: Vec<std::path::PathBuf> = walkdir::WalkDir::new(vault)
         .into_iter()
         .filter_entry(|e| !operations::is_hidden(e.path()) && !e.path().starts_with(&hn_dir))
         .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        if path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-        let raw = match std::fs::read_to_string(path) {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-        let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-        let (meta, body) = crate::vault::frontmatter::parse_note(&raw, &filename);
-        let note_path = path.to_string_lossy().to_string();
+        .filter(|e| {
+            e.file_type().is_file() && e.path().extension().and_then(|x| x.to_str()) == Some("md")
+        })
+        .map(|e| e.into_path())
+        .collect();
 
-        for (i, line) in body.lines().enumerate() {
-            let caps = match task_re.captures(line) {
-                Some(c) => c,
-                None => continue,
+    // Read and parse each note in parallel; on Android every read_to_string is a FUSE round-trip.
+    let tasks: Vec<crate::types::TaskItem> = paths
+        .par_iter()
+        .flat_map(|path| {
+            let mut out: Vec<crate::types::TaskItem> = Vec::new();
+            let raw = match std::fs::read_to_string(path) {
+                Ok(r) => r,
+                Err(_) => return out,
             };
-            let completed = !caps[1].trim().is_empty(); // 'x'/'X' completed, ' ' open
-            let content = caps[2].to_string();
-
-            let due = due_re.captures(&content).map(|c| c[1].to_string());
-            let priority = prio_re.captures(&content).map(|c| {
-                let p = c[1].to_lowercase();
-                if p == "medium" { "med".to_string() } else { p }
-            });
-            // Strip metadata tokens for the display text, then collapse whitespace.
-            let mut text = due_re.replace_all(&content, "").to_string();
-            text = prio_re.replace_all(&text, " ").to_string();
-            let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-
-            tasks.push(crate::types::TaskItem {
-                note_path: note_path.clone(),
-                note_title: meta.title.clone(),
-                line: i,
-                raw_line: line.to_string(),
-                text,
-                completed,
-                due,
-                priority,
-            });
-        }
-    }
+            let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let (meta, body) = crate::vault::frontmatter::parse_note(&raw, &filename);
+            let note_path = path.to_string_lossy().to_string();
+            for (i, line) in body.lines().enumerate() {
+                let caps = match task_re.captures(line) {
+                    Some(c) => c,
+                    None => continue,
+                };
+                let completed = !caps[1].trim().is_empty();
+                let content = caps[2].to_string();
+                let due = due_re.captures(&content).map(|c| c[1].to_string());
+                let priority = prio_re.captures(&content).map(|c| {
+                    let p = c[1].to_lowercase();
+                    if p == "medium" { "med".to_string() } else { p }
+                });
+                let mut text = due_re.replace_all(&content, "").to_string();
+                text = prio_re.replace_all(&text, " ").to_string();
+                let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+                out.push(crate::types::TaskItem {
+                    note_path: note_path.clone(),
+                    note_title: meta.title.clone(),
+                    line: i,
+                    raw_line: line.to_string(),
+                    text,
+                    completed,
+                    due,
+                    priority,
+                });
+            }
+            out
+        })
+        .collect();
     Ok(tasks)
 }
 
@@ -1223,41 +1224,38 @@ pub fn reorder_quick_access(state: State<'_, AppState>, paths: Vec<String>) -> R
 
 #[tauri::command]
 pub fn get_vault_stats(state: State<'_, AppState>) -> Result<VaultStats, String> {
+    use rayon::prelude::*;
     let config = state.config.lock().map_err(|e| e.to_string())?;
     let vault_path = config.active_vault.as_ref().ok_or("No active vault")?;
 
-    let mut total_notes: u64 = 0;
-    let mut total_attachments: u64 = 0;
-    let mut notes_size: u64 = 0;
-    let mut attachments_size: u64 = 0;
-
-    for entry in walkdir::WalkDir::new(vault_path)
+    let paths: Vec<std::path::PathBuf> = walkdir::WalkDir::new(vault_path)
         .into_iter()
         .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        let path_str = path.to_string_lossy();
-        // Include .helixnotes/attachments, skip everything else in .helixnotes
-        if path_str.contains("/.helixnotes/") && !path_str.contains("/.helixnotes/attachments/") {
-            continue;
-        }
-        // Skip trash
-        if path_str.contains("/.trash/") {
-            continue;
-        }
-        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        if ext == "md" {
-            total_notes += 1;
-            notes_size += size;
-        } else {
-            total_attachments += 1;
-            attachments_size += size;
-        }
-    }
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.into_path())
+        .filter(|p| {
+            // attachments under .helixnotes count; nothing else in .helixnotes or .trash does
+            let s = p.to_string_lossy();
+            !(s.contains("/.helixnotes/") && !s.contains("/.helixnotes/attachments/"))
+                && !s.contains("/.trash/")
+        })
+        .collect();
+
+    // Stat files in parallel; each metadata() is a FUSE round-trip on Android.
+    let (total_notes, total_attachments, notes_size, attachments_size) = paths
+        .par_iter()
+        .map(|path| {
+            let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+            if path.extension().and_then(|e| e.to_str()) == Some("md") {
+                (1u64, 0u64, size, 0u64)
+            } else {
+                (0u64, 1u64, 0u64, size)
+            }
+        })
+        .reduce(
+            || (0u64, 0u64, 0u64, 0u64),
+            |a, b| (a.0 + b.0, a.1 + b.1, a.2 + b.2, a.3 + b.3),
+        );
 
     Ok(VaultStats {
         total_notes,
