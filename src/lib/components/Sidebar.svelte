@@ -53,7 +53,7 @@
 	let dropTargetPath = $state<string | null>(null);
 	let dropPosition = $state<'above' | 'into' | 'below' | null>(null);
 	let draggedNotebookPath = $state<string | null>(null);
-	let nbPointer: { id: number; src: string } | null = null;
+	let nbPointer: { src: string } | null = null;
 
 	// Apply manual ordering recursively when in 'manual' sort mode.
 	// In 'alphabetical' mode the Rust scanner already sorts, so we pass through unchanged.
@@ -385,8 +385,9 @@
 
 	function nbStopDragListeners() {
 		window.removeEventListener('pointermove', nbPointerMove);
-		window.removeEventListener('pointerup', nbPointerUp);
-		window.removeEventListener('pointercancel', nbPointerCancel);
+		window.removeEventListener('pointerup', nbDragEnd);
+		window.removeEventListener('pointercancel', nbDragEnd);
+		window.removeEventListener('mouseup', nbDragEnd);
 	}
 
 	function nbHandleDown(e: PointerEvent, nb: NotebookEntry) {
@@ -394,17 +395,20 @@
 		e.stopPropagation();
 		e.preventDefault();
 		nbStopDragListeners();
-		nbPointer = { id: e.pointerId, src: nb.path };
+		nbPointer = { src: nb.path };
 		draggedNotebookPath = nb.path;
-		try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch {}
-		// WebView2 doesn't reliably send pointermove to a captured element; track on window instead.
+		// Capture helps touch hold the gesture; on Windows mouse it makes WebView2 swallow the release, so skip it there.
+		if (e.pointerType === 'touch') {
+			try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch {}
+		}
 		window.addEventListener('pointermove', nbPointerMove, { passive: false });
-		window.addEventListener('pointerup', nbPointerUp);
-		window.addEventListener('pointercancel', nbPointerCancel);
+		window.addEventListener('pointerup', nbDragEnd);
+		window.addEventListener('pointercancel', nbDragEnd);
+		window.addEventListener('mouseup', nbDragEnd);
 	}
 
 	function nbPointerMove(e: PointerEvent) {
-		if (!nbPointer || e.pointerId !== nbPointer.id) return;
+		if (!nbPointer) return;
 		e.preventDefault();
 		const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
 		if (el?.closest('[data-nb-root]')) { dropTargetPath = '__root__'; dropPosition = null; return; }
@@ -421,8 +425,8 @@
 		dropPosition = pos;
 	}
 
-	function nbPointerUp(e: PointerEvent) {
-		if (!nbPointer || e.pointerId !== nbPointer.id) return;
+	function nbDragEnd() {
+		if (!nbPointer) return;
 		nbStopDragListeners();
 		const src = nbPointer.src;
 		const target = dropTargetPath;
@@ -440,15 +444,6 @@
 		} else if (pos === 'into') {
 			nestNotebook(src, target);
 		}
-	}
-
-	function nbPointerCancel(e: PointerEvent) {
-		if (!nbPointer || e.pointerId !== nbPointer.id) return;
-		nbStopDragListeners();
-		nbPointer = null;
-		draggedNotebookPath = null;
-		dropTargetPath = null;
-		dropPosition = null;
 	}
 
 	function findSiblingsOfPath(tree: NotebookEntry[], parentPath: string, vaultRoot: string): NotebookEntry[] {
