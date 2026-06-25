@@ -383,13 +383,24 @@
 		}
 	}
 
+	function nbStopDragListeners() {
+		window.removeEventListener('pointermove', nbPointerMove);
+		window.removeEventListener('pointerup', nbPointerUp);
+		window.removeEventListener('pointercancel', nbPointerCancel);
+	}
+
 	function nbHandleDown(e: PointerEvent, nb: NotebookEntry) {
 		if (e.pointerType === 'mouse' && e.button !== 0) return;
 		e.stopPropagation();
 		e.preventDefault();
+		nbStopDragListeners();
 		nbPointer = { id: e.pointerId, src: nb.path };
 		draggedNotebookPath = nb.path;
 		try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch {}
+		// WebView2 doesn't reliably send pointermove to a captured element; track on window instead.
+		window.addEventListener('pointermove', nbPointerMove, { passive: false });
+		window.addEventListener('pointerup', nbPointerUp);
+		window.addEventListener('pointercancel', nbPointerCancel);
 	}
 
 	function nbPointerMove(e: PointerEvent) {
@@ -412,6 +423,7 @@
 
 	function nbPointerUp(e: PointerEvent) {
 		if (!nbPointer || e.pointerId !== nbPointer.id) return;
+		nbStopDragListeners();
 		const src = nbPointer.src;
 		const target = dropTargetPath;
 		const pos = dropPosition;
@@ -432,6 +444,7 @@
 
 	function nbPointerCancel(e: PointerEvent) {
 		if (!nbPointer || e.pointerId !== nbPointer.id) return;
+		nbStopDragListeners();
 		nbPointer = null;
 		draggedNotebookPath = null;
 		dropTargetPath = null;
@@ -1026,9 +1039,6 @@
 					class="nb-drag-handle"
 					title="Drag to reorder"
 					onpointerdown={(e) => nbHandleDown(e, nb)}
-					onpointermove={nbPointerMove}
-					onpointerup={nbPointerUp}
-					onpointercancel={nbPointerCancel}
 					onclick={(e) => e.stopPropagation()}
 				>
 					<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="5" r="1.6"/><circle cx="15" cy="5" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="19" r="1.6"/><circle cx="15" cy="19" r="1.6"/></svg>
