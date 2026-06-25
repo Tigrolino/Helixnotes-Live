@@ -1913,6 +1913,114 @@
 		},
 	});
 
+	// ── Task metadata (! priority / due) ──
+
+	const TASK_META_ITEMS = [
+		{ label: 'High priority', token: '!high', kind: 'prio', icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>' },
+		{ label: 'Medium priority', token: '!med', kind: 'prio', icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>' },
+		{ label: 'Low priority', token: '!low', kind: 'prio', icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>' },
+		{ label: 'Due date', token: '', kind: 'due', icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>' },
+	];
+	let taskMetaMenu = $state<{ x: number; y: number; from: number; to: number; query: string } | null>(null);
+	let taskMetaSelectedIndex = $state(0);
+	let taskMetaTypedByUser = false;
+	let taskDuePicker = $state<{ x: number; y: number } | null>(null);
+	let taskDueInputEl = $state<HTMLInputElement | null>(null);
+
+	let taskMetaFiltered = $derived.by(() => {
+		const q = (taskMetaMenu?.query || '').toLowerCase();
+		if (!q) return TASK_META_ITEMS;
+		return TASK_META_ITEMS.filter((it) => it.label.toLowerCase().startsWith(q) || it.token.slice(1).startsWith(q));
+	});
+
+	function closeTaskMetaMenu() {
+		taskMetaMenu = null;
+		taskMetaSelectedIndex = 0;
+	}
+
+	function updateTaskMetaMenu() {
+		const wasTyped = taskMetaTypedByUser;
+		taskMetaTypedByUser = false;
+		if (!editor || taskDuePicker) return;
+		const rfrom = editor.state.selection.$from;
+		let inTask = false;
+		for (let d = rfrom.depth; d > 0; d--) {
+			if (rfrom.node(d).type.name === 'taskItem') { inTask = true; break; }
+		}
+		if (!inTask || rfrom.parent.type.name !== 'paragraph') { closeTaskMetaMenu(); return; }
+		const textBefore = rfrom.parent.textContent.slice(0, rfrom.parentOffset);
+		const match = textBefore.match(/(^|\s)!([a-z]*)$/i);
+		if (!match) { closeTaskMetaMenu(); return; }
+		if (!taskMetaMenu && !wasTyped) return;
+		const query = match[2];
+		const offset = textBefore.length - match[0].length + match[1].length;
+		const from = rfrom.start() + offset;
+		const to = rfrom.pos;
+		const coords = editor.view.coordsAtPos(from);
+		let x = coords.left;
+		if (x + 200 > window.innerWidth) x = window.innerWidth - 210;
+		const visibleBottom = window.innerHeight - keyboardHeight;
+		const menuH = 180;
+		let y = coords.bottom + 4;
+		if (y + menuH > visibleBottom) y = coords.top - menuH - 4;
+		if (y < 4) y = 4;
+		taskMetaMenu = { x, y, from, to, query };
+		if (taskMetaSelectedIndex >= taskMetaFiltered.length) taskMetaSelectedIndex = 0;
+	}
+
+	function selectTaskMeta(index: number) {
+		const items = taskMetaFiltered;
+		if (index < 0 || index >= items.length || !taskMetaMenu || !editor) return;
+		const item = items[index];
+		const { from, to, x, y } = taskMetaMenu;
+		taskMetaMenu = null;
+		taskMetaSelectedIndex = 0;
+		if (item.kind === 'due') {
+			editor.chain().focus().deleteRange({ from, to }).run();
+			taskDuePicker = { x, y };
+			tick().then(() => { taskDueInputEl?.focus(); taskDueInputEl?.showPicker?.(); });
+			return;
+		}
+		editor.chain().focus().deleteRange({ from, to }).insertContent(item.token + ' ').run();
+	}
+
+	function applyTaskDue(value: string) {
+		taskDuePicker = null;
+		if (!editor) return;
+		if (value) editor.chain().focus().insertContent(`due:${value} `).run();
+		else editor.commands.focus();
+	}
+
+	const TaskMetaMenu = Extension.create({
+		name: 'taskMetaMenu',
+		addProseMirrorPlugins() {
+			return [
+				new Plugin({
+					key: new PluginKey('taskMetaMenu'),
+					props: {
+						handleTextInput: (_view, _from, _to, text) => {
+							if (text === '!') taskMetaTypedByUser = true;
+							return false;
+						},
+						handleKeyDown: (_view, event) => {
+							if (!taskMetaMenu) return false;
+							const n = Math.max(1, taskMetaFiltered.length);
+							if (event.key === 'ArrowDown') { event.preventDefault(); taskMetaSelectedIndex = (taskMetaSelectedIndex + 1) % n; return true; }
+							if (event.key === 'ArrowUp') { event.preventDefault(); taskMetaSelectedIndex = (taskMetaSelectedIndex - 1 + n) % n; return true; }
+							if (event.key === 'Enter' || event.key === 'Tab') {
+								if (taskMetaFiltered.length > 0) { event.preventDefault(); selectTaskMeta(taskMetaSelectedIndex); return true; }
+								closeTaskMetaMenu();
+								return false;
+							}
+							if (event.key === 'Escape') { event.preventDefault(); closeTaskMetaMenu(); return true; }
+							return false;
+						},
+					},
+				}),
+			];
+		},
+	});
+
 	// ── Wiki-links ──
 
 	let wikiLinkMenu = $state<{ x: number; y: number; query: string; from: number } | null>(null);
@@ -3985,6 +4093,7 @@
 				HeadingShortcuts,
 				WrapSelectedText,
 				SlashCommands,
+				TaskMetaMenu,
 				MoveLineShortcuts,
 				TabIndent,
 				NoteSearchExtension,
@@ -4114,6 +4223,7 @@
 				// On mobile, only check menus when they're already open or user just typed trigger char
 				if (!isMobile || slashMenu || slashTypedByUser) updateSlashMenu();
 				if (!isMobile || wikiLinkMenu || wikiLinkTypedByUser) updateWikiLinkMenu();
+				if (!isMobile || taskMetaMenu || taskMetaTypedByUser) updateTaskMetaMenu();
 				// Detect when cursor leaves a wiki-link mark and trigger rename check
 				if ($appConfig?.enable_wiki_links && editor) {
 					const curMarks = editor.state.selection.$from.marks();
@@ -6964,6 +7074,45 @@
 				{/each}
 			{/if}
 		</div>
+	</div>
+{/if}
+
+{#if taskMetaMenu}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="slash-menu-overlay" onclick={closeTaskMetaMenu}>
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div class="slash-menu" style="left: {taskMetaMenu.x}px; top: {taskMetaMenu.y}px" onclick={(e) => e.stopPropagation()}>
+			{#if taskMetaFiltered.length === 0}
+				<div class="slash-menu-empty">No match</div>
+			{:else}
+				{#each taskMetaFiltered as item, i}
+					<button
+						class="slash-menu-item"
+						class:selected={i === taskMetaSelectedIndex}
+						onmouseenter={() => taskMetaSelectedIndex = i}
+						onmousedown={(e) => { e.preventDefault(); selectTaskMeta(i); }}
+					>
+						<span class="slash-menu-icon">{@html item.icon}</span>
+						<span class="slash-menu-label">{item.label}</span>
+					</button>
+				{/each}
+			{/if}
+		</div>
+	</div>
+{/if}
+
+{#if taskDuePicker}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="slash-menu-overlay" onclick={() => { taskDuePicker = null; editor?.commands.focus(); }}>
+		<input
+			type="date"
+			class="task-due-input"
+			bind:this={taskDueInputEl}
+			style="left: {taskDuePicker.x}px; top: {taskDuePicker.y}px"
+			onclick={(e) => e.stopPropagation()}
+			onchange={(e) => applyTaskDue((e.currentTarget as HTMLInputElement).value)}
+			onkeydown={(e) => { if (e.key === 'Escape') { taskDuePicker = null; editor?.commands.focus(); } }}
+		/>
 	</div>
 {/if}
 
@@ -9968,6 +10117,18 @@
 		position: fixed;
 		inset: 0;
 		z-index: 1500;
+	}
+
+	.task-due-input {
+		position: fixed;
+		z-index: 1501;
+		background: var(--bg-primary);
+		border: 1px solid var(--border-color);
+		border-radius: 6px;
+		padding: 6px 8px;
+		color: var(--text-primary);
+		font: inherit;
+		box-shadow: var(--shadow-lg);
 	}
 
 	.slash-menu {
