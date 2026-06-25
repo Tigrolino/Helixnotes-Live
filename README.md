@@ -108,6 +108,12 @@ sudo eopkg it helixnotes
 
 [Download .dmg (Intel)](https://codeberg.org/ArkHost/HelixNotes/releases/download/v1.3.2/HelixNotes_1.3.2_x64.dmg) (older Macs, or Apple Silicon via Rosetta)
 
+> **"HelixNotes is damaged and can't be opened"?** The app isn't damaged. The macOS build isn't notarized by Apple yet, so Gatekeeper blocks it on Apple Silicon. Run this once in Terminal, then open it normally (you'll need to redo it after each update):
+>
+> ```bash
+> xattr -cr /Applications/HelixNotes.app
+> ```
+
 ### Android
 
 [Download APK](https://codeberg.org/ArkHost/HelixNotes/releases/download/v1.3.2/HelixNotes_1.3.2_android.apk)
