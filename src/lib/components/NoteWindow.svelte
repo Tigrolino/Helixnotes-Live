@@ -103,8 +103,11 @@
 				if (!$editorDirty) {
 					try {
 						const content = await readNote(notePath);
-						$activeNote = content;
-						editor?.loadNote(notePath, content.content);
+						// Ignore the file-watcher echo of our own save; only reload genuine external edits.
+						if (content.content.trim() !== (editor?.getCurrentBody() ?? '').trim()) {
+							$activeNote = content;
+							editor?.loadNote(notePath, content.content);
+						}
 					} catch (_) {}
 				}
 			}

@@ -2660,6 +2660,11 @@
 		}
 	}
 
+	// The markdown body the editor would currently save; used to ignore the file-watcher echo of our own save.
+	export function getCurrentBody(): string {
+		return $sourceMode ? restoreTitleH1(sourceContent) : editorToMarkdown();
+	}
+
 	// ── Tag editing (active note) ──
 	function toggleTagMenu(e: MouseEvent) {
 		if (tagMenu) { tagMenu = null; return; }
