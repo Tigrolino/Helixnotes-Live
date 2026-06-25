@@ -180,6 +180,8 @@
 		outlineHeadings = headings;
 	}
 
+	const scheduleOutline = debounce(updateOutline, 250);
+
 	function handleOutlineResize(delta: number) {
 		$outlineWidth = Math.max(160, Math.min(500, $outlineWidth - delta));
 	}
@@ -1038,6 +1040,38 @@
 		},
 	});
 
+	// Remap decorations while typing; full rebuild 300ms after it settles, so large notes don't rescan the whole doc per keystroke.
+	function lazyDecorationPlugin(key: PluginKey, build: (doc: any) => DecorationSet) {
+		return new Plugin({
+			key,
+			state: {
+				init: (_config: any, state: any) => build(state.doc),
+				apply: (tr: any, old: DecorationSet, _oldState: any, newState: any) => {
+					if (tr.getMeta(key) === 'rebuildDecos') return build(newState.doc);
+					if (!tr.docChanged) return old;
+					return old.map(tr.mapping, tr.doc);
+				},
+			},
+			props: {
+				decorations(state: any) { return key.getState(state); },
+			},
+			view() {
+				let timer: ReturnType<typeof setTimeout> | null = null;
+				return {
+					update(view: any, prev: any) {
+						if (view.state.doc === prev.doc) return;
+						if (timer) clearTimeout(timer);
+						timer = setTimeout(() => {
+							timer = null;
+							if (!view.isDestroyed) view.dispatch(view.state.tr.setMeta(key, 'rebuildDecos'));
+						}, 300);
+					},
+					destroy() { if (timer) clearTimeout(timer); },
+				};
+			},
+		});
+	}
+
 	const MermaidRenderer = Extension.create({
 		name: 'mermaidRendererOptIn',
 		addProseMirrorPlugins() {
@@ -1297,21 +1331,7 @@
 			}
 
 			const pluginKey = new PluginKey('mermaidRendererOptIn');
-			return [
-				new Plugin({
-					key: pluginKey,
-					state: {
-						init: (_, state) => buildDecorations(state.doc),
-						apply: (tr, old, _oldState, newState) => {
-							if (!tr.docChanged) return old;
-							return buildDecorations(newState.doc);
-						},
-					},
-					props: {
-						decorations(state) { return pluginKey.getState(state); },
-					},
-				}),
-			];
+			return [lazyDecorationPlugin(pluginKey, buildDecorations)];
 		},
 	});
 
@@ -1347,18 +1367,7 @@
 				return DecorationSet.create(doc, decos);
 			}
 			const pluginKey = new PluginKey('codeBlockCopyButton');
-			return [
-				new Plugin({
-					key: pluginKey,
-					state: {
-						init: (_, state) => buildDecorations(state.doc),
-						apply: (tr, old) => { if (!tr.docChanged) return old; return buildDecorations(tr.doc); },
-					},
-					props: {
-						decorations(state) { return pluginKey.getState(state); },
-					},
-				}),
-			];
+			return [lazyDecorationPlugin(pluginKey, buildDecorations)];
 		},
 	});
 
@@ -1456,21 +1465,7 @@
 	const ColorSwatch = Extension.create({
 		name: 'colorSwatch',
 		addProseMirrorPlugins() {
-			return [
-				new Plugin({
-					key: colorSwatchPluginKey,
-					state: {
-						init: (_, state) => buildColorSwatchDecorations(state.doc),
-						apply: (tr, old, _oldState, newState) => {
-							if (!tr.docChanged) return old;
-							return buildColorSwatchDecorations(newState.doc);
-						},
-					},
-					props: {
-						decorations(state) { return colorSwatchPluginKey.getState(state); },
-					},
-				}),
-			];
+			return [lazyDecorationPlugin(colorSwatchPluginKey, buildColorSwatchDecorations)];
 		},
 	});
 
@@ -1510,21 +1505,7 @@
 	const TaskMetaDim = Extension.create({
 		name: 'taskMetaDim',
 		addProseMirrorPlugins() {
-			return [
-				new Plugin({
-					key: taskMetaPluginKey,
-					state: {
-						init: (_, state) => buildTaskMetaDecorations(state.doc),
-						apply: (tr, old, _oldState, newState) => {
-							if (!tr.docChanged) return old;
-							return buildTaskMetaDecorations(newState.doc);
-						},
-					},
-					props: {
-						decorations(state) { return taskMetaPluginKey.getState(state); },
-					},
-				}),
-			];
+			return [lazyDecorationPlugin(taskMetaPluginKey, buildTaskMetaDecorations)];
 		},
 	});
 
@@ -2637,6 +2618,8 @@
 		wordCount = countWords(text);
 		charCount = text.replace(/\s/g, '').length;
 	}
+
+	const scheduleCounts = debounce(updateCounts, 250);
 
 	async function toggleInfo() {
 		if (!showInfo && $activeNote) {
@@ -4148,12 +4131,8 @@
 				}
 				$editorDirty = true;
 				autoSave();
-				if (!isMobile && showOutline) updateOutline();
-				if (editor) {
-					const text = editor.state.doc.textContent;
-					wordCount = countWords(text);
-					charCount = text.replace(/\s/g, '').length;
-				}
+				if (!isMobile && showOutline) scheduleOutline();
+				if (showInfo) scheduleCounts();
 			},
 		});
 		editorReady = true;
@@ -8984,11 +8963,7 @@
 		list-style-type: square;
 	}
 
-	/* Ordered lists render their number via a counter in normal content flow
-	   instead of the native outside marker. WebKitGTK (Linux) clips the native
-	   marker against the editor's overflow:hidden box, so two-digit numbers
-	   showed only the last digit (11 -> 1). The built-in `list-item` counter
-	   still respects the <ol start> attribute and per-level nesting. */
+	/* Counter-based numbering: WebKitGTK clips the native ol marker (overflow:hidden), so 11 rendered as 1. list-item respects <ol start> + nesting. */
 	:global(.tiptap-wrapper .tiptap ol) {
 		list-style: none;
 		padding-left: 0;
