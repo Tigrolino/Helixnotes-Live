@@ -9343,9 +9343,10 @@
 		padding-left: 2px;
 	}
 
-	/* Suppress placeholder on task list / details containers - overlaps with checkbox / toggle button */
+	/* Suppress placeholder on task list / details / callout containers - it overlaps their own UI (checkbox, toggle, callout header) */
 	:global(.tiptap-wrapper .tiptap > ul[data-type="taskList"].is-empty::before),
-	:global(.tiptap-wrapper .tiptap > [data-type="details"].is-empty::before) {
+	:global(.tiptap-wrapper .tiptap > [data-type="details"].is-empty::before),
+	:global(.tiptap-wrapper .tiptap > .callout.is-empty::before) {
 		content: none;
 	}
 
