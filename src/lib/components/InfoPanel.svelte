@@ -96,7 +96,7 @@
 
 	function close() {
 		$showInfo = false;
-		activeTab = 'shortcuts';
+		activeTab = isMobile ? 'about' : 'shortcuts';
 	}
 
 	function openLink(url: string) {
