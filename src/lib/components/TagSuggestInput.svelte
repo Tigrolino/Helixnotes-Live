@@ -16,11 +16,10 @@
 	// Existing tags that match what's typed, prefix matches first, already-applied ones excluded.
 	const suggestions = $derived.by(() => {
 		const q = query.trim().toLowerCase();
-		if (!q) return [];
 		const taken = new Set(existing);
 		const names = $tags
 			.map(([name]) => name)
-			.filter((name) => !taken.has(name) && name.toLowerCase().includes(q));
+			.filter((name) => !taken.has(name) && (!q || name.toLowerCase().includes(q)));
 		names.sort((a, b) => {
 			const ap = a.toLowerCase().startsWith(q) ? 0 : 1;
 			const bp = b.toLowerCase().startsWith(q) ? 0 : 1;
