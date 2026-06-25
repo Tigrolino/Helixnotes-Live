@@ -55,6 +55,14 @@
 	let draggedNotebookPath = $state<string | null>(null);
 	let nbPointer: { src: string } | null = null;
 
+	// Notebook paths arrive from Rust with native separators (backslashes on Windows), so path math must be separator-agnostic.
+	const norm = (p: string) => (p ?? '').replace(/\\/g, '/');
+	const lastSep = (p: string) => Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+	const parentOf = (p: string) => { const i = lastSep(p); return i < 0 ? '' : p.slice(0, i); };
+	const baseOf = (p: string) => p.slice(lastSep(p) + 1);
+	const joinPath = (parent: string, name: string) => parent + (parent.includes('\\') ? '\\' : '/') + name;
+	const isDescendant = (child: string, anc: string) => child.startsWith(anc + '/') || child.startsWith(anc + '\\');
+
 	// Apply manual ordering recursively when in 'manual' sort mode.
 	// In 'alphabetical' mode the Rust scanner already sorts, so we pass through unchanged.
 	function sortNotebooksTree(tree: NotebookEntry[]): NotebookEntry[] {
@@ -353,25 +361,25 @@
 		dropPosition = null;
 		draggedNotebookPath = null;
 		// Don't move onto self or descendant
-		if (destPath === srcPath || destPath.startsWith(srcPath + '/')) return;
+		if (destPath === srcPath || isDescendant(destPath, srcPath)) return;
 		// Don't move if already in that parent
-		const parentDir = srcPath.substring(0, srcPath.lastIndexOf('/'));
+		const parentDir = parentOf(srcPath);
 		if (parentDir === destPath) return;
 		try {
-			const oldName = srcPath.split('/').pop() || '';
-			const newBasePath = destPath + '/' + oldName;
+			const oldName = baseOf(srcPath);
+			const newBasePath = joinPath(destPath, oldName);
 			await moveNotebook(srcPath, destPath);
 			// Update collapsedNotebooks paths
 			$collapsedNotebooks = $collapsedNotebooks.map(p => {
 				if (p === srcPath) return newBasePath;
-				if (p.startsWith(srcPath + '/')) return newBasePath + p.slice(srcPath.length);
+				if (isDescendant(p, srcPath)) return newBasePath + p.slice(srcPath.length);
 				return p;
 			});
 			// Update active notebook/note if inside the moved notebook
-			if ($activeNotebook?.path === srcPath || $activeNotebook?.path.startsWith(srcPath + '/')) {
+			if ($activeNotebook?.path === srcPath || isDescendant($activeNotebook?.path ?? '', srcPath)) {
 				selectAllNotes();
 			}
-			if ($activeNotePath && $activeNotePath.startsWith(srcPath + '/')) {
+			if ($activeNotePath && isDescendant($activeNotePath, srcPath)) {
 				const newNotePath = newBasePath + $activeNotePath.slice(srcPath.length);
 				$activeNotePath = newNotePath;
 				$activeNote = await readNote(newNotePath);
@@ -447,9 +455,10 @@
 	}
 
 	function findSiblingsOfPath(tree: NotebookEntry[], parentPath: string, vaultRoot: string): NotebookEntry[] {
-		if (parentPath === vaultRoot) return tree;
+		const target = norm(parentPath);
+		if (target === norm(vaultRoot)) return tree;
 		for (const nb of tree) {
-			if (nb.path === parentPath) return nb.children;
+			if (norm(nb.path) === target) return nb.children;
 			if (nb.children.length > 0) {
 				const found = findSiblingsOfPath(nb.children, parentPath, vaultRoot);
 				if (found.length > 0) return found;
@@ -463,41 +472,39 @@
 		dropPosition = null;
 		draggedNotebookPath = null;
 		if (srcPath === targetPath) return;
-		if (targetPath.startsWith(srcPath + '/')) return; // can't move into descendant
+		if (isDescendant(targetPath, srcPath)) return; // can't move into descendant
 		const vaultRoot = $appConfig?.active_vault;
 		if (!vaultRoot) return;
 
-		const srcParent = srcPath.substring(0, srcPath.lastIndexOf('/'));
-		const targetParent = targetPath.substring(0, targetPath.lastIndexOf('/'));
+		const srcParent = parentOf(srcPath);
+		const targetParent = parentOf(targetPath);
 		let actualSrcPath = srcPath;
 
 		try {
 			// Step 1: if different parents, move src into target's parent first
 			if (srcParent !== targetParent) {
-				const oldName = srcPath.split('/').pop() || '';
-				const newPath = targetParent === vaultRoot
-					? vaultRoot + '/' + oldName
-					: targetParent + '/' + oldName;
+				const oldName = baseOf(srcPath);
+				const newPath = joinPath(targetParent, oldName);
 				await moveNotebook(srcPath, targetParent);
 				// Migrate paths in collapsedNotebooks
 				$collapsedNotebooks = $collapsedNotebooks.map(p => {
 					if (p === srcPath) return newPath;
-					if (p.startsWith(srcPath + '/')) return newPath + p.slice(srcPath.length);
+					if (isDescendant(p, srcPath)) return newPath + p.slice(srcPath.length);
 					return p;
 				});
 				// Migrate paths in notebookOrder
 				const migrated: Record<string, number> = {};
 				for (const [p, v] of Object.entries($notebookOrder)) {
 					if (p === srcPath) migrated[newPath] = v;
-					else if (p.startsWith(srcPath + '/')) migrated[newPath + p.slice(srcPath.length)] = v;
+					else if (isDescendant(p, srcPath)) migrated[newPath + p.slice(srcPath.length)] = v;
 					else migrated[p] = v;
 				}
 				$notebookOrder = migrated;
 				// Update active notebook/note
-				if ($activeNotebook?.path === srcPath || $activeNotebook?.path.startsWith(srcPath + '/')) {
+				if ($activeNotebook?.path === srcPath || isDescendant($activeNotebook?.path ?? '', srcPath)) {
 					selectAllNotes();
 				}
-				if ($activeNotePath && $activeNotePath.startsWith(srcPath + '/')) {
+				if ($activeNotePath && isDescendant($activeNotePath, srcPath)) {
 					const newNotePath = newPath + $activeNotePath.slice(srcPath.length);
 					$activeNotePath = newNotePath;
 					$activeNote = await readNote(newNotePath);
