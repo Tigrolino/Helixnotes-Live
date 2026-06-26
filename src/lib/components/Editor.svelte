@@ -5708,7 +5708,6 @@
 						bind:this={sourceElement}
 						bind:value={sourceContent}
 						readonly={$readOnly}
-						onclick={() => { showOutline = false; }}
 						oninput={() => {
 							$editorDirty = true;
 							autoSave();
@@ -5748,7 +5747,7 @@
 						spellcheck="false"
 					></textarea>
 					<!-- svelte-ignore a11y_no_static_element_interactions -->
-					<div class="tiptap-wrapper" class:large-doc={isLargeDoc} style={$sourceMode ? 'display:none' : ''} spellcheck="false" bind:this={editorElement} onclick={(e) => { closeLinkContextMenu(); handleEditorClick(e); showOutline = false; }}></div>
+					<div class="tiptap-wrapper" class:large-doc={isLargeDoc} style={$sourceMode ? 'display:none' : ''} spellcheck="false" bind:this={editorElement} onclick={(e) => { closeLinkContextMenu(); handleEditorClick(e); }}></div>
 				{:else}
 					<!-- Desktop: conditional rendering with line numbers -->
 					{#if $sourceMode}
@@ -5767,7 +5766,6 @@
 							bind:this={sourceElement}
 							bind:value={sourceContent}
 							readonly={$readOnly}
-							onclick={() => { showOutline = false; }}
 							oninput={() => {
 								$editorDirty = true;
 								autoSave();
@@ -5858,7 +5856,7 @@
 						></textarea>
 					{:else}
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
-						<div class="tiptap-wrapper" class:large-doc={isLargeDoc} spellcheck="false" bind:this={editorElement} onclick={(e) => { closeLinkContextMenu(); handleEditorClick(e); showOutline = false; }} oncontextmenu={handleEditorContextMenu}></div>
+						<div class="tiptap-wrapper" class:large-doc={isLargeDoc} spellcheck="false" bind:this={editorElement} onclick={(e) => { closeLinkContextMenu(); handleEditorClick(e); }} oncontextmenu={handleEditorContextMenu}></div>
 					{/if}
 				{/if}
 			</div>
