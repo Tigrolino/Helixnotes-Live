@@ -449,6 +449,14 @@
 		}
 	}
 
+	function handleListDoubleClick(e: MouseEvent) {
+		const target = e.target as HTMLElement | null;
+		if (target?.closest('button, input, .note-item, .context-menu, .sort-menu, .batch-move-picker, .cal')) return;
+		e.stopPropagation();
+		if ($viewMode === 'tasks' || $viewMode === 'trash') return;
+		handleCreateNote();
+	}
+
 	async function handleRename(note: NoteEntry) {
 		if (!editValue.trim() || editValue.trim() === note.meta.title) {
 			editingNote = null;
@@ -1079,7 +1087,8 @@
 		</div>
 	{/if}
 
-	<div class="list-content" bind:this={listContainer} onscroll={onListScroll}>
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="list-content" bind:this={listContainer} onscroll={onListScroll} ondblclick={handleListDoubleClick}>
 		{#if $viewMode === 'tasks'}
 			<TasksView onOpenTask={openTask} onToggleTask={onToggleTask} onSetTaskPriority={onSetTaskPriority} onSetTaskDue={onSetTaskDue} />
 		{/if}

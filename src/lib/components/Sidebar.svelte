@@ -636,7 +636,7 @@
 
 <svelte:window onclick={handleWindowClick} />
 
-<aside class="sidebar" class:collapsed={$sidebarCollapsed} class:mobile={isMobile} class:nav-empty={!anyNavItem} ondblclick={startNewNotebookFromSidebar}>
+<aside class="sidebar" class:collapsed={$sidebarCollapsed} class:mobile={isMobile} class:nav-empty={!anyNavItem}>
 	{#if !isMobile}
 	<div class="sidebar-header">
 		<button class="collapse-btn" onclick={() => ($sidebarCollapsed = !$sidebarCollapsed)} title="Toggle sidebar">
@@ -733,7 +733,8 @@
 		</nav>
 		{/if}
 
-		<div class="section">
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div class="section" ondblclick={startNewNotebookFromSidebar}>
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
 				class="section-header"
