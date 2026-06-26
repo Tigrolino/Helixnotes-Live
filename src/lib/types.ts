@@ -44,6 +44,15 @@ export interface NoteContent {
 export interface VaultConfig {
   path: string;
   name: string;
+  // Per-vault WebDAV sync (moved off the global AppConfig).
+  sync_provider?: string | null;
+  webdav_url?: string | null;
+  webdav_username?: string | null;
+  webdav_password?: string | null;
+  sync_on_open?: boolean;
+  sync_on_change?: boolean;
+  sync_interval_minutes?: number;
+  last_sync_time?: string | null;
 }
 
 export interface CustomThemeColors {

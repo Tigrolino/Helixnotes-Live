@@ -50,10 +50,27 @@ pub struct NoteContent {
     pub raw: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VaultConfig {
     pub path: String,
     pub name: String,
+    // Per-vault WebDAV sync (was previously global on AppConfig; those fields are kept deprecated for migration).
+    #[serde(default)]
+    pub sync_provider: Option<String>,
+    #[serde(default)]
+    pub webdav_url: Option<String>,
+    #[serde(default)]
+    pub webdav_username: Option<String>,
+    #[serde(default)]
+    pub webdav_password: Option<String>,
+    #[serde(default)]
+    pub sync_on_open: bool,
+    #[serde(default)]
+    pub sync_on_change: bool,
+    #[serde(default)]
+    pub sync_interval_minutes: u32,
+    #[serde(default)]
+    pub last_sync_time: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -172,7 +189,7 @@ pub struct AppConfig {
     pub enable_wiki_links: bool,
     #[serde(default)]
     pub restore_last_session: bool,
-    // WebDAV sync (opt-in; all off by default). Endpoint is fully user-configured.
+    // DEPRECATED: WebDAV sync moved to per-vault VaultConfig. Kept for one release to migrate old configs.
     #[serde(default)]
     pub sync_provider: Option<String>,
     #[serde(default)]

@@ -6,6 +6,7 @@ import type {
   NoteEntry,
   NoteContent,
   NotebookEntry,
+  VaultConfig,
   VaultState,
   ViewMode,
   SortMode,
@@ -13,6 +14,12 @@ import type {
 
 // App state
 export const appConfig = writable<AppConfig | null>(null);
+
+// The active vault's config entry (where per-vault WebDAV sync settings live).
+export function activeVaultConfig(c: AppConfig | null): VaultConfig | null {
+  if (!c?.active_vault) return null;
+  return c.vaults.find((v) => v.path === c.active_vault) ?? null;
+}
 export const vaultReady = writable(false);
 
 // UI state

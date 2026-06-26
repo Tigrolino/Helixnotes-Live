@@ -43,6 +43,7 @@ pub fn open_vault(app: AppHandle, state: State<'_, AppState>, path: String) -> R
         config.vaults.push(VaultConfig {
             path: path.clone(),
             name,
+            ..Default::default()
         });
     }
     config.active_vault = Some(path);
@@ -2200,19 +2201,29 @@ pub fn test_ai_connection(app: AppHandle) -> Result<(), String> {
 
 // ── Sync (WebDAV) ──
 
+fn active_vault_config(config: &AppConfig) -> Result<&VaultConfig, String> {
+    let active = config.active_vault.as_deref().ok_or("No active vault")?;
+    config
+        .vaults
+        .iter()
+        .find(|v| v.path == active)
+        .ok_or_else(|| "Active vault not found in config".to_string())
+}
+
 fn sync_config_from(config: &AppConfig) -> Result<crate::sync::WebdavConfig, String> {
-    if config.sync_provider.as_deref() != Some("webdav") {
+    let v = active_vault_config(config)?;
+    if v.sync_provider.as_deref() != Some("webdav") {
         return Err("Sync is not configured".to_string());
     }
-    let url = config
+    let url = v
         .webdav_url
         .clone()
         .filter(|u| !u.trim().is_empty())
         .ok_or("WebDAV URL is not set")?;
     Ok(crate::sync::WebdavConfig {
         url,
-        username: config.webdav_username.clone().unwrap_or_default(),
-        password: config.webdav_password.clone().unwrap_or_default(),
+        username: v.webdav_username.clone().unwrap_or_default(),
+        password: v.webdav_password.clone().unwrap_or_default(),
     })
 }
 
@@ -2228,13 +2239,19 @@ pub fn set_sync_settings(
     sync_interval_minutes: u32,
 ) -> Result<(), String> {
     let mut config = state.config.lock().map_err(|e| e.to_string())?;
-    config.sync_provider = provider.filter(|p| !p.is_empty());
-    config.webdav_url = url.filter(|u| !u.trim().is_empty());
-    config.webdav_username = username.filter(|u| !u.is_empty());
-    config.webdav_password = password.filter(|p| !p.is_empty());
-    config.sync_on_open = sync_on_open;
-    config.sync_on_change = sync_on_change;
-    config.sync_interval_minutes = sync_interval_minutes;
+    let active = config.active_vault.clone().ok_or("No active vault")?;
+    let v = config
+        .vaults
+        .iter_mut()
+        .find(|v| v.path == active)
+        .ok_or_else(|| "Active vault not found in config".to_string())?;
+    v.sync_provider = provider.filter(|p| !p.is_empty());
+    v.webdav_url = url.filter(|u| !u.trim().is_empty());
+    v.webdav_username = username.filter(|u| !u.is_empty());
+    v.webdav_password = password.filter(|p| !p.is_empty());
+    v.sync_on_open = sync_on_open;
+    v.sync_on_change = sync_on_change;
+    v.sync_interval_minutes = sync_interval_minutes;
     save_app_config(&config)?;
     Ok(())
 }
@@ -2298,13 +2315,15 @@ pub fn sync_now(app: AppHandle) -> Result<(), String> {
     };
     std::thread::spawn(move || {
         use tauri::Emitter;
-        let result = crate::sync::run_sync(app.clone(), vault, cfg);
+        let result = crate::sync::run_sync(app.clone(), vault.clone(), cfg);
         app.state::<AppState>().syncing.store(false, Ordering::SeqCst);
         match result {
             Ok(summary) => {
                 let ts = chrono::Utc::now().to_rfc3339();
                 if let Ok(mut config) = app.state::<AppState>().config.lock() {
-                    config.last_sync_time = Some(ts.clone());
+                    if let Some(v) = config.vaults.iter_mut().find(|v| v.path == vault) {
+                        v.last_sync_time = Some(ts.clone());
+                    }
                     let _ = save_app_config(&config);
                 }
                 let _ = app.emit(
@@ -2424,11 +2443,45 @@ fn app_config_path() -> Result<std::path::PathBuf, String> {
 }
 
 pub fn load_app_config() -> AppConfig {
-    app_config_path()
+    let mut config: AppConfig = app_config_path()
         .ok()
         .and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    if migrate_global_sync_to_vault(&mut config) {
+        let _ = save_app_config(&config);
+    }
+    config
+}
+
+// One-time migration: WebDAV sync moved from global AppConfig to per-vault VaultConfig.
+// Copy the old global settings into the active vault's config if it has none yet. Idempotent.
+fn migrate_global_sync_to_vault(config: &mut AppConfig) -> bool {
+    if config.sync_provider.is_none() && config.webdav_url.is_none() {
+        return false;
+    }
+    let Some(active) = config.active_vault.clone() else { return false; };
+    let g_provider = config.sync_provider.clone();
+    let g_url = config.webdav_url.clone();
+    let g_user = config.webdav_username.clone();
+    let g_pass = config.webdav_password.clone();
+    let g_on_open = config.sync_on_open;
+    let g_on_change = config.sync_on_change;
+    let g_interval = config.sync_interval_minutes;
+    let g_last = config.last_sync_time.clone();
+    let Some(v) = config.vaults.iter_mut().find(|v| v.path == active) else { return false; };
+    if v.sync_provider.is_some() || v.webdav_url.is_some() {
+        return false; // already migrated / has its own config
+    }
+    v.sync_provider = g_provider;
+    v.webdav_url = g_url;
+    v.webdav_username = g_user;
+    v.webdav_password = g_pass;
+    v.sync_on_open = g_on_open;
+    v.sync_on_change = g_on_change;
+    v.sync_interval_minutes = g_interval;
+    v.last_sync_time = g_last;
+    true
 }
 
 fn save_app_config(config: &AppConfig) -> Result<(), String> {

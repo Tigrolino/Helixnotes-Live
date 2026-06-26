@@ -53,7 +53,8 @@
 		notebookOrder,
 		noteOrder,
 		syncState,
-		platformIsMobile
+		platformIsMobile,
+		activeVaultConfig,
 	} from '$lib/stores/app';
 	import { keybindings, matchAction } from '$lib/keybindings';
 
@@ -121,16 +122,16 @@
 	}
 
 	function syncConfigured(): boolean {
-		return get(appConfig)?.sync_provider === 'webdav';
+		return activeVaultConfig(get(appConfig))?.sync_provider === 'webdav';
 	}
 
 	// Auto-sync on a timer (only when configured and an interval is set).
 	async function checkScheduledSync() {
-		const config = get(appConfig);
-		if (config?.sync_provider !== 'webdav') return;
-		const mins = config.sync_interval_minutes ?? 0;
+		const vc = activeVaultConfig(get(appConfig));
+		if (vc?.sync_provider !== 'webdav') return;
+		const mins = vc.sync_interval_minutes ?? 0;
 		if (!mins || get(syncState).running) return;
-		const last = config.last_sync_time ? new Date(config.last_sync_time).getTime() : 0;
+		const last = vc.last_sync_time ? new Date(vc.last_sync_time).getTime() : 0;
 		if (Date.now() - last >= mins * 60 * 1000) {
 			try { await syncNow(); } catch (_) {}
 		}
@@ -711,12 +712,13 @@
 		unlistenSync.push(await listen('sync-done', (event: any) => {
 			syncState.set({ running: false, error: null });
 			const cur = get(appConfig);
-			if (cur && event.payload?.last_sync_time) appConfig.set({ ...cur, last_sync_time: event.payload.last_sync_time });
+			const ts = event.payload?.last_sync_time;
+			if (cur && ts) appConfig.set({ ...cur, vaults: cur.vaults.map((v) => v.path === cur.active_vault ? { ...v, last_sync_time: ts } : v) });
 		}));
 		unlistenSync.push(await listen('sync-error', (event: any) => syncState.set({ running: false, error: event.payload?.error ?? 'Sync failed' })));
 
 		// Sync when the vault opens (if enabled)
-		if (syncConfigured() && get(appConfig)?.sync_on_open) {
+		if (syncConfigured() && activeVaultConfig(get(appConfig))?.sync_on_open) {
 			try { await syncNow(); } catch (_) {}
 		}
 
@@ -726,8 +728,8 @@
 
 		// Auto-sync on note change: a save flips editorDirty true -> false. Debounce a sync.
 		unsubDirty = editorDirty.subscribe((d) => {
-			const config = get(appConfig);
-			if (prevDirty && !d && config?.sync_provider === 'webdav' && config?.sync_on_change) {
+			const vc = activeVaultConfig(get(appConfig));
+			if (prevDirty && !d && vc?.sync_provider === 'webdav' && vc?.sync_on_change) {
 				if (onChangeSyncTimer) clearTimeout(onChangeSyncTimer);
 				onChangeSyncTimer = setTimeout(() => { if (!get(syncState).running) syncNow().catch(() => {}); }, 15000);
 			}
@@ -843,7 +845,7 @@
 						</svg>
 					</button>
 					{/if}
-					{#if $appConfig?.sync_provider === 'webdav'}
+					{#if activeVaultConfig($appConfig)?.sync_provider === 'webdav'}
 					<button class="mobile-header-btn" class:active={$syncState.running} onclick={triggerSyncNow} disabled={$syncState.running} title={$syncState.error ? `Sync error: ${$syncState.error}` : ($syncState.running ? 'Syncing...' : 'Sync now')}>
 						<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class:sync-spin={$syncState.running}>
 							<path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0115-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 01-15 6.7L3 16"/>
