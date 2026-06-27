@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { showSettings, theme, appConfig, updateAvailable as globalUpdateAvailable, updateObj as globalUpdateObj, installType, settingsTab, vaultReady, androidApkUrl, checkForUpdateMobile, notebookSortMode, isManagedInstall, customThemes } from '$lib/stores/app';
+	import { showSettings, theme, appConfig, activeVaultConfig, updateAvailable as globalUpdateAvailable, updateObj as globalUpdateObj, installType, settingsTab, vaultReady, androidApkUrl, checkForUpdateMobile, notebookSortMode, isManagedInstall, customThemes } from '$lib/stores/app';
 	import { setTheme, setAccentColor, setFontSize, setFontFamily, setLineHeight, setUiScale, setContentWidth, setGeneralSettings, importObsidian, createBackup, listBackups, restoreBackup, deleteBackup, setBackupSettings, setAiSettings, testAiConnection, setSyncSettings, testSyncConnection, syncNow, saveCustomTheme, deleteCustomTheme, exportCustomTheme, importCustomThemes } from '$lib/api';
 	import { darkThemes, isMobile, isAndroid } from '$lib/platform';
 	import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
@@ -302,33 +302,55 @@
 	}
 
 	// ── WebDAV sync ──
-	let syncProvider = $state<string | null>($appConfig?.sync_provider ?? null);
-	let syncUrl = $state($appConfig?.webdav_url ?? '');
-	let syncUsername = $state($appConfig?.webdav_username ?? '');
-	let syncPassword = $state($appConfig?.webdav_password ?? '');
+	let syncProvider = $state<string | null>(activeVaultConfig($appConfig)?.sync_provider ?? null);
+	let syncUrl = $state(activeVaultConfig($appConfig)?.webdav_url ?? '');
+	let syncUsername = $state(activeVaultConfig($appConfig)?.webdav_username ?? '');
+	let syncPassword = $state(activeVaultConfig($appConfig)?.webdav_password ?? '');
 	let syncShowPassword = $state(false);
 	let syncTestLoading = $state(false);
 	let syncTestMessage = $state<{ type: 'success' | 'error'; text: string } | null>(null);
 	let syncRunning = $state(false);
 	let syncMessage = $state<{ type: 'success' | 'error'; text: string } | null>(null);
-	let syncOnOpen = $state($appConfig?.sync_on_open ?? false);
-	let syncOnChange = $state($appConfig?.sync_on_change ?? false);
-	let syncIntervalMinutes = $state($appConfig?.sync_interval_minutes ?? 0);
+	let syncOnOpen = $state(activeVaultConfig($appConfig)?.sync_on_open ?? false);
+	let syncOnChange = $state(activeVaultConfig($appConfig)?.sync_on_change ?? false);
+	let syncIntervalMinutes = $state(activeVaultConfig($appConfig)?.sync_interval_minutes ?? 0);
+
+	// Re-seed the sync form when the active vault changes, so Settings reflects the current vault.
+	let lastSyncVault: string | null = null;
+	$effect(() => {
+		const path = $appConfig?.active_vault ?? null;
+		if (path === lastSyncVault) return;
+		lastSyncVault = path;
+		const vc = activeVaultConfig($appConfig);
+		syncProvider = vc?.sync_provider ?? null;
+		syncUrl = vc?.webdav_url ?? '';
+		syncUsername = vc?.webdav_username ?? '';
+		syncPassword = vc?.webdav_password ?? '';
+		syncOnOpen = vc?.sync_on_open ?? false;
+		syncOnChange = vc?.sync_on_change ?? false;
+		syncIntervalMinutes = vc?.sync_interval_minutes ?? 0;
+	});
 
 	async function saveSyncSettings() {
 		await setSyncSettings(syncProvider, syncUrl || null, syncUsername || null, syncPassword || null, syncOnOpen, syncOnChange, syncIntervalMinutes);
-		// Reflect into the global store so the top-bar button visibility and the auto-sync
-		// triggers update live, without needing an app restart.
-		if ($appConfig) $appConfig = {
-			...$appConfig,
-			sync_provider: syncProvider,
-			webdav_url: syncUrl || null,
-			webdav_username: syncUsername || null,
-			webdav_password: syncPassword || null,
-			sync_on_open: syncOnOpen,
-			sync_on_change: syncOnChange,
-			sync_interval_minutes: syncIntervalMinutes,
-		};
+		// Reflect into the active vault's config in the store so the top-bar button and auto-sync
+		// triggers update live, without an app restart.
+		if ($appConfig) {
+			const cur = $appConfig;
+			$appConfig = {
+				...cur,
+				vaults: cur.vaults.map((v) => v.path === cur.active_vault ? {
+					...v,
+					sync_provider: syncProvider,
+					webdav_url: syncUrl || null,
+					webdav_username: syncUsername || null,
+					webdav_password: syncPassword || null,
+					sync_on_open: syncOnOpen,
+					sync_on_change: syncOnChange,
+					sync_interval_minutes: syncIntervalMinutes,
+				} : v),
+			};
+		}
 	}
 
 	async function handleTestSync() {
@@ -367,7 +389,11 @@
 			if (s.conflicts) parts.push(`${s.conflicts} conflict copies`);
 			syncMessage = { type: 'success', text: parts.length ? `Synced: ${parts.join(', ')}.` : 'Already up to date.' };
 			syncRunning = false;
-			if ($appConfig && event.payload.last_sync_time) $appConfig = { ...$appConfig, last_sync_time: event.payload.last_sync_time };
+			if ($appConfig && event.payload.last_sync_time) {
+				const cur = $appConfig;
+				const ts = event.payload.last_sync_time;
+				$appConfig = { ...cur, vaults: cur.vaults.map((v) => v.path === cur.active_vault ? { ...v, last_sync_time: ts } : v) };
+			}
 			cleanup();
 		}));
 		unlisteners.push(await listen<{ error?: string }>('sync-error', (event) => {
@@ -2088,8 +2114,8 @@
 											<span>{syncMessage.text}</span>
 										</div>
 									{/if}
-									{#if $appConfig?.last_sync_time}
-										<p class="setting-hint">Last sync: {new Date($appConfig.last_sync_time).toLocaleString()}</p>
+									{#if activeVaultConfig($appConfig)?.last_sync_time}
+										<p class="setting-hint">Last sync: {new Date(activeVaultConfig($appConfig)!.last_sync_time!).toLocaleString()}</p>
 									{/if}
 									<p class="setting-hint">If a note is edited on two devices, both are kept (one as a "(conflict)" copy).</p>
 								</div>
