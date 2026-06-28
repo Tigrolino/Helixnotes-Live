@@ -2919,12 +2919,13 @@
 				isLoadingNote = false;
 			});
 		} else {
-			// Editor element not in DOM yet (first note load).
-			// Store content and let the $effect on editorElement handle init.
-			pendingContent = content;
-			isLoadingNote = false;
-		}
+		// Editor element not in DOM yet (first note load).
+		// Store content and let the $effect on editorElement handle init.
+		pendingContent = content;
+		isLoadingNote = false;
 	}
+	if (!isMobile && showOutline) scheduleOutline();
+}
 
 	function stripTitleH1(md: string): string {
 		const title = $activeNote?.meta.title;
