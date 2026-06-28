@@ -143,6 +143,7 @@
 	}
 
 	let anyDropdownOpen = $derived(headingDropdown || colorDropdown || highlightDropdown || alignDropdown || insertDropdown || tablePickerOpen);
+
 	let editorState = $state(0);
 	let editorStateRaf = 0; // RAF handle for batching toolbar updates
 
@@ -299,6 +300,17 @@
 	let tablePickerHover = $state({ rows: 0, cols: 0 });
 	let imageToolbar = $state<{ pos: number; x: number; y: number; size: string; src: string } | null>(null);
 	let copyToast = $state<'copying' | 'done' | null>(null);
+
+	$effect(() => {
+		const open = headingDropdown || colorDropdown || highlightDropdown || alignDropdown || insertDropdown || tablePickerOpen;
+		if (!open) return;
+		requestAnimationFrame(() => {
+			document.querySelectorAll<HTMLElement>('.fmt-dropdown').forEach((el) => {
+				const overflow = el.getBoundingClientRect().right - (window.innerWidth - 8);
+				el.style.transform = overflow > 0 ? `translateX(${-overflow}px)` : '';
+			});
+		});
+	});
 
 	// Math insert/edit modal (opened by /math slash command or double-click on existing math node)
 	let mathModal = $state<{ kind: 'block' | 'inline'; editPos: number | null; tex: string } | null>(null);
