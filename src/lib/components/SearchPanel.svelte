@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { showSearch, activeNote, activeNotePath, editorDirty, appConfig, mobileView } from '$lib/stores/app';
+	import { showSearch, activeNote, activeNotePath, editorDirty, appConfig, mobileView, notebooks, activeNotebook, activeTag, viewMode } from '$lib/stores/app';
 	import { searchNotes, readNote } from '$lib/api';
 	import { debounce } from '$lib/utils/debounce';
-	import type { SearchResult } from '$lib/types';
+	import type { SearchResult, NotebookEntry } from '$lib/types';
 	import { isMobile } from '$lib/platform';
 
 	let query = $state('');
@@ -84,6 +84,17 @@
 		return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 	}
 
+	function findNotebookByPath(nbs: NotebookEntry[], target: string): NotebookEntry | null {
+		for (const nb of nbs) {
+			if (nb.path === target) return nb;
+			if (nb.children.length) {
+				const found = findNotebookByPath(nb.children, target);
+				if (found) return found;
+			}
+		}
+		return null;
+	}
+
 	async function openResult(result: SearchResult) {
 		try {
 			const content = await readNote(result.path);
@@ -91,6 +102,19 @@
 			$activeNotePath = result.path;
 			$editorDirty = false;
 			$showSearch = false;
+			// Reveal the note in the notes list: switch to its notebook (or All Notes).
+			const sep = result.path.includes('\\') ? '\\' : '/';
+			const parentDir = result.path.slice(0, result.path.lastIndexOf(sep));
+			const nb = parentDir ? findNotebookByPath($notebooks, parentDir) : null;
+			if (nb) {
+				$activeNotebook = nb;
+				$activeTag = null;
+				$viewMode = 'notebook';
+			} else {
+				$activeNotebook = null;
+				$activeTag = null;
+				$viewMode = 'all';
+			}
 			if (isMobile) $mobileView = 'editor';
 		} catch (e) {
 			console.error('Failed to open search result:', e);
