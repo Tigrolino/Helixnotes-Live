@@ -312,8 +312,9 @@ impl WebdavClient {
             .send()
             .map_err(|e| e.to_string())?;
         let s = resp.status().as_u16();
-        // 201 created; 405 already exists; 301 redirect-to-existing.
-        if resp.status().is_success() || s == 405 || s == 301 {
+        // 201 created; 405 already exists; 301 redirect-to-existing;
+        // 403 some servers (openmediavault et al.) return 403 instead of 405.
+        if resp.status().is_success() || s == 405 || s == 301 || s == 403 {
             Ok(())
         } else {
             Err(format!("MKCOL {} failed: HTTP {}", relpath, s))
