@@ -2424,6 +2424,7 @@ pub fn ai_ask(
 // path resolver, since dirs::config_dir() is not reliable in the app sandbox.
 static MOBILE_CONFIG_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
 
+#[cfg(mobile)]
 pub fn set_mobile_config_dir(path: std::path::PathBuf) {
     let _ = MOBILE_CONFIG_DIR.set(path);
 }
