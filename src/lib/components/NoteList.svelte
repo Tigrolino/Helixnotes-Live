@@ -442,8 +442,12 @@
 			const entry = await createNote(nbRelative, 'Untitled');
 			if ($sortMode === 'custom') appendManualNoteOrder(entry.path);
 			noteCache.clear();
-			await refresh();
-			await selectNote(entry);
+			$notes = [entry, ...$notes];
+			onBeforeNoteSwitch();
+			$activeNote = { path: entry.path, meta: entry.meta, content: '\n', raw: '' };
+			$activeNotePath = entry.path;
+			$editorDirty = false;
+			onNoteSelected(entry.path, '\n');
 			onNoteCreated();
 		} catch (e) {
 			console.error('Failed to create note:', e);

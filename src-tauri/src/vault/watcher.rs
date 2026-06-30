@@ -61,6 +61,15 @@ pub fn start_watcher(app: AppHandle, vault_path: String) -> Result<RecommendedWa
                         };
                         let _ = app.emit("file-changed", &fe);
                     }
+
+                    // On mobile, throttle event emission to prevent IPC flooding
+                    // on FUSE filesystems where Syncthing/other apps generate
+                    // constant file activity that blocks the Tauri command channel.
+                    #[cfg(mobile)]
+                    {
+                        std::thread::sleep(Duration::from_secs(2));
+                        while rx.try_recv().is_ok() {}
+                    }
                 }
                 Err(e) => {
                     log::error!("File watcher error: {}", e);

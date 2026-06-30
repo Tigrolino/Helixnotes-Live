@@ -5,6 +5,22 @@ use crate::vault::{operations, watcher};
 use std::path::Path;
 use tauri::{AppHandle, Manager, State};
 
+fn index_note_bg(state: &State<'_, AppState>, path: &str) {
+	let search = state.search_index.lock().ok().and_then(|g| g.clone());
+	if let Some(search) = search {
+		let p = path.to_string();
+		std::thread::spawn(move || { let _ = search.index_note(&p); });
+	}
+}
+
+fn remove_note_bg(state: &State<'_, AppState>, path: &str) {
+	let search = state.search_index.lock().ok().and_then(|g| g.clone());
+	if let Some(search) = search {
+		let p = path.to_string();
+		std::thread::spawn(move || { let _ = search.remove_note(&p); });
+	}
+}
+
 // ── Vault Management ──
 
 #[tauri::command]
@@ -338,12 +354,8 @@ pub fn save_note(
 
     operations::save_note(&path, &meta, &body)?;
 
-    // Re-index note so search picks up changes immediately
-    if let Ok(search_guard) = state.search_index.lock() {
-        if let Some(ref search) = *search_guard {
-            let _ = search.index_note(&path);
-        }
-    }
+	// Re-index note so search picks up changes (background to avoid blocking on FUSE fsync)
+	index_note_bg(&state, &path);
 
     Ok(())
 }
@@ -354,18 +366,14 @@ pub fn create_note(
     notebook_relative: Option<String>,
     title: String,
 ) -> Result<NoteEntry, String> {
-    let config = state.config.lock().map_err(|e| e.to_string())?;
-    let vault_path = config.active_vault.as_ref().ok_or("No active vault")?;
-    let entry = operations::create_note(vault_path, notebook_relative.as_deref(), &title)?;
+	let config = state.config.lock().map_err(|e| e.to_string())?;
+	let vault_path = config.active_vault.as_ref().ok_or("No active vault")?;
+	let entry = operations::create_note(vault_path, notebook_relative.as_deref(), &title)?;
 
-    // Index new note
-    if let Ok(search_guard) = state.search_index.lock() {
-        if let Some(ref search) = *search_guard {
-            let _ = search.index_note(&entry.path);
-        }
-    }
+	// Index new note (background to avoid blocking on FUSE fsync)
+	index_note_bg(&state, &entry.path);
 
-    Ok(entry)
+	Ok(entry)
 }
 
 #[tauri::command]
@@ -374,11 +382,7 @@ pub fn create_daily_note(state: State<'_, AppState>, date: Option<String>) -> Re
     let vault_path = config.active_vault.as_ref().ok_or("No active vault")?;
     let entry = operations::create_daily_note(vault_path, date.as_deref(), &config.daily_title_format)?;
 
-    if let Ok(search_guard) = state.search_index.lock() {
-        if let Some(ref search) = *search_guard {
-            let _ = search.index_note(&entry.path);
-        }
-    }
+    	index_note_bg(&state, &entry.path);
 
     Ok(entry)
 }
@@ -397,12 +401,8 @@ pub fn delete_note(state: State<'_, AppState>, path: String) -> Result<(), Strin
     let vault_path = config.active_vault.as_ref().ok_or("No active vault")?;
     operations::delete_note(vault_path, &path)?;
 
-    // Remove from index
-    if let Ok(search_guard) = state.search_index.lock() {
-        if let Some(ref search) = *search_guard {
-            let _ = search.remove_note(&path);
-        }
-    }
+	// Remove from index (background to avoid blocking on FUSE fsync)
+	remove_note_bg(&state, &path);
 
     Ok(())
 }
@@ -781,11 +781,7 @@ pub fn set_task_done(
     }
     operations::save_note(&note_path, &meta, &new_body)?;
 
-    if let Ok(guard) = state.search_index.lock() {
-        if let Some(search) = guard.as_ref() {
-            let _ = search.index_note(&note_path);
-        }
-    }
+    	index_note_bg(&state, &note_path);
     Ok(())
 }
 
@@ -842,11 +838,7 @@ pub fn set_task_priority(
     }
     operations::save_note(&note_path, &meta, &new_body)?;
 
-    if let Ok(guard) = state.search_index.lock() {
-        if let Some(search) = guard.as_ref() {
-            let _ = search.index_note(&note_path);
-        }
-    }
+    index_note_bg(&state, &note_path);
     Ok(())
 }
 
@@ -902,11 +894,7 @@ pub fn set_task_due(
     }
     operations::save_note(&note_path, &meta, &new_body)?;
 
-    if let Ok(guard) = state.search_index.lock() {
-        if let Some(search) = guard.as_ref() {
-            let _ = search.index_note(&note_path);
-        }
-    }
+    index_note_bg(&state, &note_path);
     Ok(())
 }
 
