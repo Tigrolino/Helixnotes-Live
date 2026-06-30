@@ -4887,6 +4887,42 @@
 	function openAiMenu() {
 		if (!editor) return;
 		closeTextContextMenu();
+
+		if ($sourceMode && sourceElement) {
+			const start = sourceElement.selectionStart;
+			const end = sourceElement.selectionEnd;
+			const selected = sourceContent.slice(start, end);
+			aiResult = null;
+			aiError = null;
+			aiLoading = false;
+			aiShowCustom = false;
+			aiTranslateMenu = false;
+			aiCustomPrompt = '';
+			aiMediaPlaceholders = new Map();
+			aiOriginalMarkdown = '';
+			aiEmptyNote = false;
+			if (selected.trim()) {
+				aiSelectionFrom = start;
+				aiSelectionTo = end;
+				aiSelectedText = selected;
+				aiWholeNote = false;
+			} else {
+				const fullMd = restoreTitleH1(sourceContent);
+				if (!fullMd.trim()) {
+					aiEmptyNote = true;
+					aiWholeNote = true;
+					aiSelectedText = '';
+				} else {
+					aiWholeNote = true;
+					aiSelectedText = fullMd.trim();
+				}
+				aiSelectionFrom = 0;
+				aiSelectionTo = 0;
+			}
+			aiMenu = isMobile ? { x: 0, y: 0 } : { x: Math.max(4, window.innerWidth / 2 - 110), y: 100 };
+			return;
+		}
+
 		editor.commands.focus();
 
 		const { from, to } = editor.state.selection;
@@ -5037,7 +5073,7 @@
 	}
 
 	async function aiApplyResult() {
-		if (!editor || !aiResult) return;
+		if (!aiResult) return;
 		// Save a version snapshot before applying AI changes
 		if ($activeNotePath && $activeNote && !aiEmptyNote) {
 			try {
@@ -5047,6 +5083,24 @@
 				console.error('Failed to create version before AI apply:', e);
 			}
 		}
+		if ($sourceMode) {
+			if (aiEmptyNote) {
+				const lines = aiResult.split('\n');
+				let title = lines[0]?.replace(/^#+\s*/, '').trim() || 'Untitled';
+				const body = lines.slice(1).join('\n').replace(/^\n+/, '');
+				if ($activeNote) $activeNote.meta.title = title;
+				sourceContent = body;
+			} else if (aiWholeNote) {
+				sourceContent = stripTitleH1(aiResult);
+			} else {
+				sourceContent = sourceContent.slice(0, aiSelectionFrom) + aiResult + sourceContent.slice(aiSelectionTo);
+			}
+			$editorDirty = true;
+			autoSave();
+			closeAiMenu();
+			return;
+		}
+		if (!editor) return;
 		if (aiEmptyNote) {
 			// Parse title from first line, rest is content
 			const lines = aiResult.split('\n');
