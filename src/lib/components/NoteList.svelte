@@ -1328,8 +1328,18 @@
 								</span>
 							{/if}
 						</div>
-					{/if}
-				</button>
+				{/if}
+				{#if $viewMode === 'trash'}
+					<span class="trash-row-actions">
+						<span class="trash-row-btn" role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); handleRestore(note); }} title="Restore" onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); handleRestore(note); } }}>
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+						</span>
+						<span class="trash-row-btn danger" role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); handlePermanentDelete(note); }} title="Delete permanently" onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); handlePermanentDelete(note); } }}>
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+						</span>
+					</span>
+				{/if}
+			</button>
 			{/if}
 		{/snippet}
 
@@ -1682,6 +1692,7 @@
 		text-align: left;
 		margin-bottom: 1px;
 		contain: content;
+		position: relative;
 	}
 
 	.note-item:hover {
@@ -1743,6 +1754,37 @@
 
 	.selection-action:hover {
 		background: var(--bg-hover);
+	}
+
+	.trash-row-actions {
+		position: absolute;
+		right: 6px;
+		top: 50%;
+		transform: translateY(-50%);
+		display: none;
+		gap: 2px;
+	}
+	.note-item:hover .trash-row-actions {
+		display: flex;
+	}
+	.trash-row-btn {
+		cursor: pointer;
+		padding: 4px;
+		border-radius: 4px;
+		color: var(--text-secondary);
+		display: flex;
+		align-items: center;
+	}
+	.trash-row-btn:hover {
+		background: var(--bg-hover);
+		color: var(--text-primary);
+	}
+	.trash-row-btn.danger:hover {
+		color: var(--danger);
+		background: color-mix(in srgb, var(--danger) 10%, transparent);
+	}
+	.note-list.mobile .trash-row-actions {
+		display: flex;
 	}
 
 	.selection-action.danger {
