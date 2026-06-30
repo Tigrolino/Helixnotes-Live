@@ -3010,6 +3010,9 @@
 			}
 			entries.push({ text: serializeNode(node), isImage: isImageNode(node) });
 		});
+		while (entries.length > 0 && entries[entries.length - 1].text === '<!-- -->') {
+			entries.pop();
+		}
 		// Join: skip extra \n separator before image nodes so they don't get unwanted blank lines
 		let result = '';
 		for (let i = 0; i < entries.length; i++) {
@@ -3819,10 +3822,10 @@
 		src = src.replace(/^([\s>]*)-\s\[ \][^\S\n]+(.+)$/gm, '$1- <tiptask checked="false">$2</tiptask>');
 		src = src.replace(/^([\s>]*)-\s\[ \][^\S\n]*$/gm, '$1- <tiptask checked="false">&nbsp;</tiptask>');
 
-		// Pre-process: strip list-separator comments before markdown-it.
-		// markdown-it treats <!-- --> as an HTML block start, swallowing the
-		// next line (e.g. an image) as raw HTML instead of parsing it.
-		src = src.replace(/<!-- -->/g, '\n');
+		// Pre-process: replace empty-paragraph markers with a div sentinel before markdown-it.
+		// A bare <!-- --> starts an HTML block that swallows the next line; the blank lines
+		// around the div keep it isolated. Post-render converts it back to <p></p>.
+		src = src.replace(/<!-- -->/g, '\n\n<div data-empty-para></div>\n\n');
 
 		// Pre-process: preserve blank lines before image-only lines
 		// markdown-it collapses blank lines into paragraph breaks, losing the empty paragraph.
@@ -3839,8 +3842,8 @@
 		html = html.replace(/<code([^>]*)>\n?/g, '<code$1>');
 		html = html.replace(/\n<\/code>/g, '</code>');
 
-		// Post-process: convert list-separator comments back to empty paragraphs for TipTap
-		html = html.replace(/<!-- -->/g, '<p></p>');
+		// Post-process: convert empty-paragraph div sentinels back to empty paragraphs for TipTap
+		html = html.replace(/<div data-empty-para><\/div>\n?/g, '<p></p>\n');
 
 		// Post-process: convert task list items to TipTap format
 		// Convert opening <li> + <tiptask> into data-attributed <li>, handles both tight and loose (with <p>) lists
