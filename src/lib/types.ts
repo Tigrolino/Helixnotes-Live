@@ -171,6 +171,9 @@ export interface FileEvent {
 export interface ImportResult {
   files_converted: number;
   links_converted: number;
+  frontmatter_normalized: number;
+  syntax_converted: number;
+  attachments_moved: number;
 }
 
 export interface VaultStats {

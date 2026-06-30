@@ -393,6 +393,9 @@ pub struct FileEvent {
 pub struct ImportResult {
     pub files_converted: u64,
     pub links_converted: u64,
+    pub frontmatter_normalized: u64,
+    pub syntax_converted: u64,
+    pub attachments_moved: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

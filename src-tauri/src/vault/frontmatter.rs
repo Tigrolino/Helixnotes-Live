@@ -15,7 +15,7 @@ struct RawFrontmatter {
 }
 
 /// Try to parse a date string in multiple common formats.
-fn parse_date_flexible(s: &str) -> Option<chrono::DateTime<Utc>> {
+pub fn parse_date_flexible(s: &str) -> Option<chrono::DateTime<Utc>> {
     let s = s.trim();
     // RFC 3339 / ISO 8601 with timezone (e.g. 2024-01-15T10:30:00+00:00)
     if let Ok(dt) = s.parse::<chrono::DateTime<Utc>>() {
@@ -191,7 +191,7 @@ pub fn merge_frontmatter(original_raw: &str, meta: &NoteMeta, body: &str) -> Str
     format!("---\n{}---\n{}", yaml_str, body_with_heading)
 }
 
-fn filename_to_title(filename: &str) -> String {
+pub fn filename_to_title(filename: &str) -> String {
     let stem = filename.trim_end_matches(".md");
     // Only replace dashes/underscores acting as word separators (between non-space chars).
     // Keep dashes that are surrounded by spaces (e.g. "Title - Subtitle").

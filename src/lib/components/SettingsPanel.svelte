@@ -739,10 +739,16 @@
 		importResult = null;
 		importError = null;
 
-		const unlistenDone = await listen<{ success: boolean; files_converted?: number; links_converted?: number; error?: string }>('import-done', (event) => {
+		const unlistenDone = await listen<{ success: boolean; files_converted?: number; links_converted?: number; frontmatter_normalized?: number; syntax_converted?: number; attachments_moved?: number; error?: string }>('import-done', (event) => {
 			const data = event.payload;
 			if (data.success) {
-				importResult = { files_converted: data.files_converted ?? 0, links_converted: data.links_converted ?? 0 };
+				importResult = {
+					files_converted: data.files_converted ?? 0,
+					links_converted: data.links_converted ?? 0,
+					frontmatter_normalized: data.frontmatter_normalized ?? 0,
+					syntax_converted: data.syntax_converted ?? 0,
+					attachments_moved: data.attachments_moved ?? 0,
+				};
 			} else {
 				importError = data.error ?? 'Import failed';
 			}
@@ -1807,7 +1813,7 @@
 						<div class="tab-content">
 							<div class="settings-section">
 								<h3>Import from Obsidian</h3>
-								<p class="import-desc">Convert Obsidian wiki-links (<code>![[image.png]]</code>, <code>[[note]]</code>) to standard markdown links across all notes in the current vault. This expects that you have opened an Obsidian vault directory directly as your HelixNotes vault.</p>
+								<p class="import-desc">Fully converts an Obsidian vault to HelixNotes format: normalizes frontmatter (tags, IDs, dates, title headings), converts <code>[[wiki-links]]</code> to standard markdown links, converts <code>==highlights==</code> and <code>%%comments%%</code>, and relocates attachments to <code>.helixnotes/attachments/</code>. Open the Obsidian vault directory as your HelixNotes vault first.</p>
 								<div class="import-warn">
 									<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
 									<span>This modifies files in place. Make a backup before running!</span>
@@ -1826,12 +1832,21 @@
 									{/if}
 								</button>
 
-								{#if importResult}
-									<div class="import-result success">
-										<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 11-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
-										<span>Converted {importResult.links_converted} links across {importResult.files_converted} files</span>
+							{#if importResult}
+								<div class="import-result success">
+									<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 11-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
+									<div class="import-stats">
+										<span>Import complete</span>
+										<ul>
+											{#if importResult.frontmatter_normalized}<li>Normalized frontmatter in {importResult.frontmatter_normalized} notes</li>{/if}
+											{#if importResult.links_converted}<li>Converted {importResult.links_converted} wiki-links to markdown</li>{/if}
+											{#if importResult.syntax_converted}<li>Converted Obsidian syntax (highlights, comments) in {importResult.syntax_converted} notes</li>{/if}
+											{#if importResult.attachments_moved}<li>Moved {importResult.attachments_moved} attachments to .helixnotes/attachments/</li>{/if}
+											{#if !importResult.frontmatter_normalized && !importResult.links_converted && !importResult.syntax_converted && !importResult.attachments_moved}<li>No changes needed</li>{/if}
+										</ul>
 									</div>
-								{/if}
+								</div>
+							{/if}
 								{#if importError}
 									<div class="import-result error">
 										<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
@@ -2803,7 +2818,7 @@
 
 	.import-result {
 		display: flex;
-		align-items: center;
+		align-items: flex-start;
 		gap: 8px;
 		margin-top: 14px;
 		padding: 10px 14px;
@@ -2814,6 +2829,12 @@
 	.import-result.success {
 		background: color-mix(in srgb, #059669 10%, transparent);
 		color: #059669;
+	}
+
+	.import-stats ul {
+		margin: 4px 0 0 0;
+		padding-left: 16px;
+		line-height: 1.6;
 	}
 
 	.import-result.error {
