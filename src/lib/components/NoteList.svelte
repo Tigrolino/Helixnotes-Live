@@ -416,6 +416,7 @@
 	}
 
 	export async function handleCreateNote() {
+		if ($viewMode === 'quickaccess' || $viewMode === 'trash') return;
 		if ($viewMode === 'daily') {
 			const today = new Date();
 			const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -453,7 +454,7 @@
 		const target = e.target as HTMLElement | null;
 		if (target?.closest('button, input, .note-item, .context-menu, .sort-menu, .batch-move-picker, .cal')) return;
 		e.stopPropagation();
-		if ($viewMode === 'tasks' || $viewMode === 'trash') return;
+		if ($viewMode === 'tasks' || $viewMode === 'trash' || $viewMode === 'quickaccess') return;
 		handleCreateNote();
 	}
 
