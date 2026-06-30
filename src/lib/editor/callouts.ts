@@ -163,7 +163,7 @@ export function serializeCallout(node: any, serializeChild: (child: any) => stri
 	while (parts.length && parts[parts.length - 1] === '') parts.pop();
 
 	const out = [`> ${header}`];
-	const inner = parts.join('\n');
+	const inner = parts.join('\n\n');
 	if (inner.length) {
 		for (const line of inner.split('\n')) out.push(line.length ? `> ${line}` : '>');
 	}
