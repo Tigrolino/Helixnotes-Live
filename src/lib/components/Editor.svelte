@@ -1007,6 +1007,83 @@
 		},
 	});
 
+	const CalloutTyping = Extension.create({
+		name: 'calloutTyping',
+		addProseMirrorPlugins() {
+			return [
+				new Plugin({
+					key: new PluginKey('calloutTyping'),
+					props: {
+						handleDOMEvents: {
+							keydown(view, event) {
+								if (event.key !== 'Enter' || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return false;
+								const { state } = view;
+								const { selection } = state;
+								if (!selection.empty) return false;
+								const head = selection.$head;
+								if (head.depth !== 1 || head.parent.type.name !== 'paragraph') return false;
+								if (head.parentOffset !== head.parent.content.size) return false;
+								const m = head.parent.textContent.match(/^>\s*\[!([\w-]+)\]([-+]?)[ \t]*(.*)$/);
+								if (!m) return false;
+								event.preventDefault();
+								const type = m[1].toLowerCase();
+								const foldable = m[2] === '+' || m[2] === '-';
+								const folded = m[2] === '-';
+								const title = m[3];
+								const start = head.before(1);
+								const end = start + head.parent.nodeSize;
+								const callout = state.schema.nodes.callout.create(
+									{ type, title, foldable, folded },
+									[state.schema.nodes.paragraph.create()],
+								);
+								const tr = state.tr.replaceWith(start, end, callout);
+								tr.setSelection(TextSelection.near(tr.doc.resolve(start + 2)));
+								tr.scrollIntoView();
+								view.dispatch(tr);
+								return true;
+							},
+						},
+						handlePaste(view, event) {
+							const text = event.clipboardData?.getData('text/plain');
+							if (!text || !/^>\s*\[!/m.test(text)) return false;
+							const lines = text.split('\n');
+							const idx = lines.findIndex((l) => /^>\s*\[!/.test(l));
+							if (idx === -1) return false;
+							const m = lines[idx].match(/^>\s*\[!([\w-]+)\]([-+]?)[ \t]*(.*)$/);
+							if (!m) return false;
+							const type = m[1].toLowerCase();
+							const foldable = m[2] === '+' || m[2] === '-';
+							const folded = m[2] === '-';
+							const title = m[3];
+							const bodyLines = lines.slice(idx + 1).map((l) => l.replace(/^>\s?/, ''));
+							while (bodyLines.length > 0 && bodyLines[bodyLines.length - 1].trim() === '') bodyLines.pop();
+							const { state } = view;
+							const schema = state.schema;
+							const bodyContent = bodyLines.length > 0
+								? bodyLines.map((l) => schema.nodes.paragraph.create(null, l ? [schema.text(l)] : []))
+								: [schema.nodes.paragraph.create()];
+							const callout = schema.nodes.callout.create({ type, title, foldable, folded }, bodyContent);
+							const head = state.selection.$head;
+							const tr = state.tr;
+							let insertPos: number;
+							if (head.depth >= 1 && head.parent.type.name === 'paragraph') {
+								insertPos = head.before(head.depth);
+								tr.replaceWith(insertPos, insertPos + head.parent.nodeSize, callout);
+							} else {
+								insertPos = state.selection.to;
+								tr.insert(insertPos, callout);
+							}
+							tr.setSelection(TextSelection.near(tr.doc.resolve(insertPos + 2)));
+							tr.scrollIntoView();
+							view.dispatch(tr);
+							return true;
+						},
+					},
+				}),
+			];
+		},
+	});
+
 	const CtrlEndScrollPastEnd = Extension.create({
 		name: 'ctrlEndScrollPastEnd',
 		addProseMirrorPlugins() {
@@ -4020,6 +4097,7 @@
 				MathInline,
 				PageBreak,
 				Callout,
+				CalloutTyping,
 				Details.configure({ persist: true, HTMLAttributes: { class: 'editor-details' } }),
 				DetailsSummary,
 				DetailsContent,
