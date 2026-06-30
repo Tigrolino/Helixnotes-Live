@@ -1896,7 +1896,8 @@
 
 		// Keep menu within viewport (account for virtual keyboard on mobile)
 		if (x + 240 > window.innerWidth) x = window.innerWidth - 250;
-		const visibleBottom = window.innerHeight - keyboardHeight;
+		const vv1 = window.visualViewport;
+		const visibleBottom = isMobile && vv1 ? vv1.height + (vv1.offsetTop || 0) : window.innerHeight;
 		const menuHeight = 300;
 		let y = coords.bottom + 4;
 		if (y + menuHeight > visibleBottom) y = coords.top - menuHeight - 4;
@@ -2048,7 +2049,8 @@
 		const coords = editor.view.coordsAtPos(from);
 		let x = coords.left;
 		if (x + 200 > window.innerWidth) x = window.innerWidth - 210;
-		const visibleBottom = window.innerHeight - keyboardHeight;
+		const vv2 = window.visualViewport;
+		const visibleBottom = isMobile && vv2 ? vv2.height + (vv2.offsetTop || 0) : window.innerHeight;
 		const menuH = 180;
 		let y = coords.bottom + 4;
 		if (y + menuH > visibleBottom) y = coords.top - menuH - 4;
@@ -2520,7 +2522,8 @@
 		const coords = editor.view.coordsAtPos(from);
 		let x = coords.left;
 		if (x + 280 > window.innerWidth) x = window.innerWidth - 290;
-		const visibleBottom = window.innerHeight - keyboardHeight;
+		const vv = window.visualViewport;
+		const visibleBottom = isMobile && vv ? vv.height + (vv.offsetTop || 0) : window.innerHeight;
 		const menuHeight = 360;
 		let y = coords.bottom + 4;
 		if (y + menuHeight > visibleBottom) y = coords.top - menuHeight - 4;
