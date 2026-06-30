@@ -4906,6 +4906,10 @@
 				aiSelectionTo = end;
 				aiSelectedText = selected;
 				aiWholeNote = false;
+				requestAnimationFrame(() => {
+					sourceElement?.focus();
+					sourceElement?.setSelectionRange(start, end);
+				});
 			} else {
 				const fullMd = restoreTitleH1(sourceContent);
 				if (!fullMd.trim()) {
