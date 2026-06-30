@@ -61,7 +61,7 @@
 	const appWindow = getCurrentWindow();
 	const isMac = navigator.platform.startsWith('Mac');
 	const isMobile = $derived($platformIsMobile);
-	import { loadVaultState, saveVaultState, readNote, createDailyNote, createBackup, getPendingOpenFile, addQuickAccess, removeQuickAccess, getQuickAccess, setTheme, syncNow, setTaskDone, setTaskPriority, setTaskDue } from '$lib/api';
+	import { loadVaultState, saveVaultState, readNote, createDailyNote, createBackup, getPendingOpenFile, addQuickAccess, removeQuickAccess, getQuickAccess, setTheme, syncNow, setTaskDone, setTaskPriority, setTaskDue, findOrphanedAttachments, trashOrphanedAttachments } from '$lib/api';
 	import { darkThemes, isAndroid } from '$lib/platform';
 	import { debounce } from '$lib/utils/debounce';
 	import { openNoteWindow } from '$lib/utils/window';
@@ -614,6 +614,26 @@
 		// Run sidebar and note list refresh in parallel
 		await Promise.all([sidebar?.refresh(), noteList?.refresh()]);
 
+		// Auto-cleanup orphaned attachments in the background
+		setTimeout(async () => {
+			if (get(editorDirty)) return; // skip if user is actively editing
+			try {
+				const orphans = await findOrphanedAttachments();
+				if (orphans.length > 0) {
+					if (get(editorDirty)) return; // re-check after async scan
+					const moved = await trashOrphanedAttachments(orphans.map((o) => o.name));
+					if (moved > 0) {
+						const toast = document.createElement('div');
+						toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--bg-secondary);color:var(--text-primary);padding:10px 18px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.15);border:1px solid var(--border-color);font-size:13px;z-index:10000;opacity:0;transition:opacity .3s;pointer-events:none';
+						toast.textContent = `Moved ${moved} orphaned attachment${moved > 1 ? 's' : ''} to trash`;
+						document.body.appendChild(toast);
+						requestAnimationFrame(() => (toast.style.opacity = '1'));
+						setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 4000);
+					}
+				}
+			} catch (_) {}
+		}, 3000);
+
 		// Restore the last session (view + open note) if enabled.
 		if ($appConfig?.restore_last_session) {
 			const vault = $appConfig?.active_vault;
@@ -679,7 +699,7 @@
 					}
 				}
 				tags.set(Array.from(tagMap.entries()).sort((a, b) => a[0].localeCompare(b[0])));
-			}, 3000);
+		}, 10000);
 			unlistenFileChange = await listen<FileEvent>('file-changed', () => {
 				debouncedRefresh();
 			});
