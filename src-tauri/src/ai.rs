@@ -434,12 +434,14 @@ async fn test_anthropic(api_key: &str, model: &str) -> Result<String, String> {
 }
 
 async fn test_openai(url: &str, api_key: Option<&str>, model: &str) -> Result<String, String> {
-    let client = Client::new();
+	let client = Client::new();
+	let is_gpt5 = model.starts_with("gpt-5");
+	let token_key = if is_gpt5 { "max_completion_tokens" } else { "max_tokens" };
 
-    let body = json!({
-        "model": model,
-        "max_tokens": 10,
-        "messages": [
+	let body = json!({
+		"model": model,
+		token_key: 10,
+		"messages": [
             {
                 "role": "user",
                 "content": "Hi"
