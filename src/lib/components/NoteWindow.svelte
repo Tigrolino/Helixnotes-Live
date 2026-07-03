@@ -9,8 +9,7 @@
 		editorDirty,
 		readOnly,
 		sourceMode,
-		theme,
-		customThemes
+		theme
 	} from '$lib/stores/app';
 	import { readNote } from '$lib/api';
 	import { keybindings, matchAction } from '$lib/keybindings';
@@ -18,7 +17,7 @@
 
 	let { notePath }: { notePath: string } = $props();
 
-	import { applyTheme } from '$lib/platform';
+	import { darkThemes } from '$lib/platform';
 
 	const appWindow = getCurrentWindow();
 	const isMac = navigator.platform.startsWith('Mac');
@@ -38,7 +37,17 @@
 	});
 
 	$effect(() => {
-		applyTheme($theme || 'system', $customThemes);
+		const t = $theme || 'system';
+		const namedThemes = ['solarized-light', 'solarized-dark', 'catppuccin', 'nord', 'tokyo-night', 'github-light', 'github-dark', 'dracula', 'blueberry', 'forest-green', 'gruvbox', 'midnight-tide', 'cherry-blossom', 'synthwave', 'ember', 'moonlit', 'light-coffee', 'dark-coffee', 'cotton-candy', 'crimson', 'cloud', 'peach', 'material-dark', 'material-light', 'monokai', 'rose-pine', 'everforest', 'horizon', 'cyberpunk', 'black', 'one-dark'];
+		const root = document.documentElement;
+		root.classList.remove('dark');
+		root.removeAttribute('data-theme');
+		if (namedThemes.includes(t)) {
+			root.setAttribute('data-theme', t);
+			if (darkThemes.includes(t)) root.classList.add('dark');
+		} else if (t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+			root.classList.add('dark');
+		}
 	});
 
 	let lastMouseDown = 0;
