@@ -2,7 +2,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { appConfig, vaultReady, theme } from '$lib/stores/app';
 	import { getAppConfig, openVault, setFontSize } from '$lib/api';
-	import { darkThemes } from '$lib/platform';
+	import { applyTheme } from '$lib/platform';
 	import { getCurrentWebview } from '@tauri-apps/api/webview';
 	import VaultPicker from '$lib/components/VaultPicker.svelte';
 	import AppLayout from '$lib/components/AppLayout.svelte';
@@ -120,16 +120,7 @@
 
 			// Apply theme immediately to prevent flash
 			const themeValue = config.theme || 'system';
-			const root = document.documentElement;
-			const namedThemes = ['solarized-light', 'solarized-dark', 'catppuccin', 'nord', 'tokyo-night', 'github-light', 'github-dark', 'dracula', 'blueberry', 'forest-green', 'gruvbox', 'midnight-tide', 'cherry-blossom', 'synthwave', 'ember', 'moonlit', 'light-coffee', 'dark-coffee', 'cotton-candy', 'crimson', 'cloud', 'peach', 'material-dark', 'material-light', 'monokai', 'rose-pine', 'everforest', 'horizon', 'cyberpunk', 'black', 'one-dark'];
-			root.classList.remove('dark');
-			root.removeAttribute('data-theme');
-			if (namedThemes.includes(themeValue)) {
-				root.setAttribute('data-theme', themeValue);
-				if (darkThemes.includes(themeValue)) root.classList.add('dark');
-			} else if (themeValue === 'dark' || (themeValue === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-				root.classList.add('dark');
-			}
+			applyTheme(themeValue, config.custom_themes);
 
 			// Apply saved font settings
 			if (config.font_size) {

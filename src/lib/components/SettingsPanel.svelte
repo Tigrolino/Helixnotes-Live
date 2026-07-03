@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { showSettings, theme, appConfig, activeVaultConfig, updateAvailable as globalUpdateAvailable, updateObj as globalUpdateObj, installType, settingsTab, vaultReady, androidApkUrl, checkForUpdateMobile, notebookSortMode, isManagedInstall, customThemes } from '$lib/stores/app';
 	import { setTheme, setAccentColor, setFontSize, setFontFamily, setLineHeight, setUiScale, setContentWidth, setGeneralSettings, importObsidian, createBackup, listBackups, restoreBackup, deleteBackup, setBackupSettings, setAiSettings, testAiConnection, setSyncSettings, testSyncConnection, syncNow, saveCustomTheme, deleteCustomTheme, exportCustomTheme, importCustomThemes } from '$lib/api';
-	import { darkThemes, isMobile, isAndroid } from '$lib/platform';
+	import { applyTheme, darkThemes, isMobile, isAndroid } from '$lib/platform';
 	import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 	import { listen } from '@tauri-apps/api/event';
 	import { getVersion } from '@tauri-apps/api/app';
@@ -583,33 +583,7 @@
 	}
 
 	function restoreCurrentTheme() {
-		// Re-apply the currently active theme to undo preview
-		const root = document.documentElement;
-		const varsToClear = ['--bg-primary','--bg-secondary','--bg-tertiary','--bg-hover','--bg-active','--bg-editor','--text-primary','--text-secondary','--border-color'];
-		root.classList.remove('dark');
-		root.removeAttribute('data-theme');
-		for (const v of varsToClear) root.style.removeProperty(v);
-		const namedThemes = ['solarized-light','solarized-dark','catppuccin','nord','tokyo-night','github-light','github-dark','dracula','blueberry','forest-green','gruvbox','midnight-tide','cherry-blossom','synthwave','ember','moonlit','light-coffee','dark-coffee','cotton-candy','crimson','cloud','peach','material-dark','material-light','monokai','rose-pine','everforest','horizon','cyberpunk','black','one-dark'];
-		if ($theme.startsWith('custom-')) {
-			const ct = $customThemes.find(c => c.id === $theme);
-			if (ct) {
-				root.style.setProperty('--bg-primary', ct.colors.bg_primary);
-				root.style.setProperty('--bg-secondary', ct.colors.bg_secondary);
-				root.style.setProperty('--bg-tertiary', ct.colors.bg_tertiary);
-				root.style.setProperty('--bg-hover', ct.colors.bg_hover);
-				root.style.setProperty('--bg-active', ct.colors.bg_active);
-				root.style.setProperty('--bg-editor', ct.colors.bg_editor);
-				root.style.setProperty('--text-primary', ct.colors.text_primary);
-				root.style.setProperty('--text-secondary', ct.colors.text_secondary);
-				root.style.setProperty('--border-color', ct.colors.border_color);
-				if (ct.is_dark) root.classList.add('dark');
-			}
-		} else if (namedThemes.includes($theme)) {
-			root.setAttribute('data-theme', $theme);
-			if (darkThemes.includes($theme)) root.classList.add('dark');
-		} else if ($theme === 'dark' || ($theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-			root.classList.add('dark');
-		}
+		applyTheme($theme, $customThemes);
 	}
 
 	async function saveCustomThemeEditor() {
