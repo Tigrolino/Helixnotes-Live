@@ -405,7 +405,7 @@ async fn test_anthropic(api_key: &str, model: &str) -> Result<String, String> {
 
     let body = json!({
         "model": model,
-        "max_tokens": 10,
+        "max_tokens": 20,
         "messages": [
             {
                 "role": "user",
@@ -440,7 +440,7 @@ async fn test_openai(url: &str, api_key: Option<&str>, model: &str) -> Result<St
 
 	let body = json!({
 		"model": model,
-		token_key: 10,
+		token_key: 20,
 		"messages": [
             {
                 "role": "user",
