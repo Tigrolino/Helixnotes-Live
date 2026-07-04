@@ -800,12 +800,12 @@
 						class:active={$viewMode === 'notebook' && $activeNotebook?.relative_path === ''}
 						onclick={selectUnfiled}
 					>
-						<span style="width:13px;flex-shrink:0"></span>
-						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.6">
-							<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-							<polyline points="14 2 14 8 20 8" />
-						</svg>
-						<span class="notebook-name">Unfiled Notes <span class="notebook-count">{$rootNoteCount}</span></span>
+					<span style="width:14px;flex-shrink:0"></span>
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.6">
+						<path d="M22 12h-6l-2 3h-4l-2-3H2" />
+						<path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+					</svg>
+					<span class="notebook-name">Unfiled Notes <span class="notebook-count">{$rootNoteCount}</span></span>
 					</button>
 				{/if}
 				{#each sortedNotebooks as nb (nb.path)}
@@ -942,7 +942,7 @@
 	{@const isCollapsed = $collapsedNotebooks.includes(nb.path)}
 	{@const iconSrc = getNotebookIconSrc(nb)}
 	{#if editingNotebook === nb.path}
-		<div class="notebook-item" style="padding-left: {8 + depth * 16}px">
+		<div class="notebook-item" style="padding-left: {depth * 16}px">
 			<input
 				type="text"
 				class="rename-input"
@@ -962,7 +962,7 @@
 			class:drop-target={dropTargetPath === nb.path && dropPosition === 'into'}
 			class:drop-above={dropTargetPath === nb.path && dropPosition === 'above'}
 			class:drop-below={dropTargetPath === nb.path && dropPosition === 'below'}
-			style="padding-left: {8 + depth * 16}px"
+			style="padding-left: {depth * 16}px"
 			data-nb-path={nb.path}
 			onclick={() => selectNotebook(nb)}
 			onkeydown={(e) => {
@@ -1028,13 +1028,20 @@
 			{:else}
 				<span class="chevron-spacer"></span>
 			{/if}
-			{#if iconSrc}
-				<img class="notebook-icon" src={iconSrc} alt="" />
-			{:else}
-				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.6">
-					<path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-				</svg>
-			{/if}
+		{#if iconSrc}
+			<img class="notebook-icon" src={iconSrc} alt="" />
+		{:else if isCollapsed || nb.children.length === 0}
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.6;flex-shrink:0">
+				<path d="M2 6h4"/><path d="M2 10h4"/><path d="M2 14h4"/><path d="M2 18h4"/>
+				<path d="M6 2h12a2 2 0 012 2v16a2 2 0 01-2 2H6a2 2 0 01-2-2V4a2 2 0 012-2z"/>
+			</svg>
+		{:else}
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.6;flex-shrink:0">
+				<path d="M2 6h4"/><path d="M2 10h4"/><path d="M2 14h4"/><path d="M2 18h4"/>
+				<path d="M6 2h12a2 2 0 012 2v16a2 2 0 01-2 2H6a2 2 0 01-2-2V4a2 2 0 012-2z"/>
+				<path d="M10 9h8"/><path d="M10 13h8"/><path d="M10 17h5"/>
+			</svg>
+		{/if}
 			<span class="notebook-name">{nb.name} <span class="notebook-count">{nb.note_count}</span></span>
 			{#if $notebookSortMode === 'manual'}
 				<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
@@ -1295,7 +1302,7 @@
 		align-items: center;
 		gap: 6px;
 		width: 100%;
-		padding: 5px 8px;
+		padding: 5px 8px 5px 0;
 		border: none;
 		background: none;
 		border-radius: 6px;
