@@ -942,7 +942,7 @@
 	{@const isCollapsed = $collapsedNotebooks.includes(nb.path)}
 	{@const iconSrc = getNotebookIconSrc(nb)}
 	{#if editingNotebook === nb.path}
-		<div class="notebook-item" style="padding-left: {depth * 16}px">
+		<div class="notebook-item" style="padding-left: {4 + depth * 16}px">
 			<input
 				type="text"
 				class="rename-input"
@@ -962,7 +962,7 @@
 			class:drop-target={dropTargetPath === nb.path && dropPosition === 'into'}
 			class:drop-above={dropTargetPath === nb.path && dropPosition === 'above'}
 			class:drop-below={dropTargetPath === nb.path && dropPosition === 'below'}
-			style="padding-left: {depth * 16}px"
+			style="padding-left: {4 + depth * 16}px"
 			data-nb-path={nb.path}
 			onclick={() => selectNotebook(nb)}
 			onkeydown={(e) => {
@@ -1302,7 +1302,7 @@
 		align-items: center;
 		gap: 6px;
 		width: 100%;
-		padding: 5px 8px 5px 0;
+		padding: 5px 8px 5px 4px;
 		border: none;
 		background: none;
 		border-radius: 6px;
