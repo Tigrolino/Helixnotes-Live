@@ -85,6 +85,13 @@ pub fn run() {
                 setup_tray(app)?;
             }
 
+            #[cfg(target_os = "macos")]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    fix_macos_traffic_lights(&window);
+                }
+            }
+
             // Check CLI args for a .md file path on initial launch
             #[cfg(desktop)]
             {
@@ -386,4 +393,47 @@ fn percent_decode(input: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&output).to_string()
+}
+
+#[cfg(target_os = "macos")]
+fn fix_macos_traffic_lights(window: &tauri::WebviewWindow) {
+    use objc2_app_kit::{NSView, NSWindow, NSWindowButton};
+
+    let ns_window_ptr = match window.ns_window() {
+        Ok(ptr) => ptr,
+        Err(_) => return,
+    };
+
+    let ns_window: &NSWindow = unsafe { &*(ns_window_ptr as *const NSWindow) };
+
+    let close = match ns_window.standardWindowButton(NSWindowButton::CloseButton) {
+        Some(btn) => btn,
+        None => return,
+    };
+    let miniaturize = match ns_window.standardWindowButton(NSWindowButton::MiniaturizeButton) {
+        Some(btn) => btn,
+        None => return,
+    };
+    let zoom = match ns_window.standardWindowButton(NSWindowButton::ZoomButton) {
+        Some(btn) => btn,
+        None => return,
+    };
+
+    let superview = match close.superview() {
+        Some(sv) => sv,
+        None => return,
+    };
+
+    let sv_height = NSView::frame(&superview).size.height;
+    let btn_height = NSView::frame(&close).size.height;
+    if sv_height <= 0.0 || btn_height <= 0.0 {
+        return;
+    }
+    let centered_y = (sv_height - btn_height) / 2.0;
+
+    for btn in [&close, &miniaturize, &zoom] {
+        let mut frame = NSView::frame(btn);
+        frame.origin.y = centered_y;
+        btn.setFrameOrigin(frame.origin);
+    }
 }
