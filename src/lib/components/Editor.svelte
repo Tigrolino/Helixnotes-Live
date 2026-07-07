@@ -8363,7 +8363,7 @@
 		overflow-x: auto;
 		background: none;
 		padding: 0;
-		font-size: 13px;
+		font-size: 0.93em;
 		line-height: 1.5;
 	}
 
