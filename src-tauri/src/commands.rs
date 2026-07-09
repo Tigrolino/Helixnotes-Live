@@ -1486,6 +1486,10 @@ fn xdg_open(arg: &str) -> Result<(), String> {
             .spawn()
             .map_err(|e| format!("Failed to open {}: {}", arg, e))?;
     }
+    #[cfg(mobile)]
+    {
+        let _ = arg;
+    }
     Ok(())
 }
 
@@ -2061,6 +2065,14 @@ pub fn get_install_type() -> String {
             return forced.to_string();
         }
     }
+
+    // On mobile (iOS/Android) the concept of install type is irrelevant and the
+    // Linux detection below would attempt std::process::Command which is forbidden
+    // in the iOS sandbox. Return early.
+    if cfg!(mobile) {
+        return "mobile".to_string();
+    }
+
     if cfg!(target_os = "macos") {
         "macos".to_string()
     } else if cfg!(target_os = "windows") {
