@@ -473,7 +473,6 @@ pub fn get_all_note_titles(state: State<'_, AppState>) -> Result<Vec<NoteTitleEn
         if !path.is_file() {
             continue;
         }
-        let path_str = path.to_string_lossy();
         if path.extension().and_then(|e| e.to_str()) != Some("md") {
             continue;
         }
@@ -492,9 +491,16 @@ pub fn get_all_note_titles(state: State<'_, AppState>) -> Result<Vec<NoteTitleEn
                 .to_string()
         };
 
+        // Store vault-relative path with forward slashes for cross-platform portability.
+        // Absolute paths (e.g. C:\Users\...) break when the vault is synced to another device.
+        let rel = path
+            .strip_prefix(vault)
+            .map(|r| r.to_string_lossy().replace('\\', "/").to_string())
+            .unwrap_or_else(|_| path.to_string_lossy().to_string());
+
         entries.push(NoteTitleEntry {
             title,
-            path: path_str.to_string(),
+            path: rel,
         });
     }
 

@@ -549,6 +549,50 @@
 		return resolved.join('/');
 	}
 
+	/**
+	 * Resolve a note path (which may be vault-relative or absolute) to a full
+	 * filesystem path for file I/O operations (readNote, renameNote, etc.).
+	 *
+	 * Wikilink data-path attributes store vault-relative paths (e.g. "folder/note.md")
+	 * for cross-platform portability. This helper joins them with the active vault
+	 * root so the Rust backend receives the full path it expects.
+	 *
+	 * Legacy absolute paths (from older Windows builds) are passed through as-is
+	 * so they don't break before the migration pass rewrites them.
+	 */
+	function resolveNotePath(path: string): string {
+		if (!path) return path;
+		const vaultRoot = $appConfig?.active_vault;
+		if (!vaultRoot) return path;
+		// Normalize separators for comparison
+		const norm = path.replace(/\\/g, '/');
+		const root = vaultRoot.replace(/\\/g, '/');
+		// Already absolute (starts with vault root, or has a Windows drive letter, or starts with /)
+		if (norm.startsWith(root + '/')) return path;
+		if (/^[A-Za-z]:[\\/]/.test(path)) return path;
+		if (path.startsWith('/')) return path;
+		// Relative: join with vault root
+		return vaultRoot + '/' + path;
+	}
+
+	/**
+	 * Normalize a data-path value to a vault-relative path with forward slashes.
+	 * Handles legacy absolute paths (from older Windows builds) and Windows
+	 * backslashes so wikilinks survive cross-device sync.
+	 */
+	function normalizeWikiPath(path: string): string {
+		if (!path) return '';
+		const vaultRoot = $appConfig?.active_vault;
+		let norm = path.replace(/\\/g, '/');
+		if (vaultRoot) {
+			const root = vaultRoot.replace(/\\/g, '/');
+			if (norm.startsWith(root + '/')) {
+				norm = norm.slice(root.length + 1);
+			}
+		}
+		return norm;
+	}
+
 	const CustomImage = Image.extend({
 		addAttributes() {
 			return {
@@ -2173,13 +2217,10 @@
 	});
 
 	function wikiLinkFolderPath(entry: NoteTitleEntry): string {
-		const vaultRoot = $appConfig?.active_vault;
-		if (!vaultRoot || !entry.path) return '';
-		// Normalize Windows backslashes so the folder subtitle shows there too.
+		if (!entry.path) return '';
+		// entry.path is vault-relative (e.g. "folder/note.md"); normalize Windows backslashes.
 		const path = entry.path.replace(/\\/g, '/');
-		const root = vaultRoot.replace(/\\/g, '/');
-		const rel = path.startsWith(root + '/') ? path.slice(root.length + 1) : path;
-		const parts = rel.split('/');
+		const parts = path.split('/');
 		// Return parent folder(s), excluding the filename
 		return parts.length > 1 ? parts.slice(0, -1).join('/') + '/' : '';
 	}
@@ -2201,9 +2242,9 @@
 	}
 
 	function wikiLinkRelPath(entry: NoteTitleEntry): string | null {
-		const vaultRoot = $appConfig?.active_vault;
-		if (!vaultRoot || !entry.path || !entry.path.startsWith(vaultRoot + '/')) return null;
-		return entry.path.slice(vaultRoot.length + 1).replace(/\.md$/, '');
+		if (!entry.path) return null;
+		// entry.path is vault-relative (e.g. "folder/note.md"); strip .md for the ref.
+		return entry.path.replace(/\\/g, '/').replace(/\.md$/, '');
 	}
 
 	// Scan the document for wiki-link marks whose visible text has been changed by
@@ -2234,7 +2275,8 @@
 
 		for (const item of toRename) {
 			try {
-				const newPath = await renameNote(item.mark.attrs.path, item.newTitle);
+				const absPath = resolveNotePath(item.mark.attrs.path);
+				const newPath = await renameNote(absPath, item.newTitle);
 				// Update the mark attrs in the editor (title + path) so the next save
 				// serialises [[NewTitle]] and doesn't re-trigger the rename check
 				if (editor) {
@@ -2314,6 +2356,21 @@
 			};
 		},
 		parseHTML() {
+			// Normalize legacy absolute paths in data-path to vault-relative.
+			// Older Windows builds wrote absolute paths (C:\Users\...) into wikilink
+			// data-path attributes, which break when the vault is synced to another device.
+			const normalizePath = (rawPath: string | null): string | null => {
+				if (!rawPath) return null;
+				const vaultRoot = $appConfig?.active_vault;
+				let norm = rawPath.replace(/\\/g, '/');
+				if (vaultRoot) {
+					const root = vaultRoot.replace(/\\/g, '/');
+					if (norm.startsWith(root + '/')) {
+						norm = norm.slice(root.length + 1);
+					}
+				}
+				return norm;
+			};
 			return [
 				{
 					tag: 'span[data-wiki-link]',
@@ -2322,7 +2379,7 @@
 						const text = el.textContent || '';
 						return {
 							title,
-							path: el.getAttribute('data-path') || null,
+							path: normalizePath(el.getAttribute('data-path')),
 							// Detect alias from the HTML: if the visible text differs from the
 							// stored title the link was serialised as [[ref|display]]
 							aliased: el.getAttribute('data-aliased') === '1' || (!!title && text !== title),
@@ -2336,7 +2393,7 @@
 						const text = el.textContent || '';
 						return {
 							title,
-							path: el.getAttribute('data-path') || null,
+							path: normalizePath(el.getAttribute('data-path')),
 							aliased: el.getAttribute('data-aliased') === '1' || (!!title && text !== title),
 						};
 					},
@@ -2533,14 +2590,16 @@
 	}
 
 	async function navigateToWikiLink(path: string, title: string, clickEvent?: MouseEvent) {
+		// Normalize legacy absolute paths in data-path to vault-relative (issue: cross-device sync)
+		path = normalizeWikiPath(path);
 		// title may contain #heading or ^block anchors - strip for note lookup
 		const noteTitle = title.replace(/#.*$/, '').replace(/\^.*$/, '').trim();
 		if (!path) {
 			// Try path-based resolution first (for disambiguated refs like "folder/note")
-			const vaultRoot = $appConfig?.active_vault;
-			if (noteTitle.includes('/') && vaultRoot) {
-				const fullPath = vaultRoot + '/' + noteTitle + '.md';
-				const pathMatch = wikiLinkTitlesCache.find(e => e.path === fullPath);
+			if (noteTitle.includes('/')) {
+				// entry.path is vault-relative (e.g. "folder/note.md"); match against that
+				const relPath = noteTitle + '.md';
+				const pathMatch = wikiLinkTitlesCache.find(e => e.path === relPath);
 				if (pathMatch) {
 					path = pathMatch.path;
 				} else {
@@ -2575,7 +2634,7 @@
 				// Create the note (use clean title, not the anchor ref)
 				const cleanTitle = noteTitle.includes('/') ? noteTitle.split('/').pop()! : noteTitle;
 				const notebookRel = $activeNotePath
-					? $activeNotePath.substring(($appConfig?.active_vault?.length ?? 0) + 1).split('/').slice(0, -1).join('/')
+					? $activeNotePath.replace(/\\/g, '/').replace(($appConfig?.active_vault ?? '').replace(/\\/g, '/') + '/', '').split('/').slice(0, -1).join('/')
 					: null;
 				try {
 					// Save the current note before navigating away
@@ -2596,9 +2655,10 @@
 			}
 		}
 		try {
-			const content = await readNote(path);
+			const absPath = resolveNotePath(path);
+			const content = await readNote(absPath);
 			$activeNote = { ...content, content: content.content };
-			$activeNotePath = path;
+			$activeNotePath = absPath;
 		} catch (e) {
 			// Note at path no longer exists (deleted/moved). Refresh cache and
 			// retry as unresolved so the user can recreate it from the link.
@@ -2610,9 +2670,10 @@
 	async function navigateToWikiLinkDirect(entry: NoteTitleEntry) {
 		wikiLinkNavDisambig = null;
 		try {
-			const content = await readNote(entry.path);
+			const absPath = resolveNotePath(entry.path);
+			const content = await readNote(absPath);
 			$activeNote = { ...content, content: content.content };
-			$activeNotePath = entry.path;
+			$activeNotePath = absPath;
 		} catch (e) {
 			console.error('Failed to navigate to wiki-link:', e);
 		}
@@ -3791,12 +3852,12 @@
 				const display = (pipeIdx >= 0 ? raw.slice(pipeIdx + 1) : noteRef).trim();
 				// Strip #heading and ^block anchors for title matching
 				const titleForLookup = noteRef.replace(/#.*$/, '').replace(/\^.*$/, '').trim();
-				// Try to resolve: first by vault-relative path (for disambiguated links), then by title
-				const vaultRoot = $appConfig?.active_vault ?? '';
+				// Try to resolve: first by vault-relative path (for disambiguated links), then by title.
+				// entry.path is vault-relative (e.g. "folder/note.md"); match against that.
 				let match: NoteTitleEntry | undefined;
-				if (titleForLookup.includes('/') && vaultRoot) {
-					const fullPath = vaultRoot + '/' + titleForLookup + '.md';
-					match = wikiLinkTitlesCache.find(e => e.path === fullPath);
+				if (titleForLookup.includes('/')) {
+					const relPath = titleForLookup + '.md';
+					match = wikiLinkTitlesCache.find(e => e.path === relPath);
 				}
 				if (!match) {
 					// Fallback: resolve by title (use the last segment if path-based)
@@ -4413,15 +4474,19 @@
 	}
 
 	function linkModalSelectNote(entry: NoteTitleEntry) {
-		// Build a relative .md path from the selected note and confirm immediately
+		// Build a relative .md path from the selected note and confirm immediately.
+		// entry.path is vault-relative (e.g. "folder/note.md"); currentNote is absolute.
 		const vaultRoot = $appConfig?.active_vault;
 		const currentNote = $activeNotePath;
 		if (vaultRoot && currentNote) {
-			const noteDir = currentNote.substring(0, currentNote.lastIndexOf('/'));
-			const targetRel = entry.path.startsWith(vaultRoot) ? entry.path.substring(vaultRoot.length + 1) : entry.path;
-			const currentRel = noteDir.startsWith(vaultRoot) ? noteDir.substring(vaultRoot.length + 1) : noteDir;
-			const targetParts = targetRel.split('/');
-			const currentParts = currentRel ? currentRel.split('/') : [];
+			// Strip vault root from currentNote to get its relative path
+			const normCurrent = currentNote.replace(/\\/g, '/');
+			const normRoot = vaultRoot.replace(/\\/g, '/');
+			const currentRel = normCurrent.startsWith(normRoot + '/') ? normCurrent.slice(normRoot.length + 1) : normCurrent;
+			const noteDir = currentRel.substring(0, currentRel.lastIndexOf('/'));
+			// entry.path is already relative
+			const targetParts = entry.path.split('/');
+			const currentParts = noteDir ? noteDir.split('/') : [];
 			let common = 0;
 			while (common < targetParts.length && common < currentParts.length && targetParts[common] === currentParts[common]) common++;
 			const ups = currentParts.length - common;
