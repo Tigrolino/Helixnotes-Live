@@ -1256,38 +1256,45 @@
 				container.appendChild(btn);
 			}
 
-			async function svgToPngBlob(svgEl: SVGElement, scale = 2): Promise<Blob> {
-				const clone = svgEl.cloneNode(true) as SVGElement;
-				if (!clone.getAttribute('xmlns')) clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-				const svgString = new XMLSerializer().serializeToString(clone);
-				const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
-				const url = URL.createObjectURL(svgBlob);
-				try {
-					const img = new window.Image();
-					await new Promise<void>((resolve, reject) => {
-						img.onload = () => resolve();
-						img.onerror = () => reject(new Error('SVG image load failed'));
-						img.src = url;
-					});
-					const bbox = svgEl.getBoundingClientRect();
-					const width = Math.max(Math.round(bbox.width || 800), 100);
-					const height = Math.max(Math.round(bbox.height || 600), 100);
-					const canvas = document.createElement('canvas');
-					canvas.width = width * scale;
-					canvas.height = height * scale;
-					const ctx = canvas.getContext('2d');
-					if (!ctx) throw new Error('Canvas not supported');
-					ctx.scale(scale, scale);
-					ctx.fillStyle = document.documentElement.classList.contains('dark') ? '#1e1e1e' : '#ffffff';
-					ctx.fillRect(0, 0, width, height);
-					ctx.drawImage(img, 0, 0, width, height);
-					return await new Promise<Blob>((resolve, reject) => {
-						canvas.toBlob((b) => b ? resolve(b) : reject(new Error('toBlob failed')), 'image/png');
-					});
-				} finally {
-					URL.revokeObjectURL(url);
+		async function svgToPngBlob(svgEl: SVGElement, scale = 2): Promise<Blob> {
+			const clone = svgEl.cloneNode(true) as SVGElement;
+			if (!clone.getAttribute('xmlns')) clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+			if (!clone.getAttribute('xmlns:xlink')) clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+
+			// Sanitize: remove external resource references that taint canvas on WebKitGTK ("The operation is insecure")
+			clone.querySelectorAll('image').forEach((img) => {
+				const href = img.getAttribute('href') || img.getAttribute('xlink:href') || '';
+				if (href.startsWith('http') || href.startsWith('//') || href.startsWith('data:')) {
+					img.remove();
 				}
-			}
+			});
+
+			const svgString = new XMLSerializer().serializeToString(clone);
+			// Use data URL instead of blob URL — blob: URLs taint canvas on some WebKitGTK versions
+			const dataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgString);
+
+			const img = new window.Image();
+			await new Promise<void>((resolve, reject) => {
+				img.onload = () => resolve();
+				img.onerror = () => reject(new Error('SVG image load failed'));
+				img.src = dataUrl;
+			});
+			const bbox = svgEl.getBoundingClientRect();
+			const width = Math.max(Math.round(bbox.width || 800), 100);
+			const height = Math.max(Math.round(bbox.height || 600), 100);
+			const canvas = document.createElement('canvas');
+			canvas.width = width * scale;
+			canvas.height = height * scale;
+			const ctx = canvas.getContext('2d');
+			if (!ctx) throw new Error('Canvas not supported');
+			ctx.scale(scale, scale);
+			ctx.fillStyle = document.documentElement.classList.contains('dark') ? '#1e1e1e' : '#ffffff';
+			ctx.fillRect(0, 0, width, height);
+			ctx.drawImage(img, 0, 0, width, height);
+			return await new Promise<Blob>((resolve, reject) => {
+				canvas.toBlob((b) => b ? resolve(b) : reject(new Error('toBlob failed')), 'image/png');
+			});
+		}
 
 			function flashToast(container: HTMLElement, msg: string) {
 				const existing = container.querySelector('.mermaid-render-toast');
@@ -1299,49 +1306,67 @@
 				setTimeout(() => { if (toast.parentElement) toast.remove(); }, 1500);
 			}
 
-			async function copyDiagram(container: HTMLElement) {
-				const svgEl = container.querySelector('svg') as SVGElement | null;
-				if (!svgEl) return;
-				try {
-					const blob = await svgToPngBlob(svgEl);
-					const buf = new Uint8Array(await blob.arrayBuffer());
-					await copyPngToClipboard(buf);
-					flashToast(container, 'Copied');
-				} catch (e: any) {
-					console.error('[Mermaid] copy failed', e);
-					flashToast(container, 'Copy failed: ' + (e?.message || String(e)));
-				}
-			}
-
-			async function saveDiagram(container: HTMLElement) {
-				const svgEl = container.querySelector('svg') as SVGElement | null;
-				if (!svgEl) return;
-				try {
-					const dest = await saveDialog({
-						defaultPath: 'diagram.png',
-						filters: [
-							{ name: 'PNG Image', extensions: ['png'] },
-							{ name: 'SVG Image', extensions: ['svg'] },
-						],
-					});
-					if (!dest) return;
-					const lower = dest.toLowerCase();
-					if (lower.endsWith('.svg')) {
+		async function copyDiagram(container: HTMLElement) {
+			const svgEl = container.querySelector('svg') as SVGElement | null;
+			if (!svgEl) return;
+			try {
+				const blob = await svgToPngBlob(svgEl);
+				const buf = new Uint8Array(await blob.arrayBuffer());
+				await copyPngToClipboard(buf);
+				flashToast(container, 'Copied');
+			} catch (e: any) {
+				console.error('[Mermaid] copy failed', e);
+				// SecurityError fallback: canvas tainted by WebKitGTK — copy SVG source as text instead
+				if (e instanceof DOMException && (e.name === 'SecurityError' || e.code === 18)) {
+					try {
 						const clone = svgEl.cloneNode(true) as SVGElement;
 						if (!clone.getAttribute('xmlns')) clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
 						const svgString = new XMLSerializer().serializeToString(clone);
-						await writeBytesTo(dest, new TextEncoder().encode(svgString));
-					} else {
-						const blob = await svgToPngBlob(svgEl);
-						const buf = new Uint8Array(await blob.arrayBuffer());
-						await writeBytesTo(dest, buf);
+						await navigator.clipboard.writeText(svgString);
+						flashToast(container, 'Copied SVG source (PNG blocked by browser security)');
+					} catch (e2: any) {
+						flashToast(container, 'Copy failed: ' + (e2?.message || String(e2)));
 					}
-					flashToast(container, 'Saved');
-				} catch (e: any) {
-					console.error('[Mermaid] save failed', e);
+				} else {
+					flashToast(container, 'Copy failed: ' + (e?.message || String(e)));
+				}
+			}
+		}
+
+		async function saveDiagram(container: HTMLElement) {
+			const svgEl = container.querySelector('svg') as SVGElement | null;
+			if (!svgEl) return;
+			try {
+				const dest = await saveDialog({
+					defaultPath: 'diagram.png',
+					filters: [
+						{ name: 'PNG Image', extensions: ['png'] },
+						{ name: 'SVG Image', extensions: ['svg'] },
+					],
+				});
+				if (!dest) return;
+				const lower = dest.toLowerCase();
+				if (lower.endsWith('.svg')) {
+					const clone = svgEl.cloneNode(true) as SVGElement;
+					if (!clone.getAttribute('xmlns')) clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+					const svgString = new XMLSerializer().serializeToString(clone);
+					await writeBytesTo(dest, new TextEncoder().encode(svgString));
+				} else {
+					const blob = await svgToPngBlob(svgEl);
+					const buf = new Uint8Array(await blob.arrayBuffer());
+					await writeBytesTo(dest, buf);
+				}
+				flashToast(container, 'Saved');
+			} catch (e: any) {
+				console.error('[Mermaid] save failed', e);
+				// SecurityError fallback: canvas tainted by WebKitGTK — tell user to use SVG format
+				if (e instanceof DOMException && (e.name === 'SecurityError' || e.code === 18)) {
+					flashToast(container, 'PNG blocked by browser security — try SVG format');
+				} else {
 					flashToast(container, 'Save failed: ' + (e?.message || String(e)));
 				}
 			}
+		}
 
 			function addToolbar(container: HTMLElement, source: string) {
 				const toolbar = document.createElement('div');
