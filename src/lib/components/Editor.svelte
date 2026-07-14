@@ -3669,6 +3669,7 @@
 
 	export function openNoteSearch() {
 		noteSearchOpen = true;
+		tick().then(() => noteSearchInput?.focus());
 	}
 
 	function closeNoteSearch() {
