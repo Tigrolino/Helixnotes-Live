@@ -1157,7 +1157,13 @@
 	.mobile-shell {
 		display: flex;
 		flex-direction: column;
-		height: 100vh;
+		height: 100dvh;
+		box-sizing: border-box;
+		padding:
+			env(safe-area-inset-top, 0px)
+			env(safe-area-inset-right, 0px)
+			env(safe-area-inset-bottom, 0px)
+			env(safe-area-inset-left, 0px);
 		overflow: hidden;
 		background: var(--bg-primary);
 	}
