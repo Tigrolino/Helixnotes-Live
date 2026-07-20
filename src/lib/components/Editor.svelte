@@ -48,6 +48,7 @@
 	import { WrapSelectedText } from '$lib/editor/extensions/wrapSelectedText';
 	import { calloutGroup, calloutIcon, calloutLabel, CALLOUT_MENU, transformCalloutBlockquotes, serializeCallout } from '$lib/editor/callouts';
 	import { wrapTextareaSelection } from '$lib/editor/source/selectionPairs';
+	import { relativePath } from '$lib/utils/paths';
 	import GraphView from './GraphView.svelte';
 	import TagSuggestInput from './TagSuggestInput.svelte';
 	import { isMobile, isAndroid } from '$lib/platform';
@@ -3697,7 +3698,7 @@
 			}
 		}
 		// Convert asset:// URLs back to relative paths for saving
-		if (!src.startsWith('asset:') && !src.startsWith('http://asset.localhost')) return src;
+		if (!src.startsWith('asset:') && !src.startsWith('http://asset.localhost') && !src.startsWith('https://asset.localhost')) return src;
 		let absPath = '';
 		try {
 			const url = new URL(src);
@@ -3707,18 +3708,20 @@
 		}
 		// Clean up any leading double/triple slashes (URL parsing artifact)
 		absPath = absPath.replace(/^\/{2,}/, '/');
-		// Make relative to note directory (matches how resolveImageSrc works)
+		absPath = absPath.replace(/^\/([A-Za-z]:\/)/, '$1').replace(/\\/g, '/');
+		// Preserve note-relative paths, including parent-directory segments.
 		const notePath = $activeNotePath;
-		if (notePath) {
-			const noteDir = notePath.substring(0, notePath.lastIndexOf('/'));
-			if (absPath.startsWith(noteDir + '/')) {
-				return absPath.substring(noteDir.length + 1);
-			}
-		}
-		// Fallback: make relative to vault root
-		const vaultRoot = $appConfig?.active_vault;
+		const vaultRoot = $appConfig?.active_vault?.replace(/\\/g, '/').replace(/\/$/, '');
 		if (vaultRoot && absPath.startsWith(vaultRoot + '/')) {
-			return absPath.substring(vaultRoot.length + 1);
+			const vaultRelative = absPath.substring(vaultRoot.length + 1);
+			// HelixNotes-managed attachments have explicit vault-root semantics.
+			if (vaultRelative.startsWith('.helixnotes/')) return vaultRelative;
+			if (notePath) {
+				const normalizedNotePath = notePath.replace(/\\/g, '/');
+				const noteDir = normalizedNotePath.substring(0, normalizedNotePath.lastIndexOf('/'));
+				return relativePath(noteDir, absPath);
+			}
+			return vaultRelative;
 		}
 		return absPath;
 	}

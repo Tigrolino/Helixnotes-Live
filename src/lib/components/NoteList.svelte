@@ -787,6 +787,19 @@
 		}
 	}
 
+	function isFiled(note: NoteEntry): boolean {
+		const vaultRoot = $appConfig?.active_vault?.replace(/\\/g, '/').replace(/\/$/, '');
+		if (!vaultRoot) return false;
+		const normalizedPath = note.path.replace(/\\/g, '/');
+		const noteDir = normalizedPath.substring(0, normalizedPath.lastIndexOf('/'));
+		return noteDir !== vaultRoot;
+	}
+
+	function unfileNote(note: NoteEntry) {
+		const vaultRoot = $appConfig?.active_vault;
+		if (vaultRoot) handleMoveNote(note, vaultRoot);
+	}
+
 	function clampMenu(x: number, y: number, menuWidth = 220, menuHeight = 400): { x: number; y: number } {
 		if (x + menuWidth > window.innerWidth) x = window.innerWidth - menuWidth - 8;
 		if (y + menuHeight > window.innerHeight) y = window.innerHeight - menuHeight - 8;
@@ -1535,6 +1548,14 @@
 				</svg>
 				Move to...
 			</button>
+			{#if isFiled(contextMenu.note)}
+			<button onclick={() => unfileNote(contextMenu!.note)}>
+				<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+					<path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/><path d="M9 13h6"/>
+				</svg>
+				Unfile Note
+			</button>
+			{/if}
 			{#if !isMobile}
 			<button onclick={async () => { const n = contextMenu!.note; contextMenu = null; await selectNote(n); setTimeout(() => window.print(), 300); }}>
 				<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
