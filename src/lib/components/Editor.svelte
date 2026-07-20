@@ -2793,7 +2793,8 @@
 		// Standard markdown: resolve relative paths against the note's directory
 		const notePath = $activeNotePath;
 		if (notePath) {
-			const noteDir = notePath.substring(0, notePath.lastIndexOf('/'));
+			const normalizedNotePath = notePath.replace(/\\/g, '/');
+			const noteDir = normalizedNotePath.substring(0, normalizedNotePath.lastIndexOf('/'));
 			return convertFileSrc(normalizePath(`${noteDir}/${decoded}`));
 		}
 		// Last fallback: vault root
