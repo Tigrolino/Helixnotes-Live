@@ -1678,19 +1678,6 @@
 		padding: 4px;
 	}
 
-	.list-content::-webkit-scrollbar {
-		width: 8px;
-	}
-
-	.list-content::-webkit-scrollbar-thumb {
-		background: var(--text-tertiary);
-		border-radius: 4px;
-	}
-
-	.list-content::-webkit-scrollbar-thumb:hover {
-		background: var(--text-secondary);
-	}
-
 	.note-list-section {
 		padding: 14px 12px 4px;
 		font-size: 0.7rem;

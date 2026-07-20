@@ -8087,19 +8087,6 @@
 		margin-right: 8px;
 	}
 
-	.editor-body::-webkit-scrollbar {
-		width: 8px;
-	}
-
-	.editor-body::-webkit-scrollbar-thumb {
-		background: var(--text-tertiary);
-		border-radius: 4px;
-	}
-
-	.editor-body::-webkit-scrollbar-thumb:hover {
-		background: var(--text-secondary);
-	}
-
 	.editor-body:has(.source-editor) {
 		overflow: hidden;
 	}
@@ -8397,7 +8384,7 @@
 	}
 
 	:global(.tiptap-wrapper .tiptap p) {
-		margin: 0 0 0.75em;
+		margin: 0 0 0.4em;
 		line-height: var(--editor-line-height, 1.65);
 	}
 
