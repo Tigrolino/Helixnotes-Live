@@ -3228,10 +3228,11 @@
 		let changed = false;
 		state.doc.descendants((node: any, pos: number) => {
 			if (node.type.name === 'tableCell' || node.type.name === 'tableHeader') {
-				if (node.attrs.backgroundColor || (node.attrs.colspan && node.attrs.colspan > 1) || (node.attrs.rowspan && node.attrs.rowspan > 1)) {
+				if (node.attrs.backgroundColor || node.attrs.colwidth || (node.attrs.colspan && node.attrs.colspan > 1) || (node.attrs.rowspan && node.attrs.rowspan > 1)) {
 					tr = tr.setNodeMarkup(pos, undefined, {
 						...node.attrs,
 						backgroundColor: null,
+						colwidth: null,
 						colspan: 1,
 						rowspan: 1,
 					});
@@ -3306,17 +3307,22 @@
 			case 'pageBreak':
 				return '<div style="page-break-after: always;"></div>\n';
 			case 'table': {
-				// Check if any cell has styling (background color) or if there are merged cells
 				let hasStyling = false;
+				const firstRow = node.firstChild;
+				let hasHeaderRow = !!firstRow && firstRow.childCount > 0;
+				firstRow?.forEach((cell: any) => {
+					if (cell.type.name !== 'tableHeader') hasHeaderRow = false;
+				});
 				node.descendants((child: any) => {
 					if (child.type.name === 'tableCell' || child.type.name === 'tableHeader') {
 						if (child.attrs.backgroundColor) hasStyling = true;
+						if (child.attrs.colwidth) hasStyling = true;
 						if (child.attrs.colspan && child.attrs.colspan > 1) hasStyling = true;
 						if (child.attrs.rowspan && child.attrs.rowspan > 1) hasStyling = true;
 					}
 					return true;
 				});
-				if (hasStyling) {
+				if (hasStyling || !hasHeaderRow) {
 					const tempDiv = document.createElement('div');
 					const frag = DOMSerializer.fromSchema(editor!.schema).serializeNode(node);
 					tempDiv.appendChild(frag);
@@ -3709,12 +3715,10 @@
 		// Clean up any leading double/triple slashes (URL parsing artifact)
 		absPath = absPath.replace(/^\/{2,}/, '/');
 		absPath = absPath.replace(/^\/([A-Za-z]:\/)/, '$1').replace(/\\/g, '/');
-		// Preserve note-relative paths, including parent-directory segments.
 		const notePath = $activeNotePath;
 		const vaultRoot = $appConfig?.active_vault?.replace(/\\/g, '/').replace(/\/$/, '');
 		if (vaultRoot && absPath.startsWith(vaultRoot + '/')) {
 			const vaultRelative = absPath.substring(vaultRoot.length + 1);
-			// HelixNotes-managed attachments have explicit vault-root semantics.
 			if (vaultRelative.startsWith('.helixnotes/')) return vaultRelative;
 			if (notePath) {
 				const normalizedNotePath = notePath.replace(/\\/g, '/');
@@ -4707,7 +4711,7 @@
 					if (resolved.node(d).type.name === 'table') {
 						resolved.node(d).descendants((n: any) => {
 							if (n.type.name === 'tableCell' || n.type.name === 'tableHeader') {
-								if (n.attrs.backgroundColor || (n.attrs.colspan > 1) || (n.attrs.rowspan > 1)) hasStyling = true;
+								if (n.attrs.backgroundColor || n.attrs.colwidth || (n.attrs.colspan > 1) || (n.attrs.rowspan > 1)) hasStyling = true;
 							}
 							return true;
 						});
@@ -7020,7 +7024,7 @@
 			</div>
 			<div class="table-ctx-sep"></div>
 			{#if tableContextMenu.hasStyling}
-			<button onclick={resetTableToMarkdown} title="Strip cell colors and merged cells, output as plain markdown">
+			<button onclick={resetTableToMarkdown} title="Strip cell colors, merged cells, and custom widths, output as plain markdown">
 				<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 11-3-6.7"/><polyline points="21 4 21 10 15 10"/></svg>
 				Reset to Markdown
 			</button>
@@ -9660,7 +9664,7 @@
 
 	:global(.tiptap-wrapper .tiptap table) {
 		border-collapse: collapse;
-		width: 100%;
+		width: auto;
 		table-layout: fixed;
 		overflow: hidden;
 	}
