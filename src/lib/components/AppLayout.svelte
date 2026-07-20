@@ -252,11 +252,11 @@
 	// Tasks view: the editor pane shows a placeholder until a task is opened from the list.
 	let taskNoteOpened = $state(false);
 
-	function handleNoteSelected(path: string, content: string) {
+	function handleNoteSelected(path: string, content: string, task?: TaskItem) {
 		// Selecting a real vault note exits viewer mode
 		$viewerNote = null;
 		taskNoteOpened = true;
-		editor?.loadNote(path, content);
+		editor?.loadNote(path, content, task);
 		if (isMobile) $mobileView = 'editor';
 	}
 

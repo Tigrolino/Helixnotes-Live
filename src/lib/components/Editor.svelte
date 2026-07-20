@@ -41,7 +41,7 @@
 	import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 	import { activeNote, activeNotePath, appConfig, editorDirty, sourceMode, focusMode, readOnly, quickAccessPaths, notes, navHistory, canGoBack, canGoForward, viewerNote, notebooks, outlineWidth } from '$lib/stores/app';
 	import { saveNote, saveImage, saveAttachment, readClipboardImage, addQuickAccess, removeQuickAccess, getQuickAccess, getNoteVersions, getNoteVersionContent, createVersion, aiAsk, getAllNoteTitles, readNote, renameNote } from '$lib/api';
-	import type { VersionEntry, AiStreamEvent, NoteTitleEntry } from '$lib/types';
+	import type { VersionEntry, AiStreamEvent, NoteTitleEntry, TaskItem as TaskRecord } from '$lib/types';
 	import { listen } from '@tauri-apps/api/event';
 	import { debounce } from '$lib/utils/debounce';
 	import { encryptSecretText, decryptSecretText, readSecretTitle } from '$lib/utils/secrets';
@@ -86,6 +86,13 @@
 	let titleWasStripped = false;
 	let strippedTitle = '';
 	let strippedHeadingPrefix = '';
+	let taskRevealTimer: ReturnType<typeof setTimeout> | null = null;
+	let taskRevealElement: HTMLElement | null = null;
+	let taskRevealRequest = 0;
+	const taskRevealPluginKey = new PluginKey('taskReveal');
+	type TaskRevealTarget = { sourceOrdinal: number; richOrdinal: number | null };
+	const TASK_LINE_RE = /^\s*[-*]\s\[[ xX]\]\s+.+?\s*$/;
+	const RICH_TASK_LINE_RE = /^\s*-\s\[(?:x| )\]\s+.+?\s*$/;
 
 	let headingDropdown = $state(false);
 	let colorDropdown = $state(false);
@@ -100,6 +107,112 @@
 		requestAnimationFrame(() => {
 			editorBody.scrollTop = editorBody.scrollHeight;
 		});
+	}
+
+	function clearTaskReveal() {
+		if (taskRevealTimer) clearTimeout(taskRevealTimer);
+		taskRevealTimer = null;
+		taskRevealElement?.classList.remove('task-target-source');
+		taskRevealElement = null;
+		if (editor && !editor.isDestroyed) {
+			editor.view.dispatch(editor.state.tr.setMeta(taskRevealPluginKey, DecorationSet.empty));
+		}
+	}
+
+	function resolveTaskTarget(task: TaskRecord, content: string): TaskRevealTarget | null {
+		const lines = content.split(/\r?\n/).map((line) => line.replace(/\r$/, ''));
+		const rawLine = task.raw_line.replace(/\r$/, '');
+		const exactLines = lines.flatMap((line, index) => line === rawLine ? [index] : []);
+		const line = lines[task.line] === rawLine
+			? task.line
+			: exactLines.length === 1 ? exactLines[0] : null;
+		if (line === null || !TASK_LINE_RE.test(lines[line])) return null;
+
+		let sourceOrdinal = -1;
+		let richOrdinal = -1;
+		for (let index = 0; index <= line; index++) {
+			if (TASK_LINE_RE.test(lines[index])) sourceOrdinal++;
+			if (RICH_TASK_LINE_RE.test(lines[index])) richOrdinal++;
+		}
+		return {
+			sourceOrdinal,
+			richOrdinal: RICH_TASK_LINE_RE.test(lines[line]) ? richOrdinal : null,
+		};
+	}
+
+	function sourceTaskRange(ordinal: number): { start: number; end: number } | null {
+		let offset = 0;
+		let current = -1;
+		for (const line of sourceContent.split('\n')) {
+			if (TASK_LINE_RE.test(line.replace(/\r$/, ''))) {
+				current++;
+				if (current === ordinal) return { start: offset, end: offset + line.length };
+			}
+			offset += line.length + 1;
+		}
+		return null;
+	}
+
+	function revealTaskTarget(target: TaskRevealTarget): boolean {
+		clearTaskReveal();
+		if ($sourceMode) {
+			if (!sourceElement) return false;
+			const range = sourceTaskRange(target.sourceOrdinal);
+			if (!range) return true;
+			sourceElement.classList.add('task-target-source');
+			sourceElement.setSelectionRange(range.start, range.end);
+			scrollSourceToOffset(range.start);
+			requestAnimationFrame(() => scrollSourceToOffset(range.start));
+			taskRevealElement = sourceElement;
+			taskRevealTimer = setTimeout(() => {
+				if (sourceElement?.selectionStart === range.start && sourceElement.selectionEnd === range.end) {
+					sourceElement.setSelectionRange(range.end, range.end);
+				}
+				sourceElement?.classList.remove('task-target-source');
+				taskRevealElement = null;
+				taskRevealTimer = null;
+			}, 1600);
+			return true;
+		}
+
+		if (!editor || target.richOrdinal === null) return !!editor;
+		let current = -1;
+		let targetPos: number | null = null;
+		editor.state.doc.descendants((node, pos) => {
+			if (targetPos !== null || node.type.name !== 'taskItem') return targetPos === null;
+			current++;
+			if (current === target.richOrdinal) targetPos = pos;
+			return targetPos === null;
+		});
+		if (targetPos === null) return true;
+		const node = editor.state.doc.nodeAt(targetPos);
+		if (!node) return true;
+		const decorations = DecorationSet.create(editor.state.doc, [
+			Decoration.node(targetPos, targetPos + node.nodeSize, { class: 'task-target-reveal' }),
+		]);
+		editor.view.dispatch(editor.state.tr.setMeta(taskRevealPluginKey, decorations));
+		const element = editor.view.nodeDOM(targetPos);
+		if (!(element instanceof HTMLElement)) return true;
+		const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+		element.scrollIntoView({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
+		const decoratedEditor = editor;
+		taskRevealTimer = setTimeout(() => {
+			if (!decoratedEditor.isDestroyed) {
+				decoratedEditor.view.dispatch(decoratedEditor.state.tr.setMeta(taskRevealPluginKey, DecorationSet.empty));
+			}
+			taskRevealTimer = null;
+		}, 2200);
+		return true;
+	}
+
+	function scheduleTaskReveal(path: string, target: TaskRevealTarget | null, request: number, attempts = 0) {
+		if (!target) return;
+		tick().then(() => requestAnimationFrame(() => {
+			if (request !== taskRevealRequest || path !== loadedPath) return;
+			if (!revealTaskTarget(target) && attempts < 3) {
+				scheduleTaskReveal(path, target, request, attempts + 1);
+			}
+		}));
 	}
 
 	function handleSourceCtrlEnd(event: KeyboardEvent) {
@@ -1597,6 +1710,28 @@
 		},
 	});
 
+	const TaskRevealExtension = Extension.create({
+		name: 'taskReveal',
+		addProseMirrorPlugins() {
+			return [
+				new Plugin({
+					key: taskRevealPluginKey,
+					state: {
+						init() { return DecorationSet.empty; },
+						apply(tr, old) {
+							const meta = tr.getMeta(taskRevealPluginKey);
+							if (meta !== undefined) return meta;
+							return old.map(tr.mapping, tr.doc);
+						},
+					},
+					props: {
+						decorations(state) { return this.getState(state); },
+					},
+				}),
+			];
+		},
+	});
+
 	// Color swatch decorations: render a small filled square before every hex/rgb/hsl color
 	// literal (in normal text AND code blocks), VSCode-style. These are view-only widget
 	// decorations, so they never touch the document/markdown - the note stores only the plain
@@ -3065,7 +3200,10 @@
 		$editorDirty = false;
 	}
 
-	export function loadNote(path: string, content: string) {
+	export function loadNote(path: string, content: string, taskTarget?: TaskRecord) {
+		clearTaskReveal();
+		const revealRequest = ++taskRevealRequest;
+		const revealTarget = taskTarget ? resolveTaskTarget(taskTarget, content) : null;
 		loadedPath = path;
 		lastSourceMode = $sourceMode;
 		isLoadingNote = true;
@@ -3113,8 +3251,9 @@
 		pendingContent = content;
 		isLoadingNote = false;
 	}
-	if (!isMobile && showOutline) scheduleOutline();
-}
+		if (!isMobile && showOutline) scheduleOutline();
+		scheduleTaskReveal(path, revealTarget, revealRequest);
+	}
 
 	function stripTitleH1(md: string): string {
 		const title = $activeNote?.meta.title;
@@ -4302,9 +4441,10 @@
 				SlashCommands,
 				TaskMetaMenu,
 				MoveLineShortcuts,
-				TabIndent,
-				NoteSearchExtension,
-				ColorSwatch,
+					TabIndent,
+					NoteSearchExtension,
+					TaskRevealExtension,
+					ColorSwatch,
 				TaskMetaDim,
 				...($appConfig?.enable_wiki_links ? [WikiLink, WikiLinkAutocomplete] : []),
 			],
@@ -5655,6 +5795,7 @@
 	}
 
 	onDestroy(() => {
+		clearTaskReveal();
 		destroyEditor();
 		unlistenFileChange?.();
 	});
@@ -9409,6 +9550,32 @@
 		align-items: flex-start;
 		gap: 8px;
 		margin: 4px 0;
+	}
+
+	:global(.tiptap-wrapper .tiptap ul[data-type="taskList"] li.task-target-reveal) {
+		border-radius: 6px;
+		animation: task-target-flash 2.2s ease-out;
+	}
+
+	@keyframes task-target-flash {
+		0%, 62% {
+			background: color-mix(in srgb, var(--accent) 24%, var(--bg-editor));
+		}
+		100% {
+			background: transparent;
+		}
+	}
+
+	.source-editor.task-target-source::selection {
+		background: color-mix(in srgb, var(--accent) 36%, transparent);
+		color: inherit;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		:global(.tiptap-wrapper .tiptap ul[data-type="taskList"] li.task-target-reveal) {
+			animation: none;
+			background: color-mix(in srgb, var(--accent) 24%, var(--bg-editor));
+		}
 	}
 
 	:global(.tiptap-wrapper .tiptap ul[data-type="taskList"] li label) {
