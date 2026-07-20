@@ -1052,6 +1052,15 @@
 		},
 	});
 
+	const StrikeShortcut = Extension.create({
+		name: 'strikeShortcut',
+		addKeyboardShortcuts() {
+			return {
+				'Mod-Shift-x': () => this.editor.commands.toggleStrike(),
+			};
+		},
+	});
+
 	const CalloutTyping = Extension.create({
 		name: 'calloutTyping',
 		addProseMirrorPlugins() {
@@ -4287,6 +4296,7 @@
 				}),
 				CtrlEndScrollPastEnd,
 				HeadingShortcuts,
+				StrikeShortcut,
 				WrapSelectedText,
 				SlashCommands,
 				TaskMetaMenu,
