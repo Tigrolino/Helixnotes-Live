@@ -146,6 +146,12 @@
 		const vault = $appConfig?.active_vault;
 		if (!vault) return;
 		if ($viewMode === 'notebook' && $activeNotebook?.relative_path === '') {
+			// On mobile, Back only changes panels. Reopen the still-selected notebook
+			// instead of treating the second tap as a request for All Notes. (issue #220)
+			if (isMobile) {
+				onViewChanged();
+				return;
+			}
 			selectAllNotes();
 			return;
 		}
@@ -158,6 +164,10 @@
 	async function selectNotebook(nb: NotebookEntry) {
 		// Deselect if clicking the already-active notebook; expand/collapse is the chevron's job
 		if ($viewMode === 'notebook' && $activeNotebook?.path === nb.path) {
+			if (isMobile) {
+				onViewChanged();
+				return;
+			}
 			selectAllNotes();
 			return;
 		}
@@ -1146,7 +1156,9 @@
 	.section {
 		flex: 1;
 		overflow-y: auto;
-		padding: 4px 0;
+		/* Keep the scrollport flush with the opaque sticky header so notebook names
+		   cannot show through the gap above it while scrolling. (issue #220) */
+		padding: 0 0 4px;
 		border-top: 1px solid var(--border-light);
 	}
 
