@@ -1,7 +1,7 @@
 # HelixNotes
 
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://codeberg.org/ArkHost/HelixNotes/src/branch/main/LICENSE)
-[![Latest Release](https://img.shields.io/badge/release-v1.3.3-green)](https://codeberg.org/ArkHost/HelixNotes/releases)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://gitlab.com/ArkHost/HelixNotes/-/blob/main/LICENSE)
+[![Latest Release](https://img.shields.io/badge/release-v1.3.3-green)](https://gitlab.com/ArkHost/HelixNotes/-/releases)
 [![Website](https://img.shields.io/badge/web-helixnotes.com-purple)](https://helixnotes.com)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS%20%7C%20Android-lightgrey)]()
 
@@ -42,7 +42,7 @@ sudo eopkg it helixnotes
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     helix-notes = {
-      url = "git+https://codeberg.org/ArkHost/HelixNotes";
+      url = "git+https://gitlab.com/ArkHost/HelixNotes";
       # inputs.nixpkgs.follows = "nixpkgs";
     }
   };
@@ -96,17 +96,17 @@ sudo eopkg it helixnotes
 
 #### .deb (manual)
 
-[Download .deb](https://codeberg.org/ArkHost/HelixNotes/releases/download/v1.3.3/HelixNotes_1.3.3_amd64.deb) (Ubuntu 22.04+)
+[Download .deb](https://gitlab.com/ArkHost/HelixNotes/-/releases/v1.3.3/downloads/HelixNotes_1.3.3_amd64.deb) (Ubuntu 22.04+)
 
 ### Windows
 
-[Download Installer](https://codeberg.org/ArkHost/HelixNotes/releases/download/v1.3.3/HelixNotes_1.3.3_x64-setup.exe) (Windows 10/11)
+[Download Installer](https://gitlab.com/ArkHost/HelixNotes/-/releases/v1.3.3/downloads/HelixNotes_1.3.3_x64-setup.exe) (Windows 10/11)
 
 ### macOS
 
-[Download .dmg (Apple Silicon)](https://codeberg.org/ArkHost/HelixNotes/releases/download/v1.3.3/HelixNotes_1.3.3_aarch64.dmg) (M-series Macs)
+[Download .dmg (Apple Silicon)](https://gitlab.com/ArkHost/HelixNotes/-/releases/v1.3.3/downloads/HelixNotes_1.3.3_aarch64.dmg) (M-series Macs)
 
-[Download .dmg (Intel)](https://codeberg.org/ArkHost/HelixNotes/releases/download/v1.3.3/HelixNotes_1.3.3_x64.dmg) (older Macs, or Apple Silicon via Rosetta)
+[Download .dmg (Intel)](https://gitlab.com/ArkHost/HelixNotes/-/releases/v1.3.3/downloads/HelixNotes_1.3.3_x64.dmg) (older Macs, or Apple Silicon via Rosetta)
 
 > **"HelixNotes is damaged and can't be opened"?** The app isn't damaged. The macOS build isn't notarized by Apple yet, so Gatekeeper blocks it on Apple Silicon. Run this once in Terminal, then open it normally (you'll need to redo it after each update):
 >
@@ -116,11 +116,11 @@ sudo eopkg it helixnotes
 
 ### Android
 
-[Download APK](https://codeberg.org/ArkHost/HelixNotes/releases/download/v1.3.3/HelixNotes_1.3.3_android.apk)
+[Download APK](https://gitlab.com/ArkHost/HelixNotes/-/releases/v1.3.3/downloads/HelixNotes_1.3.3_android.apk)
 
 ---
 
-All releases: [codeberg.org/ArkHost/HelixNotes/releases](https://codeberg.org/ArkHost/HelixNotes/releases)
+All releases: [gitlab.com/ArkHost/HelixNotes/-/releases](https://gitlab.com/ArkHost/HelixNotes/-/releases)
 
 ## Features
 
@@ -183,4 +183,4 @@ pnpm tauri build
 
 ## License
 
-[AGPL-3.0](https://codeberg.org/ArkHost/HelixNotes/src/branch/main/LICENSE)
+[AGPL-3.0](https://gitlab.com/ArkHost/HelixNotes/-/blob/main/LICENSE)
