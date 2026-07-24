@@ -1,7 +1,7 @@
 # HelixNotes
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://gitlab.com/ArkHost/HelixNotes/-/blob/main/LICENSE)
-[![Latest Release](https://img.shields.io/badge/release-v1.3.3-green)](https://gitlab.com/ArkHost/HelixNotes/-/releases)
+[![Latest Release](https://img.shields.io/badge/release-v1.3.4-green)](https://gitlab.com/ArkHost/HelixNotes/-/releases/v1.3.4)
 [![Website](https://img.shields.io/badge/web-helixnotes.com-purple)](https://helixnotes.com)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS%20%7C%20Android-lightgrey)]()
 
@@ -10,7 +10,7 @@ A local markdown note-taking app built with Tauri, SvelteKit, and Rust.
 Your notes are stored as standard Markdown files on your local filesystem.
 No cloud, no lock-in.
 
-## Download (v1.3.3)
+## Download (v1.3.4)
 
 ### Linux
 
@@ -92,21 +92,23 @@ sudo eopkg it helixnotes
 
 #### AppImage (Arch, Fedora 43+, openSUSE Tumbleweed)
 
-[Download AppImage](https://download.helixnotes.com/releases/v1.3.3/HelixNotes_1.3.3_amd64.AppImage)
+[Download AppImage](https://download.helixnotes.com/releases/v1.3.4/HelixNotes_1.3.4_amd64.AppImage)
 
 #### .deb (manual)
 
-[Download .deb](https://gitlab.com/ArkHost/HelixNotes/-/releases/v1.3.3/downloads/HelixNotes_1.3.3_amd64.deb) (Ubuntu 22.04+)
+[Download .deb](https://download.helixnotes.com/releases/v1.3.4/HelixNotes_1.3.4_amd64.deb) (Ubuntu 22.04+)
+
+#### .rpm (manual)
+
+[Download .rpm](https://download.helixnotes.com/releases/v1.3.4/HelixNotes-1.3.4-1.x86_64.rpm)
 
 ### Windows
 
-[Download Installer](https://gitlab.com/ArkHost/HelixNotes/-/releases/v1.3.3/downloads/HelixNotes_1.3.3_x64-setup.exe) (Windows 10/11)
+[Download Installer](https://download.helixnotes.com/releases/v1.3.4/HelixNotes_1.3.4_x64-setup.exe) (Windows 10/11)
 
 ### macOS
 
-[Download .dmg (Apple Silicon)](https://gitlab.com/ArkHost/HelixNotes/-/releases/v1.3.3/downloads/HelixNotes_1.3.3_aarch64.dmg) (M-series Macs)
-
-[Download .dmg (Intel)](https://gitlab.com/ArkHost/HelixNotes/-/releases/v1.3.3/downloads/HelixNotes_1.3.3_x64.dmg) (older Macs, or Apple Silicon via Rosetta)
+[Download .dmg (Apple Silicon)](https://download.helixnotes.com/releases/v1.3.4/HelixNotes_1.3.4_aarch64.dmg) (M-series Macs)
 
 > **"HelixNotes is damaged and can't be opened"?** The app isn't damaged. The macOS build isn't notarized by Apple yet, so Gatekeeper blocks it on Apple Silicon. Run this once in Terminal, then open it normally (you'll need to redo it after each update):
 >
@@ -116,7 +118,7 @@ sudo eopkg it helixnotes
 
 ### Android
 
-[Download APK](https://gitlab.com/ArkHost/HelixNotes/-/releases/v1.3.3/downloads/HelixNotes_1.3.3_android.apk)
+[Download APK](https://download.helixnotes.com/releases/v1.3.4/HelixNotes_1.3.4_android.apk)
 
 ---
 
