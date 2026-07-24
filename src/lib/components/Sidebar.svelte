@@ -807,6 +807,7 @@
 						class="notebook-item"
 						class:active={$viewMode === 'notebook' && $activeNotebook?.relative_path === ''}
 						onclick={selectUnfiled}
+						style="padding-left: 4px"
 					>
 					<span style="width:14px;flex-shrink:0"></span>
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.6">
