@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::{
-    plugin::{Builder, PluginApi, PluginHandle, TauriPlugin},
-    AppHandle, Manager, Runtime,
+    plugin::{Builder, PluginHandle, TauriPlugin},
+    Manager, Runtime,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -73,19 +73,11 @@ impl<R: Runtime, T: Manager<R>> IosVaultAccessExt<R> for T {
     }
 }
 
-fn initialize<R: Runtime>(
-    _app: &AppHandle<R>,
-    api: PluginApi<R, ()>,
-) -> tauri::Result<IosVaultAccess<R>> {
-    let handle = api.register_ios_plugin(init_plugin_ios_vault_access)?;
-    Ok(IosVaultAccess(handle))
-}
-
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("ios-vault-access")
         .setup(|app, api| {
-            let access = initialize(app, api)?;
-            app.manage(access);
+            let handle = api.register_ios_plugin(init_plugin_ios_vault_access)?;
+            app.manage(IosVaultAccess(handle));
             Ok(())
         })
         .build()
