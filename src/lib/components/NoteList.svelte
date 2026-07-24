@@ -1112,7 +1112,7 @@
 	{/if}
 
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="list-content" bind:this={listContainer} onscroll={onListScroll} ondblclick={handleListDoubleClick}>
+	<div class="list-content" class:tasks-mode={$viewMode === 'tasks'} bind:this={listContainer} onscroll={onListScroll} ondblclick={handleListDoubleClick}>
 		{#if $viewMode === 'tasks'}
 			<TasksView onOpenTask={openTask} onToggleTask={onToggleTask} onSetTaskPriority={onSetTaskPriority} onSetTaskDue={onSetTaskDue} />
 		{/if}
@@ -2211,6 +2211,11 @@
 
 	.note-list.mobile .list-content {
 		padding: 4px 8px 180px;
+	}
+
+	.note-list.mobile .list-content.tasks-mode {
+		padding-bottom: 0;
+		overflow: hidden;
 	}
 
 	.note-list.mobile .note-item {
