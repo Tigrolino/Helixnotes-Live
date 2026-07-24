@@ -392,11 +392,15 @@ pub fn import_custom_themes(state: State<'_, AppState>, path: String) -> Result<
 }
 
 #[tauri::command]
-pub fn set_font_size(state: State<'_, AppState>, size: u32) -> Result<(), String> {
+pub fn set_font_size(app: AppHandle, state: State<'_, AppState>, size: u32) -> Result<(), String> {
     let mut config = state.config.lock().map_err(|e| e.to_string())?;
     config.font_size = Some(size);
     save_app_config(&config)?;
-    Ok(())
+    drop(config);
+
+    use tauri::Emitter;
+    app.emit("editor-font-size-changed", size)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

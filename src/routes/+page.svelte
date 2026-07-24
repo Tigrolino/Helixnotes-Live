@@ -4,6 +4,7 @@
 	import { getAppConfig, openVault, restoreExternalVault, setFontSize } from '$lib/api';
 	import { darkThemes, isIOS } from '$lib/platform';
 	import { getCurrentWebview } from '@tauri-apps/api/webview';
+	import { listen } from '@tauri-apps/api/event';
 	import VaultPicker from '$lib/components/VaultPicker.svelte';
 	import AppLayout from '$lib/components/AppLayout.svelte';
 	import NoteWindow from '$lib/components/NoteWindow.svelte';
@@ -13,6 +14,7 @@
 	let startupVaultError = $state('');
 	let fontSizeSaveTimer: ReturnType<typeof setTimeout> | null = null;
 	let removeEditorZoomShortcuts: (() => void) | null = null;
+	let removeFontSizeListener: (() => void) | null = null;
 
 	const defaultEditorFontSize = 14;
 	const minEditorFontSize = 10;
@@ -56,12 +58,17 @@
 		};
 	}
 
-	function setEditorFontSize(value: number) {
+	function applyEditorFontSize(value: number) {
 		const nextSize = Math.max(minEditorFontSize, Math.min(maxEditorFontSize, Math.round(value)));
 		const restoreEditorViewport = preserveEditorViewportAfterLayout(getEditorScrollSurface());
 		if ($appConfig) $appConfig.font_size = nextSize;
 		document.documentElement.style.setProperty('--editor-font-size', `${nextSize}px`);
 		restoreEditorViewport();
+		return nextSize;
+	}
+
+	function setEditorFontSize(value: number) {
+		const nextSize = applyEditorFontSize(value);
 		if (fontSizeSaveTimer) clearTimeout(fontSizeSaveTimer);
 		fontSizeSaveTimer = setTimeout(() => {
 			setFontSize(nextSize).catch((e) => console.error('Failed to save font size:', e));
@@ -117,6 +124,9 @@
 		try {
 			const config = await getAppConfig();
 			$appConfig = config;
+			removeFontSizeListener = await listen<number>('editor-font-size-changed', (event) => {
+				if ($appConfig?.font_size !== event.payload) applyEditorFontSize(event.payload);
+			});
 			$theme = config.theme || 'system';
 
 			// Apply theme immediately to prevent flash
@@ -133,9 +143,7 @@
 			}
 
 			// Apply saved font settings
-			if (config.font_size) {
-				document.documentElement.style.setProperty('--editor-font-size', `${config.font_size}px`);
-			}
+			if (config.font_size) applyEditorFontSize(config.font_size);
 			if (config.line_height) {
 				document.documentElement.style.setProperty('--editor-line-height', String(config.line_height));
 			}
@@ -193,15 +201,15 @@
 				}
 			}
 
-			// Apply saved interface scale (desktop main window only; no-ops gracefully elsewhere)
-			if (!noteWindowPath && config.ui_scale && config.ui_scale !== 1) {
+			// Apply saved interface scale to every desktop window; no-ops gracefully elsewhere.
+			if (config.ui_scale && config.ui_scale !== 1) {
 				try {
 					await getCurrentWebview().setZoom(config.ui_scale);
 				} catch (e) {
 					console.error('Failed to apply interface scale:', e);
 				}
 			}
-			if (!noteWindowPath) removeEditorZoomShortcuts = installEditorZoomShortcuts();
+			removeEditorZoomShortcuts = installEditorZoomShortcuts();
 
 			// Auto-open last vault if available
 			if (config.active_vault) {
@@ -240,6 +248,7 @@
 
 	onDestroy(() => {
 		removeEditorZoomShortcuts?.();
+		removeFontSizeListener?.();
 		if (fontSizeSaveTimer) clearTimeout(fontSizeSaveTimer);
 	});
 </script>
