@@ -56,6 +56,23 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
+        .on_page_load(|webview, payload| {
+            #[cfg(target_os = "macos")]
+            if webview.label() == "main"
+                && matches!(
+                    payload.event(),
+                    tauri::webview::PageLoadEvent::Finished
+                )
+            {
+                let window = webview.window();
+                let window_on_main = window.clone();
+                let _ = window.run_on_main_thread(move || {
+                    fix_macos_traffic_lights(&window_on_main);
+                });
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (webview, payload);
+        })
         .setup(move |app| {
             #[cfg(target_os = "ios")]
             app.handle().plugin(tauri_plugin_ios_vault_access::init())?;
@@ -391,4 +408,60 @@ fn percent_decode(input: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&output).to_string()
+}
+
+#[cfg(target_os = "macos")]
+fn fix_macos_traffic_lights(window: &tauri::Window) {
+    use objc2_app_kit::{NSView, NSWindow, NSWindowButton};
+
+    const TITLEBAR_HEIGHT: f64 = 34.0;
+    const LEFT_INSET: f64 = 12.0;
+
+    let ns_window_ptr = match window.ns_window() {
+        Ok(ptr) => ptr,
+        Err(_) => return,
+    };
+    let ns_window: &NSWindow = unsafe { &*(ns_window_ptr as *const NSWindow) };
+
+    let close = match ns_window.standardWindowButton(NSWindowButton::CloseButton) {
+        Some(button) => button,
+        None => return,
+    };
+    let miniaturize = match ns_window.standardWindowButton(NSWindowButton::MiniaturizeButton) {
+        Some(button) => button,
+        None => return,
+    };
+    let zoom = match ns_window.standardWindowButton(NSWindowButton::ZoomButton) {
+        Some(button) => button,
+        None => return,
+    };
+
+    let titlebar_container = match unsafe {
+        close
+            .superview()
+            .and_then(|titlebar| titlebar.superview())
+    } {
+        Some(container) => container,
+        None => return,
+    };
+
+    let close_frame = NSView::frame(&close);
+    let top_inset = ((TITLEBAR_HEIGHT - close_frame.size.height) / 2.0).max(0.0);
+    let container_height = close_frame.size.height + top_inset;
+    let window_height = ns_window.frame().size.height;
+    if container_height <= 0.0 || window_height <= 0.0 {
+        return;
+    }
+
+    let mut container_frame = NSView::frame(&titlebar_container);
+    container_frame.size.height = container_height;
+    container_frame.origin.y = window_height - container_height;
+    NSView::setFrame(&titlebar_container, container_frame);
+
+    let button_spacing = NSView::frame(&miniaturize).origin.x - close_frame.origin.x;
+    for (index, button) in [&close, &miniaturize, &zoom].into_iter().enumerate() {
+        let mut frame = NSView::frame(button);
+        frame.origin.x = LEFT_INSET + index as f64 * button_spacing;
+        button.setFrameOrigin(frame.origin);
+    }
 }
