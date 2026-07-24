@@ -436,31 +436,23 @@ fn fix_macos_traffic_lights(window: &tauri::Window) {
         None => return,
     };
 
-    let titlebar_container = match unsafe {
-        close
-            .superview()
-            .and_then(|titlebar| titlebar.superview())
-    } {
-        Some(container) => container,
-        None => return,
-    };
-
-    let close_frame = NSView::frame(&close);
-    let top_inset = ((TITLEBAR_HEIGHT - close_frame.size.height) / 2.0).max(0.0);
-    let container_height = close_frame.size.height + top_inset;
     let window_height = ns_window.frame().size.height;
-    if container_height <= 0.0 || window_height <= 0.0 {
+    if window_height <= 0.0 {
         return;
     }
 
-    let mut container_frame = NSView::frame(&titlebar_container);
-    container_frame.size.height = container_height;
-    container_frame.origin.y = window_height - container_height;
-    NSView::setFrame(&titlebar_container, container_frame);
-
+    let close_frame = NSView::frame(&close);
     let button_spacing = NSView::frame(&miniaturize).origin.x - close_frame.origin.x;
     for (index, button) in [&close, &miniaturize, &zoom].into_iter().enumerate() {
+        let button_superview = match unsafe { button.superview() } {
+            Some(view) => view,
+            None => return,
+        };
         let mut frame = NSView::frame(button);
+        let top_inset = ((TITLEBAR_HEIGHT - frame.size.height) / 2.0).max(0.0);
+        let mut target = frame.origin;
+        target.y = window_height - top_inset - frame.size.height;
+        frame.origin.y = button_superview.convertPoint_fromView(target, None).y;
         frame.origin.x = LEFT_INSET + index as f64 * button_spacing;
         button.setFrameOrigin(frame.origin);
     }
