@@ -61,7 +61,7 @@
 	const appWindow = getCurrentWindow();
 	const isMac = navigator.platform.startsWith('Mac');
 	const isMobile = $derived($platformIsMobile);
-	import { loadVaultState, saveVaultState, readNote, createDailyNote, createBackup, getPendingOpenFile, addQuickAccess, removeQuickAccess, getQuickAccess, setTheme, syncNow, setTaskDone, setTaskPriority, setTaskDue, findOrphanedAttachments, trashOrphanedAttachments } from '$lib/api';
+	import { loadVaultState, saveVaultState, readNote, createDailyNote, createBackup, getPendingOpenFile, addQuickAccess, removeQuickAccess, getQuickAccess, setTheme, syncNow, getAppConfig, setTaskDone, setTaskPriority, setTaskDue, findOrphanedAttachments, trashOrphanedAttachments } from '$lib/api';
 	import { darkThemes, isAndroid } from '$lib/platform';
 	import { debounce } from '$lib/utils/debounce';
 	import { openNoteWindow } from '$lib/utils/window';
@@ -729,11 +729,11 @@
 
 		// ── WebDAV sync: global status + auto-sync triggers ──
 		unlistenSync.push(await listen('sync-progress', () => syncState.set({ running: true, error: null })));
-		unlistenSync.push(await listen('sync-done', (event: any) => {
+		unlistenSync.push(await listen('sync-done', async () => {
 			syncState.set({ running: false, error: null });
-			const cur = get(appConfig);
-			const ts = event.payload?.last_sync_time;
-			if (cur && ts) appConfig.set({ ...cur, vaults: cur.vaults.map((v) => v.path === cur.active_vault ? { ...v, last_sync_time: ts } : v) });
+			try {
+				appConfig.set(await getAppConfig());
+			} catch {}
 		}));
 		unlistenSync.push(await listen('sync-error', (event: any) => syncState.set({ running: false, error: event.payload?.error ?? 'Sync failed' })));
 

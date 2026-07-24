@@ -143,7 +143,12 @@ fn open_vault_path(
 }
 
 #[tauri::command]
-pub fn open_vault(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<(), String> {
+pub async fn open_vault(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<(), String> {
+    let _transition = state.vault_transition.lock().await;
     open_vault_path(app.clone(), &state, path, None)?;
     #[cfg(target_os = "ios")]
     app.ios_vault_access().release_active()?;
@@ -155,6 +160,7 @@ pub async fn choose_external_vault(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Option<ExternalVaultResult>, String> {
+    let _transition = state.vault_transition.lock().await;
     #[cfg(target_os = "ios")]
     {
         let picker_app = app.clone();
@@ -194,7 +200,7 @@ pub async fn choose_external_vault(
     }
     #[cfg(not(target_os = "ios"))]
     {
-        let _ = (app, state);
+        let _ = (&app, &state);
         Err("Files folders are only available on iOS.".to_string())
     }
 }
@@ -205,6 +211,7 @@ pub async fn restore_external_vault(
     state: State<'_, AppState>,
     bookmark_id: String,
 ) -> Result<ExternalVaultResult, String> {
+    let _transition = state.vault_transition.lock().await;
     #[cfg(target_os = "ios")]
     {
         let resolver_app = app.clone();
@@ -228,7 +235,7 @@ pub async fn restore_external_vault(
     }
     #[cfg(not(target_os = "ios"))]
     {
-        let _ = (app, state, bookmark_id);
+        let _ = (&app, &state, &bookmark_id);
         Err("Files folders are only available on iOS.".to_string())
     }
 }
@@ -240,39 +247,34 @@ pub async fn remove_vault(
     path: String,
     bookmark_id: Option<String>,
 ) -> Result<(), String> {
-    let target = {
-        let config = state.config.lock().map_err(|error| error.to_string())?;
-        let vault = if let Some(bookmark_id) = bookmark_id.as_deref() {
-            config
-                .vaults
-                .iter()
-                .find(|vault| vault.bookmark_id.as_deref() == Some(bookmark_id))
+    let _transition = state.vault_transition.lock().await;
+    let mut config = state.config.lock().map_err(|error| error.to_string())?;
+    let target = if let Some(bookmark_id) = bookmark_id.as_deref() {
+        config
+            .vaults
+            .iter()
+            .find(|vault| vault.bookmark_id.as_deref() == Some(bookmark_id))
+    } else {
+        config
+            .vaults
+            .iter()
+            .find(|vault| vault.bookmark_id.is_none() && vault.path == path)
+    }
+    .map(|vault| {
+        let is_active = if let Some(bookmark_id) = vault.bookmark_id.as_deref() {
+            config.active_bookmark_id.as_deref() == Some(bookmark_id)
         } else {
-            config
-                .vaults
-                .iter()
-                .find(|vault| vault.bookmark_id.is_none() && vault.path == path)
+            config.active_bookmark_id.is_none()
+                && config.active_vault.as_deref() == Some(vault.path.as_str())
         };
-        vault.map(|vault| {
-            let is_active = if let Some(bookmark_id) = vault.bookmark_id.as_deref() {
-                config.active_bookmark_id.as_deref() == Some(bookmark_id)
-            } else {
-                config.active_bookmark_id.is_none()
-                    && config.active_vault.as_deref() == Some(vault.path.as_str())
-            };
-            (vault.path.clone(), vault.bookmark_id.clone(), is_active)
-        })
-    };
+        (vault.path.clone(), vault.bookmark_id.clone(), is_active)
+    });
 
     let Some((target_path, target_bookmark, is_active)) = target else {
         return Ok(());
     };
 
-    let old = state
-        .config
-        .lock()
-        .map_err(|error| error.to_string())?
-        .clone();
+    let old = config.clone();
     let mut next = old.clone();
     if let Some(id) = target_bookmark.as_deref() {
         next.vaults
@@ -289,20 +291,7 @@ pub async fn remove_vault(
 
     #[cfg(target_os = "ios")]
     if let Some(id) = target_bookmark.as_deref() {
-        let forget_app = app.clone();
-        let id_to_forget = id.to_string();
-        let forget_result = match tauri::async_runtime::spawn_blocking(move || {
-            forget_app
-                .ios_vault_access()
-                .forget_bookmark(&id_to_forget)
-        })
-        .await
-        {
-            Ok(result) => result,
-            Err(error) => Err(error.to_string()),
-        };
-
-        if let Err(error) = forget_result {
+        if let Err(error) = app.ios_vault_access().forget_bookmark(id) {
             return match save_app_config(&old) {
                 Ok(()) => Err(error),
                 Err(rollback_error) => Err(format!(
@@ -317,7 +306,7 @@ pub async fn remove_vault(
     if is_active {
         clear_vault_runtime(&state)?;
     }
-    *state.config.lock().map_err(|error| error.to_string())? = next;
+    *config = next;
 
     Ok(())
 }
@@ -2005,13 +1994,61 @@ pub fn test_ai_connection(app: AppHandle) -> Result<(), String> {
 
 // ── Sync (WebDAV) ──
 
-fn active_vault_config(config: &AppConfig) -> Result<&VaultConfig, String> {
+fn vault_matches_identity(
+    vault: &VaultConfig,
+    path: &str,
+    bookmark_id: Option<&str>,
+) -> bool {
+    if let Some(bookmark_id) = bookmark_id {
+        vault.bookmark_id.as_deref() == Some(bookmark_id)
+    } else {
+        vault.bookmark_id.is_none() && vault.path == path
+    }
+}
+
+fn active_vault_index(config: &AppConfig) -> Result<usize, String> {
     let active = config.active_vault.as_deref().ok_or("No active vault")?;
     config
         .vaults
         .iter()
-        .find(|v| v.path == active)
+        .position(|vault| {
+            vault_matches_identity(vault, active, config.active_bookmark_id.as_deref())
+        })
         .ok_or_else(|| "Active vault not found in config".to_string())
+}
+
+fn active_vault_config(config: &AppConfig) -> Result<&VaultConfig, String> {
+    Ok(&config.vaults[active_vault_index(config)?])
+}
+
+#[cfg(test)]
+mod vault_identity_tests {
+    use super::*;
+
+    #[test]
+    fn bookmark_identity_disambiguates_vaults_with_the_same_path() {
+        let mut config = AppConfig::default();
+        config.active_vault = Some("/same/path".to_string());
+        config.vaults = vec![
+            VaultConfig {
+                path: "/same/path".to_string(),
+                name: "Local".to_string(),
+                ..Default::default()
+            },
+            VaultConfig {
+                path: "/same/path".to_string(),
+                name: "Files".to_string(),
+                bookmark_id: Some("bookmark".to_string()),
+                ..Default::default()
+            },
+        ];
+
+        config.active_bookmark_id = Some("bookmark".to_string());
+        assert_eq!(active_vault_config(&config).unwrap().name, "Files");
+
+        config.active_bookmark_id = None;
+        assert_eq!(active_vault_config(&config).unwrap().name, "Local");
+    }
 }
 
 fn sync_config_from(config: &AppConfig) -> Result<crate::sync::WebdavConfig, String> {
@@ -2043,12 +2080,8 @@ pub fn set_sync_settings(
     sync_interval_minutes: u32,
 ) -> Result<(), String> {
     let mut config = state.config.lock().map_err(|e| e.to_string())?;
-    let active = config.active_vault.clone().ok_or("No active vault")?;
-    let v = config
-        .vaults
-        .iter_mut()
-        .find(|v| v.path == active)
-        .ok_or_else(|| "Active vault not found in config".to_string())?;
+    let active_index = active_vault_index(&config)?;
+    let v = &mut config.vaults[active_index];
     v.sync_provider = provider.filter(|p| !p.is_empty());
     v.webdav_url = url.filter(|u| !u.trim().is_empty());
     v.webdav_username = username.filter(|u| !u.is_empty());
@@ -2094,7 +2127,7 @@ pub fn sync_now(app: AppHandle) -> Result<(), String> {
     if app.state::<AppState>().syncing.swap(true, Ordering::SeqCst) {
         return Ok(()); // a sync is already running
     }
-    let (vault, cfg) = {
+    let (vault, bookmark_id, cfg) = {
         let state = app.state::<AppState>();
         let config = match state.config.lock() {
             Ok(c) => c,
@@ -2107,9 +2140,13 @@ pub fn sync_now(app: AppHandle) -> Result<(), String> {
             .active_vault
             .clone()
             .ok_or_else(|| "No active vault".to_string())
-            .and_then(|v| sync_config_from(&config).map(|c| (v, c)));
+            .and_then(|vault| {
+                sync_config_from(&config).map(|cfg| {
+                    (vault, config.active_bookmark_id.clone(), cfg)
+                })
+            });
         match gathered {
-            Ok(vc) => vc,
+            Ok(vault_config) => vault_config,
             Err(e) => {
                 drop(config);
                 state.syncing.store(false, Ordering::SeqCst);
@@ -2125,8 +2162,10 @@ pub fn sync_now(app: AppHandle) -> Result<(), String> {
             Ok(summary) => {
                 let ts = chrono::Utc::now().to_rfc3339();
                 if let Ok(mut config) = app.state::<AppState>().config.lock() {
-                    if let Some(v) = config.vaults.iter_mut().find(|v| v.path == vault) {
-                        v.last_sync_time = Some(ts.clone());
+                    if let Some(vault_config) = config.vaults.iter_mut().find(|candidate| {
+                        vault_matches_identity(candidate, &vault, bookmark_id.as_deref())
+                    }) {
+                        vault_config.last_sync_time = Some(ts.clone());
                     }
                     let _ = save_app_config(&config);
                 }
@@ -2265,7 +2304,7 @@ fn migrate_global_sync_to_vault(config: &mut AppConfig) -> bool {
     if config.sync_provider.is_none() && config.webdav_url.is_none() {
         return false;
     }
-    let Some(active) = config.active_vault.clone() else { return false; };
+    let Ok(active_index) = active_vault_index(config) else { return false; };
     let g_provider = config.sync_provider.clone();
     let g_url = config.webdav_url.clone();
     let g_user = config.webdav_username.clone();
@@ -2274,7 +2313,7 @@ fn migrate_global_sync_to_vault(config: &mut AppConfig) -> bool {
     let g_on_change = config.sync_on_change;
     let g_interval = config.sync_interval_minutes;
     let g_last = config.last_sync_time.clone();
-    let Some(v) = config.vaults.iter_mut().find(|v| v.path == active) else { return false; };
+    let v = &mut config.vaults[active_index];
     if v.sync_provider.is_some() || v.webdav_url.is_some() {
         return false; // already migrated / has its own config
     }

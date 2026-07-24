@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { showSettings, theme, appConfig, activeVaultConfig, updateAvailable as globalUpdateAvailable, updateObj as globalUpdateObj, installType, settingsTab, vaultReady, androidApkUrl, checkForUpdateMobile, notebookSortMode, isManagedInstall, customThemes } from '$lib/stores/app';
-	import { setTheme, setAccentColor, setFontSize, setFontFamily, setLineHeight, setUiScale, setContentWidth, setGeneralSettings, importObsidian, createBackup, listBackups, restoreBackup, deleteBackup, setBackupSettings, setAiSettings, testAiConnection, setSyncSettings, testSyncConnection, syncNow, saveCustomTheme, deleteCustomTheme, exportCustomTheme, importCustomThemes } from '$lib/api';
+	import { setTheme, setAccentColor, setFontSize, setFontFamily, setLineHeight, setUiScale, setContentWidth, setGeneralSettings, importObsidian, createBackup, listBackups, restoreBackup, deleteBackup, setBackupSettings, setAiSettings, testAiConnection, setSyncSettings, testSyncConnection, syncNow, getAppConfig, saveCustomTheme, deleteCustomTheme, exportCustomTheme, importCustomThemes } from '$lib/api';
 	import { darkThemes, isMobile, isAndroid } from '$lib/platform';
 	import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 	import { listen } from '@tauri-apps/api/event';
@@ -318,9 +318,13 @@
 	// Re-seed the sync form when the active vault changes, so Settings reflects the current vault.
 	let lastSyncVault: string | null = null;
 	$effect(() => {
-		const path = $appConfig?.active_vault ?? null;
-		if (path === lastSyncVault) return;
-		lastSyncVault = path;
+		const identity = $appConfig?.active_bookmark_id
+			? `bookmark:${$appConfig.active_bookmark_id}`
+			: $appConfig?.active_vault
+				? `path:${$appConfig.active_vault}`
+				: null;
+		if (identity === lastSyncVault) return;
+		lastSyncVault = identity;
 		const vc = activeVaultConfig($appConfig);
 		syncProvider = vc?.sync_provider ?? null;
 		syncUrl = vc?.webdav_url ?? '';
@@ -337,10 +341,11 @@
 		// triggers update live, without an app restart.
 		if ($appConfig) {
 			const cur = $appConfig;
+			const active = activeVaultConfig(cur);
 			$appConfig = {
 				...cur,
-				vaults: cur.vaults.map((v) => v.path === cur.active_vault ? {
-					...v,
+				vaults: cur.vaults.map((vault) => vault === active ? {
+					...vault,
 					sync_provider: syncProvider,
 					webdav_url: syncUrl || null,
 					webdav_username: syncUsername || null,
@@ -348,7 +353,7 @@
 					sync_on_open: syncOnOpen,
 					sync_on_change: syncOnChange,
 					sync_interval_minutes: syncIntervalMinutes,
-				} : v),
+				} : vault),
 			};
 		}
 	}
@@ -379,7 +384,7 @@
 		syncMessage = null;
 		const unlisteners: Array<() => void> = [];
 		const cleanup = () => { unlisteners.forEach((u) => u()); };
-		unlisteners.push(await listen<{ success: boolean; summary?: { uploaded?: number; downloaded?: number; deleted_local?: number; deleted_remote?: number; conflicts?: number }; last_sync_time?: string }>('sync-done', (event) => {
+		unlisteners.push(await listen<{ success: boolean; summary?: { uploaded?: number; downloaded?: number; deleted_local?: number; deleted_remote?: number; conflicts?: number }; last_sync_time?: string }>('sync-done', async (event) => {
 			const s = event.payload.summary ?? {};
 			const parts: string[] = [];
 			if (s.uploaded) parts.push(`${s.uploaded} uploaded`);
@@ -389,10 +394,10 @@
 			if (s.conflicts) parts.push(`${s.conflicts} conflict copies`);
 			syncMessage = { type: 'success', text: parts.length ? `Synced: ${parts.join(', ')}.` : 'Already up to date.' };
 			syncRunning = false;
-			if ($appConfig && event.payload.last_sync_time) {
-				const cur = $appConfig;
-				const ts = event.payload.last_sync_time;
-				$appConfig = { ...cur, vaults: cur.vaults.map((v) => v.path === cur.active_vault ? { ...v, last_sync_time: ts } : v) };
+			if (event.payload.last_sync_time) {
+				try {
+					$appConfig = await getAppConfig();
+				} catch {}
 			}
 			cleanup();
 		}));

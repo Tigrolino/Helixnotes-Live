@@ -130,6 +130,7 @@
 	}
 
 	async function openRecentVault(vault: VaultConfig) {
+		if (loading) return;
 		if (!isIOS || !vault.bookmark_id) {
 			await openSelectedVault(vault.path);
 			return;
@@ -149,6 +150,9 @@
 	}
 
 	async function forgetVault(vault: VaultConfig) {
+		if (loading) return;
+		loading = true;
+		error = '';
 		try {
 			const wasActive = isActiveVault(vault);
 			await removeVault(vault.path, vault.bookmark_id);
@@ -156,6 +160,8 @@
 			if (wasActive) $vaultReady = false;
 		} catch (e) {
 			error = String(e);
+		} finally {
+			loading = false;
 		}
 	}
 
@@ -272,11 +278,11 @@
 				<span class="recent-label">Recent</span>
 				{#each recentVaults as vault}
 					<div class="vault-row">
-						<button class="vault-item" class:current={isActiveVault(vault)} onclick={() => openRecentVault(vault)}>
+						<button class="vault-item" class:current={isActiveVault(vault)} onclick={() => openRecentVault(vault)} disabled={loading}>
 							<span class="vault-name">{vault.name}{#if isActiveVault(vault)}<span class="vault-current-badge">Current</span>{/if}</span>
 							<span class="vault-path">{vault.bookmark_id ? `Files · ${vault.path}` : vault.path}</span>
 						</button>
-						<button class="vault-remove" title="Remove from list" aria-label="Remove from list" onclick={() => forgetVault(vault)}>
+						<button class="vault-remove" title="Remove from list" aria-label="Remove from list" onclick={() => forgetVault(vault)} disabled={loading}>
 							<svg width="12" height="12" viewBox="0 0 10 10">
 								<line x1="1.5" y1="1.5" x2="8.5" y2="8.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
 								<line x1="8.5" y1="1.5" x2="1.5" y2="8.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
