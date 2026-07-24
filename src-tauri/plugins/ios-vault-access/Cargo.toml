@@ -1,0 +1,15 @@
+[package]
+name = "tauri-plugin-ios-vault-access"
+version = "0.1.0"
+authors = ["HelixNotes"]
+description = "iOS Files folder access for HelixNotes"
+edition = "2021"
+rust-version = "1.77.2"
+links = "tauri-plugin-ios-vault-access"
+
+[dependencies]
+tauri = "2"
+serde = { version = "1", features = ["derive"] }
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }

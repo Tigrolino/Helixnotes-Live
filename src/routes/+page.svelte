@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import { appConfig, vaultReady, theme } from '$lib/stores/app';
-	import { getAppConfig, openVault, setFontSize } from '$lib/api';
-	import { darkThemes } from '$lib/platform';
+	import { getAppConfig, openVault, restoreExternalVault, setFontSize } from '$lib/api';
+	import { darkThemes, isIOS } from '$lib/platform';
 	import { getCurrentWebview } from '@tauri-apps/api/webview';
 	import VaultPicker from '$lib/components/VaultPicker.svelte';
 	import AppLayout from '$lib/components/AppLayout.svelte';
@@ -10,6 +10,7 @@
 
 	let loading = $state(true);
 	let noteWindowPath = $state<string | null>(null);
+	let startupVaultError = $state('');
 	let fontSizeSaveTimer: ReturnType<typeof setTimeout> | null = null;
 	let removeEditorZoomShortcuts: (() => void) | null = null;
 
@@ -204,14 +205,31 @@
 
 			// Auto-open last vault if available
 			if (config.active_vault) {
+				const activeVault = config.active_bookmark_id
+					? config.vaults.find((vault) => vault.bookmark_id === config.active_bookmark_id)
+					: config.vaults.find(
+							(vault) => !vault.bookmark_id && vault.path === config.active_vault
+						);
 				try {
 					// Note windows don't re-open the vault (already open in main process)
 					if (!noteWindowPath) {
-						await openVault(config.active_vault);
+						if (isIOS && activeVault?.bookmark_id) {
+							await restoreExternalVault(activeVault.bookmark_id);
+							$appConfig = await getAppConfig();
+						} else {
+							await openVault(config.active_vault);
+						}
 					}
 					$vaultReady = true;
-				} catch {
-					// Vault path might not exist anymore
+				} catch (e) {
+					if (isIOS && activeVault?.bookmark_id) {
+						startupVaultError = String(e);
+						$appConfig = {
+							...config,
+							active_vault: null,
+							active_bookmark_id: null
+						};
+					}
 				}
 			}
 		} catch {
@@ -235,7 +253,7 @@
 {:else if $vaultReady}
 	<AppLayout />
 {:else}
-	<VaultPicker />
+	<VaultPicker initialError={startupVaultError} />
 {/if}
 
 <style>

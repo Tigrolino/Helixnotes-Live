@@ -54,6 +54,8 @@ pub struct NoteContent {
 pub struct VaultConfig {
     pub path: String,
     pub name: String,
+    #[serde(default)]
+    pub bookmark_id: Option<String>,
     // Per-vault WebDAV sync (was previously global on AppConfig; those fields are kept deprecated for migration).
     #[serde(default)]
     pub sync_provider: Option<String>,
@@ -98,6 +100,8 @@ pub struct CustomTheme {
 pub struct AppConfig {
     pub vaults: Vec<VaultConfig>,
     pub active_vault: Option<String>,
+    #[serde(default)]
+    pub active_bookmark_id: Option<String>,
     pub theme: String,
     #[serde(default)]
     pub accent_color: Option<String>,
@@ -255,6 +259,7 @@ impl Default for AppConfig {
         Self {
             vaults: Vec::new(),
             active_vault: None,
+            active_bookmark_id: None,
             theme: "system".to_string(),
             accent_color: None,
             font_size: None,

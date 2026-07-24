@@ -57,6 +57,9 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .setup(move |app| {
+            #[cfg(target_os = "ios")]
+            app.handle().plugin(tauri_plugin_ios_vault_access::init())?;
+
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -119,6 +122,8 @@ pub fn run() {
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             commands::open_vault,
+            commands::choose_external_vault,
+            commands::restore_external_vault,
             commands::remove_vault,
             commands::get_app_config,
             commands::set_theme,

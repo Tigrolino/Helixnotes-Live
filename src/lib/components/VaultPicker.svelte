@@ -2,10 +2,12 @@
 	import { open } from '@tauri-apps/plugin-dialog';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { documentDir } from '@tauri-apps/api/path';
-	import { openVault, removeVault, getAppConfig } from '$lib/api';
+	import { chooseExternalVault, getAppConfig, openVault, removeVault, restoreExternalVault } from '$lib/api';
 	import { appConfig, vaultReady } from '$lib/stores/app';
 	import { isAndroid, isIOS, isMobile } from '$lib/platform';
 	import type { VaultConfig } from '$lib/types';
+
+	let { initialError = '' }: { initialError?: string } = $props();
 
 	const appWindow = getCurrentWindow();
 
@@ -15,6 +17,10 @@
 	let vaultName = $state('HelixNotes');
 	let hasPermission = $state(!isAndroid);
 	let selectedLocation = $state('Documents');
+
+	$effect(() => {
+		if (initialError && !error) error = initialError;
+	});
 	let customPath = $state('');
 	let iosBasePath = $state('');
 
@@ -108,13 +114,56 @@
 		}
 	}
 
-	async function forgetVault(path: string) {
+	async function pickExternalFolder() {
+		loading = true;
+		error = '';
 		try {
-			await removeVault(path);
+			const selected = await chooseExternalVault();
+			if (!selected) return;
 			$appConfig = await getAppConfig();
+			$vaultReady = true;
+		} catch (e) {
+			error = String(e);
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function openRecentVault(vault: VaultConfig) {
+		if (!isIOS || !vault.bookmark_id) {
+			await openSelectedVault(vault.path);
+			return;
+		}
+
+		loading = true;
+		error = '';
+		try {
+			await restoreExternalVault(vault.bookmark_id);
+			$appConfig = await getAppConfig();
+			$vaultReady = true;
+		} catch (e) {
+			error = String(e);
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function forgetVault(vault: VaultConfig) {
+		try {
+			const wasActive = isActiveVault(vault);
+			await removeVault(vault.path, vault.bookmark_id);
+			$appConfig = await getAppConfig();
+			if (wasActive) $vaultReady = false;
 		} catch (e) {
 			error = String(e);
 		}
+	}
+
+	function isActiveVault(vault: VaultConfig): boolean {
+		if (vault.bookmark_id) {
+			return vault.bookmark_id === $appConfig?.active_bookmark_id;
+		}
+		return !$appConfig?.active_bookmark_id && vault.path === $appConfig?.active_vault;
 	}
 </script>
 
@@ -146,7 +195,7 @@
 		<p class="subtitle">Local markdown notes</p>
 		{#if isMobile}
 			{#if isIOS}
-				<p class="description">Your notes are saved in the app's folder and appear in the Files app under "On My iPhone &rarr; HelixNotes".</p>
+				<p class="description">Keep notes in HelixNotes, or use an existing folder from iCloud Drive or Files.</p>
 			{:else}
 				<p class="description">Choose where to store your notes. Sync with Syncthing, Nextcloud, or any file sync app.</p>
 			{/if}
@@ -197,12 +246,20 @@
 		<button class="btn-primary" onclick={pickFolder} disabled={loading}>
 			{#if loading}
 				Opening...
+			{:else if isIOS}
+				Use Local Folder
 			{:else if isMobile}
 				Get Started
 			{:else}
 				Open Notes Folder
 			{/if}
 		</button>
+
+		{#if isIOS}
+			<button class="btn-back" onclick={pickExternalFolder} disabled={loading}>
+				Choose Folder in Files
+			</button>
+		{/if}
 
 		{#if $appConfig?.active_vault}
 			<button class="btn-back" onclick={() => ($vaultReady = true)}>
@@ -215,11 +272,11 @@
 				<span class="recent-label">Recent</span>
 				{#each recentVaults as vault}
 					<div class="vault-row">
-						<button class="vault-item" class:current={vault.path === $appConfig?.active_vault} onclick={() => openSelectedVault(vault.path)}>
-							<span class="vault-name">{vault.name}{#if vault.path === $appConfig?.active_vault}<span class="vault-current-badge">Current</span>{/if}</span>
-							<span class="vault-path">{vault.path}</span>
+						<button class="vault-item" class:current={isActiveVault(vault)} onclick={() => openRecentVault(vault)}>
+							<span class="vault-name">{vault.name}{#if isActiveVault(vault)}<span class="vault-current-badge">Current</span>{/if}</span>
+							<span class="vault-path">{vault.bookmark_id ? `Files · ${vault.path}` : vault.path}</span>
 						</button>
-						<button class="vault-remove" title="Remove from list" aria-label="Remove from list" onclick={() => forgetVault(vault.path)}>
+						<button class="vault-remove" title="Remove from list" aria-label="Remove from list" onclick={() => forgetVault(vault)}>
 							<svg width="12" height="12" viewBox="0 0 10 10">
 								<line x1="1.5" y1="1.5" x2="8.5" y2="8.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
 								<line x1="8.5" y1="1.5" x2="1.5" y2="8.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />

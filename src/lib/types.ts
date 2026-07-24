@@ -44,6 +44,7 @@ export interface NoteContent {
 export interface VaultConfig {
   path: string;
   name: string;
+  bookmark_id?: string | null;
   // Per-vault WebDAV sync (moved off the global AppConfig).
   sync_provider?: string | null;
   webdav_url?: string | null;
@@ -53,6 +54,12 @@ export interface VaultConfig {
   sync_on_change?: boolean;
   sync_interval_minutes?: number;
   last_sync_time?: string | null;
+}
+
+export interface ExternalVaultResult {
+  bookmarkId: string;
+  path: string;
+  name: string;
 }
 
 export interface CustomThemeColors {
@@ -77,6 +84,7 @@ export interface CustomTheme {
 export interface AppConfig {
   vaults: VaultConfig[];
   active_vault: string | null;
+  active_bookmark_id?: string | null;
   theme: string;
   accent_color: string | null;
   font_size: number | null;

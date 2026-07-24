@@ -21,15 +21,63 @@ fn remove_note_bg(state: &State<'_, AppState>, path: &str) {
 	}
 }
 
+fn clear_vault_runtime(state: &State<'_, AppState>) -> Result<(), String> {
+    *state.watcher.lock().map_err(|error| error.to_string())? = None;
+    *state
+        .search_index
+        .lock()
+        .map_err(|error| error.to_string())? = None;
+    Ok(())
+}
+
 // ── Vault Management ──
 
-#[tauri::command]
-pub fn open_vault(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<(), String> {
+#[cfg(target_os = "ios")]
+use tauri_plugin_ios_vault_access::{FolderSelection, IosVaultAccessExt};
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalVaultResult {
+    pub bookmark_id: String,
+    pub path: String,
+    pub name: String,
+}
+
+#[cfg(target_os = "ios")]
+impl From<FolderSelection> for ExternalVaultResult {
+    fn from(selection: FolderSelection) -> Self {
+        Self {
+            bookmark_id: selection.bookmark_id,
+            path: selection.path,
+            name: selection.name,
+        }
+    }
+}
+
+fn open_vault_path(
+    app: AppHandle,
+    state: &State<'_, AppState>,
+    path: String,
+    external: Option<(String, String)>,
+) -> Result<(), String> {
     operations::ensure_vault_structure(&path)?;
 
-    // Initialize search index - rebuild in background on mobile (sandboxed FS is slow)
+    // Stage the search index and watcher before replacing the active runtime.
     let search = std::sync::Arc::new(SearchIndex::new(&path)?);
-    #[cfg(mobile)]
+    #[cfg(target_os = "ios")]
+    {
+        if external.is_some() {
+            search.rebuild(&path)?;
+        } else {
+            let search_bg = search.clone();
+            let vault = path.clone();
+            std::thread::spawn(move || {
+                let _ = search_bg.rebuild(&vault);
+                log::info!("mobile: search index rebuild complete");
+            });
+        }
+    }
+    #[cfg(all(mobile, not(target_os = "ios")))]
     {
         let search_bg = search.clone();
         let vault = path.clone();
@@ -39,43 +87,238 @@ pub fn open_vault(app: AppHandle, state: State<'_, AppState>, path: String) -> R
         });
     }
     #[cfg(desktop)]
-    {
-        search.rebuild(&path)?;
-    }
-    *state.search_index.lock().map_err(|e| e.to_string())? = Some(search);
+    search.rebuild(&path)?;
 
-    // Start file watcher
-    let w = watcher::start_watcher(app.clone(), path.clone())?;
-    *state.watcher.lock().map_err(|e| e.to_string())? = Some(w);
+    let new_watcher = watcher::start_watcher(app.clone(), path.clone())?;
 
-    // Update config
+    // Update config. External vaults use the bookmark as their stable identity;
+    // the resolved path is refreshed whenever the vault opens.
+    let mut search_slot = state.search_index.lock().map_err(|e| e.to_string())?;
+    let mut watcher_slot = state.watcher.lock().map_err(|e| e.to_string())?;
     let mut config = state.config.lock().map_err(|e| e.to_string())?;
-    if !config.vaults.iter().any(|v| v.path == path) {
+    let mut next = config.clone();
+    let active_bookmark_id = external
+        .as_ref()
+        .map(|(bookmark_id, _)| bookmark_id.clone());
+    if let Some((bookmark_id, name)) = external {
+        if let Some(vault) = next
+            .vaults
+            .iter_mut()
+            .find(|vault| vault.bookmark_id.as_deref() == Some(bookmark_id.as_str()))
+        {
+            vault.path.clone_from(&path);
+            vault.name = name;
+        } else {
+            next.vaults.push(VaultConfig {
+                path: path.clone(),
+                name,
+                bookmark_id: Some(bookmark_id),
+                ..Default::default()
+            });
+        }
+    } else if !next
+        .vaults
+        .iter()
+        .any(|vault| vault.bookmark_id.is_none() && vault.path == path)
+    {
         let name = std::path::Path::new(&path)
             .file_name()
             .unwrap_or_default()
             .to_string_lossy()
             .to_string();
-        config.vaults.push(VaultConfig {
+        next.vaults.push(VaultConfig {
             path: path.clone(),
             name,
             ..Default::default()
         });
     }
-    config.active_vault = Some(path);
-    save_app_config(&config)?;
+    next.active_vault = Some(path);
+    next.active_bookmark_id = active_bookmark_id;
+    save_app_config(&next)?;
+    *search_slot = Some(search);
+    *watcher_slot = Some(new_watcher);
+    *config = next;
 
     Ok(())
 }
 
 #[tauri::command]
-pub fn remove_vault(state: State<'_, AppState>, path: String) -> Result<(), String> {
-    let mut config = state.config.lock().map_err(|e| e.to_string())?;
-    config.vaults.retain(|v| v.path != path);
-    if config.active_vault.as_deref() == Some(path.as_str()) {
-        config.active_vault = None;
+pub fn open_vault(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<(), String> {
+    open_vault_path(app.clone(), &state, path, None)?;
+    #[cfg(target_os = "ios")]
+    app.ios_vault_access().release_active()?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn choose_external_vault(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<ExternalVaultResult>, String> {
+    #[cfg(target_os = "ios")]
+    {
+        let picker_app = app.clone();
+        let selection = tauri::async_runtime::spawn_blocking(move || {
+            picker_app.ios_vault_access().choose_folder()
+        })
+        .await
+        .map_err(|error| error.to_string())??;
+        if selection.cancelled {
+            return Ok(None);
+        }
+        let result = ExternalVaultResult::from(selection);
+        let bookmark_was_registered = state
+            .config
+            .lock()
+            .map_err(|error| error.to_string())?
+            .vaults
+            .iter()
+            .any(|vault| vault.bookmark_id.as_deref() == Some(result.bookmark_id.as_str()));
+        if let Err(error) = open_vault_path(
+            app.clone(),
+            &state,
+            result.path.clone(),
+            Some((result.bookmark_id.clone(), result.name.clone())),
+        ) {
+            if bookmark_was_registered {
+                let _ = app.ios_vault_access().rollback_staged();
+            } else {
+                let _ = app
+                    .ios_vault_access()
+                    .forget_bookmark(&result.bookmark_id);
+            }
+            return Err(error);
+        }
+        app.ios_vault_access().commit_staged()?;
+        Ok(Some(result))
     }
-    save_app_config(&config)?;
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = (app, state);
+        Err("Files folders are only available on iOS.".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn restore_external_vault(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    bookmark_id: String,
+) -> Result<ExternalVaultResult, String> {
+    #[cfg(target_os = "ios")]
+    {
+        let resolver_app = app.clone();
+        let selection = tauri::async_runtime::spawn_blocking(move || {
+            resolver_app.ios_vault_access().resolve_folder(&bookmark_id)
+        })
+        .await
+        .map_err(|error| error.to_string())??;
+        let result = ExternalVaultResult::from(selection);
+        if let Err(error) = open_vault_path(
+            app.clone(),
+            &state,
+            result.path.clone(),
+            Some((result.bookmark_id.clone(), result.name.clone())),
+        ) {
+            let _ = app.ios_vault_access().rollback_staged();
+            return Err(error);
+        }
+        app.ios_vault_access().commit_staged()?;
+        Ok(result)
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = (app, state, bookmark_id);
+        Err("Files folders are only available on iOS.".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn remove_vault(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    bookmark_id: Option<String>,
+) -> Result<(), String> {
+    let target = {
+        let config = state.config.lock().map_err(|error| error.to_string())?;
+        let vault = if let Some(bookmark_id) = bookmark_id.as_deref() {
+            config
+                .vaults
+                .iter()
+                .find(|vault| vault.bookmark_id.as_deref() == Some(bookmark_id))
+        } else {
+            config
+                .vaults
+                .iter()
+                .find(|vault| vault.bookmark_id.is_none() && vault.path == path)
+        };
+        vault.map(|vault| {
+            let is_active = if let Some(bookmark_id) = vault.bookmark_id.as_deref() {
+                config.active_bookmark_id.as_deref() == Some(bookmark_id)
+            } else {
+                config.active_bookmark_id.is_none()
+                    && config.active_vault.as_deref() == Some(vault.path.as_str())
+            };
+            (vault.path.clone(), vault.bookmark_id.clone(), is_active)
+        })
+    };
+
+    let Some((target_path, target_bookmark, is_active)) = target else {
+        return Ok(());
+    };
+
+    let old = state
+        .config
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    let mut next = old.clone();
+    if let Some(id) = target_bookmark.as_deref() {
+        next.vaults
+            .retain(|vault| vault.bookmark_id.as_deref() != Some(id));
+    } else {
+        next.vaults
+            .retain(|vault| vault.bookmark_id.is_some() || vault.path != target_path);
+    }
+    if is_active {
+        next.active_vault = None;
+        next.active_bookmark_id = None;
+    }
+    save_app_config(&next)?;
+
+    #[cfg(target_os = "ios")]
+    if let Some(id) = target_bookmark.as_deref() {
+        let forget_app = app.clone();
+        let id_to_forget = id.to_string();
+        let forget_result = match tauri::async_runtime::spawn_blocking(move || {
+            forget_app
+                .ios_vault_access()
+                .forget_bookmark(&id_to_forget)
+        })
+        .await
+        {
+            Ok(result) => result,
+            Err(error) => Err(error.to_string()),
+        };
+
+        if let Err(error) = forget_result {
+            return match save_app_config(&old) {
+                Ok(()) => Err(error),
+                Err(rollback_error) => Err(format!(
+                    "{error} Configuration rollback also failed: {rollback_error}"
+                )),
+            };
+        }
+    }
+    #[cfg(not(target_os = "ios"))]
+    let _ = (&app, &target_bookmark);
+
+    if is_active {
+        clear_vault_runtime(&state)?;
+    }
+    *state.config.lock().map_err(|error| error.to_string())? = next;
+
     Ok(())
 }
 

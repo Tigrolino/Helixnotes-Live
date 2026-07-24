@@ -15,14 +15,23 @@ import type {
   BackupEntry,
   VersionEntry,
   TaskItem,
+  ExternalVaultResult,
 } from "./types";
 
 export async function openVault(path: string): Promise<void> {
   return invoke("open_vault", { path });
 }
 
-export async function removeVault(path: string): Promise<void> {
-  return invoke("remove_vault", { path });
+export async function chooseExternalVault(): Promise<ExternalVaultResult | null> {
+  return invoke("choose_external_vault");
+}
+
+export async function restoreExternalVault(bookmarkId: string): Promise<ExternalVaultResult> {
+  return invoke("restore_external_vault", { bookmarkId });
+}
+
+export async function removeVault(path: string, bookmarkId?: string | null): Promise<void> {
+  return invoke("remove_vault", { path, bookmarkId: bookmarkId ?? null });
 }
 
 export async function getAppConfig(): Promise<AppConfig> {

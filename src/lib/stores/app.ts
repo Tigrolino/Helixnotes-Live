@@ -18,7 +18,10 @@ export const appConfig = writable<AppConfig | null>(null);
 // The active vault's config entry (where per-vault WebDAV sync settings live).
 export function activeVaultConfig(c: AppConfig | null): VaultConfig | null {
   if (!c?.active_vault) return null;
-  return c.vaults.find((v) => v.path === c.active_vault) ?? null;
+  if (c.active_bookmark_id) {
+    return c.vaults.find((v) => v.bookmark_id === c.active_bookmark_id) ?? null;
+  }
+  return c.vaults.find((v) => !v.bookmark_id && v.path === c.active_vault) ?? null;
 }
 export const vaultReady = writable(false);
 
