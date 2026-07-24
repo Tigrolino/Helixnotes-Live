@@ -424,7 +424,7 @@ fn fix_macos_traffic_lights(window: &tauri::WebviewWindow) {
         None => return,
     };
 
-    let superview = match close.superview() {
+    let superview = match unsafe { close.superview() } {
         Some(sv) => sv,
         None => return,
     };
