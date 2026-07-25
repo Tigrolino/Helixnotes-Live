@@ -610,6 +610,14 @@
 		contextMenu = { x, y, notebook: nb };
 	}
 
+	function openNotebookMenu(e: Event, nb: NotebookEntry) {
+		e.preventDefault();
+		e.stopPropagation();
+		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		const { x, y } = clampMenu(rect.right - 200, rect.bottom + 4, 200, 280);
+		contextMenu = { x, y, notebook: nb };
+	}
+
 	function closeContextMenu() {
 		contextMenu = null;
 	}
@@ -892,8 +900,11 @@
 </aside>
 
 {#if contextMenu}
+	{#if isMobile}
+		<button type="button" class="context-menu-backdrop" aria-label="Close notebook actions" onclick={closeContextMenu}></button>
+	{/if}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="context-menu" style="left: {contextMenu.x}px; top: {contextMenu.y}px" onmousedown={(e) => e.stopPropagation()}>
+	<div class="context-menu" class:mobile={isMobile} style="left: {contextMenu.x}px; top: {contextMenu.y}px" onmousedown={(e) => e.stopPropagation()}>
 		<button onclick={() => startNewSubNotebook(contextMenu!.notebook)}>
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" /><line x1="12" y1="11" x2="12" y2="17" /><line x1="9" y1="14" x2="15" y2="14" /></svg>
 			New Sub-notebook
@@ -920,8 +931,11 @@
 {/if}
 
 {#if trashContextMenu}
+	{#if isMobile}
+		<button type="button" class="context-menu-backdrop" aria-label="Close trash actions" onclick={() => trashContextMenu = null}></button>
+	{/if}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="context-menu" style="left: {trashContextMenu.x}px; top: {trashContextMenu.y}px" onmousedown={(e) => e.stopPropagation()}>
+	<div class="context-menu" class:mobile={isMobile} style="left: {trashContextMenu.x}px; top: {trashContextMenu.y}px" onmousedown={(e) => e.stopPropagation()}>
 		<button class="danger" onclick={handleEmptyTrash}>
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 				<polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" />
@@ -935,7 +949,7 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div class="delete-confirm-overlay" onclick={() => deleteConfirm = null}>
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="delete-confirm" onclick={(e) => e.stopPropagation()}>
+		<div class="delete-confirm" class:mobile={isMobile} onclick={(e) => e.stopPropagation()}>
 			<h4>Delete "{deleteConfirm.name}"?</h4>
 			<p>This notebook contains {countNotesRecursive(deleteConfirm)} note{countNotesRecursive(deleteConfirm) === 1 ? '' : 's'} that will be permanently deleted.</p>
 			<div class="delete-confirm-actions">
@@ -965,6 +979,7 @@
 			/>
 		</div>
 	{:else}
+		<div class="notebook-row" data-nb-path={nb.path}>
 		<button
 			class="notebook-item"
 			class:active={$viewMode === 'notebook' && $activeNotebook?.path === nb.path}
@@ -1064,6 +1079,17 @@
 				</span>
 			{/if}
 		</button>
+		{#if isMobile}
+			<button
+				type="button"
+				class="notebook-actions-btn"
+				aria-label={`Actions for ${nb.name}`}
+				onclick={(e) => openNotebookMenu(e, nb)}
+			>
+				<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+			</button>
+		{/if}
+		</div>
 	{/if}
 	{#if hasChildren && !isCollapsed}
 		{#each nb.children as child (child.path)}
@@ -1306,6 +1332,10 @@
 		padding: 0 2px;
 	}
 
+	.notebook-row {
+		position: relative;
+	}
+
 	.notebook-item {
 		display: flex;
 		align-items: center;
@@ -1413,6 +1443,28 @@
 		cursor: grabbing;
 	}
 
+	.notebook-actions-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		position: absolute;
+		right: 4px;
+		top: 50%;
+		transform: translateY(-50%);
+		width: 44px;
+		height: 44px;
+		padding: 0;
+		border: none;
+		border-radius: 8px;
+		background: none;
+		color: var(--text-tertiary);
+	}
+
+	.notebook-actions-btn:active {
+		background: var(--bg-hover);
+		color: var(--text-primary);
+	}
+
 	.tag-list {
 		padding: 0 4px;
 	}
@@ -1479,6 +1531,15 @@
 		padding: 4px;
 		z-index: 1000;
 		min-width: 140px;
+	}
+
+	.context-menu-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 999;
+		padding: 0;
+		border: none;
+		background: rgba(0, 0, 0, 0.18);
 	}
 
 	.context-menu button {
@@ -1635,7 +1696,7 @@
 	}
 
 	.sidebar.mobile .notebook-item {
-		padding: 12px 12px;
+		padding: 2px 56px 2px 12px;
 		min-height: 48px;
 		gap: 10px;
 		font-size: 15px;
@@ -1676,34 +1737,40 @@
 		display: none;
 	}
 
-	.sidebar.mobile .context-menu {
-		min-width: 200px;
+	.context-menu.mobile {
+		left: calc(12px + env(safe-area-inset-left, 0px)) !important;
+		right: calc(12px + env(safe-area-inset-right, 0px));
+		top: auto !important;
+		bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+		min-width: 0;
+		max-height: calc(100dvh - 24px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+		overflow-y: auto;
 		border-radius: 12px;
 		padding: 6px;
 	}
 
-	.sidebar.mobile .context-menu button {
+	.context-menu.mobile button {
 		padding: 12px 16px;
 		font-size: 15px;
 		min-height: 44px;
 		border-radius: 8px;
 	}
 
-	.sidebar.mobile .delete-confirm {
+	.delete-confirm.mobile {
 		max-width: calc(100vw - 40px);
 		padding: 24px;
 	}
 
-	.sidebar.mobile .delete-confirm h4 {
+	.delete-confirm.mobile h4 {
 		font-size: 16px;
 	}
 
-	.sidebar.mobile .delete-confirm p {
+	.delete-confirm.mobile p {
 		font-size: 14px;
 	}
 
-	.sidebar.mobile .delete-confirm-cancel,
-	.sidebar.mobile .delete-confirm-btn {
+	.delete-confirm.mobile .delete-confirm-cancel,
+	.delete-confirm.mobile .delete-confirm-btn {
 		padding: 10px 20px;
 		font-size: 14px;
 		min-height: 44px;
