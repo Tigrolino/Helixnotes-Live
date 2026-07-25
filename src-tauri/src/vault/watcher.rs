@@ -1,4 +1,4 @@
-use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{Config, EventKind, PollWatcher, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::Path;
 use std::sync::mpsc;
 use std::time::Duration;
@@ -8,14 +8,57 @@ use crate::state::AppState;
 use crate::types::FileEvent;
 use crate::vault::operations::helixnotes_dir;
 
-pub fn start_watcher(app: AppHandle, vault_path: String) -> Result<RecommendedWatcher, String> {
+const IOS_POLL_INTERVAL: Duration = Duration::from_secs(10);
+const NATIVE_POLL_INTERVAL: Duration = Duration::from_secs(1);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WatcherBackend {
+    Recommended,
+    Poll,
+}
+
+const fn watcher_backend_for_target(is_ios: bool) -> WatcherBackend {
+    if is_ios {
+        WatcherBackend::Poll
+    } else {
+        WatcherBackend::Recommended
+    }
+}
+
+const fn poll_interval_for_backend(backend: WatcherBackend) -> Duration {
+    match backend {
+        WatcherBackend::Recommended => NATIVE_POLL_INTERVAL,
+        WatcherBackend::Poll => IOS_POLL_INTERVAL,
+    }
+}
+
+pub enum VaultWatcher {
+    Recommended(RecommendedWatcher),
+    Poll(PollWatcher),
+}
+
+impl VaultWatcher {
+    fn watch(&mut self, path: &Path, recursive_mode: RecursiveMode) -> notify::Result<()> {
+        match self {
+            Self::Recommended(watcher) => watcher.watch(path, recursive_mode),
+            Self::Poll(watcher) => watcher.watch(path, recursive_mode),
+        }
+    }
+}
+
+pub fn start_watcher(app: AppHandle, vault_path: String) -> Result<VaultWatcher, String> {
     let (tx, rx) = mpsc::channel();
 
-    let mut watcher = RecommendedWatcher::new(
-        tx,
-        Config::default().with_poll_interval(Duration::from_secs(1)),
-    )
-    .map_err(|e| e.to_string())?;
+    let backend = watcher_backend_for_target(cfg!(target_os = "ios"));
+    let config = Config::default().with_poll_interval(poll_interval_for_backend(backend));
+    let mut watcher = match backend {
+        WatcherBackend::Recommended => VaultWatcher::Recommended(
+            RecommendedWatcher::new(tx, config).map_err(|e| e.to_string())?,
+        ),
+        WatcherBackend::Poll => {
+            VaultWatcher::Poll(PollWatcher::new(tx, config).map_err(|e| e.to_string())?)
+        }
+    };
 
     watcher
         .watch(Path::new(&vault_path), RecursiveMode::Recursive)
@@ -79,4 +122,34 @@ pub fn start_watcher(app: AppHandle, vault_path: String) -> Result<RecommendedWa
     });
 
     Ok(watcher)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ios_uses_polling_backend() {
+        assert_eq!(watcher_backend_for_target(true), WatcherBackend::Poll);
+    }
+
+    #[test]
+    fn other_platforms_keep_recommended_backend() {
+        assert_eq!(
+            watcher_backend_for_target(false),
+            WatcherBackend::Recommended
+        );
+    }
+
+    #[test]
+    fn watcher_backends_use_the_expected_intervals() {
+        assert_eq!(
+            poll_interval_for_backend(WatcherBackend::Poll),
+            Duration::from_secs(10)
+        );
+        assert_eq!(
+            poll_interval_for_backend(WatcherBackend::Recommended),
+            Duration::from_secs(1)
+        );
+    }
 }

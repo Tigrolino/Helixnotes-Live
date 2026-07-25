@@ -1,14 +1,14 @@
 use crate::search::SearchIndex;
 use crate::types::AppConfig;
-use notify::RecommendedWatcher;
+use crate::vault::watcher::VaultWatcher;
 use std::sync::atomic::AtomicBool;
-use std::sync::Mutex;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 pub struct AppState {
     pub config: Mutex<AppConfig>,
     pub search_index: Mutex<Option<Arc<SearchIndex>>>,
-    pub watcher: Mutex<Option<RecommendedWatcher>>,
+    pub watcher: Mutex<Option<VaultWatcher>>,
     pub vault_transition: tokio::sync::Mutex<()>,
     pub importing: AtomicBool,
     pub syncing: AtomicBool,
