@@ -59,16 +59,9 @@ pub fn run() {
         .on_page_load(|webview, payload| {
             #[cfg(target_os = "macos")]
             if webview.label() == "main"
-                && matches!(
-                    payload.event(),
-                    tauri::webview::PageLoadEvent::Finished
-                )
+                && matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
             {
-                let window = webview.window();
-                let window_on_main = window.clone();
-                let _ = window.run_on_main_thread(move || {
-                    fix_macos_traffic_lights(&window_on_main);
-                });
+                queue_macos_traffic_light_fix(&webview.window());
             }
             #[cfg(not(target_os = "macos"))]
             let _ = (webview, payload);
@@ -321,6 +314,21 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
 
         builder = builder.on_window_event(move |window, event| {
+            #[cfg(target_os = "macos")]
+            if window.label() == "main"
+                && matches!(
+                    event,
+                    tauri::WindowEvent::Resized(_)
+                        | tauri::WindowEvent::Focused(true)
+                        | tauri::WindowEvent::ScaleFactorChanged { .. }
+                        | tauri::WindowEvent::ThemeChanged(_)
+                )
+            {
+                // AppKit can restore the default button Y position after window-state
+                // changes. Queue this pass so it runs after AppKit finishes its layout.
+                queue_macos_traffic_light_fix(window);
+            }
+
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     // Only hide to tray for the main window
@@ -408,6 +416,14 @@ fn percent_decode(input: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&output).to_string()
+}
+
+#[cfg(target_os = "macos")]
+fn queue_macos_traffic_light_fix(window: &tauri::Window) {
+    let window_on_main = window.clone();
+    let _ = window.run_on_main_thread(move || {
+        fix_macos_traffic_lights(&window_on_main);
+    });
 }
 
 #[cfg(target_os = "macos")]
