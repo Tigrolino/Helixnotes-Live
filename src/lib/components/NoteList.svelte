@@ -40,6 +40,7 @@
 	} from '$lib/api';
 	import { formatRelativeTime, formatDate, dateBucketLabel } from '$lib/utils/time';
 	import { openNoteWindow } from '$lib/utils/window';
+	import { encodeNoteDragPaths } from '$lib/utils/note-drag';
 	import { revealItemInDir } from '@tauri-apps/plugin-opener';
 	import type { NoteEntry, TrashNotebookEntry, SortMode, TaskItem } from '$lib/types';
 	import TasksView from './TasksView.svelte';
@@ -263,6 +264,19 @@
 		clearSelection();
 		scrollTop = 0;
 		if (listContainer) listContainer.scrollTop = 0;
+	});
+
+	// Notes can also be removed from this list by a drop handled in the sidebar.
+	$effect(() => {
+		if (selectedPaths.size === 0) return;
+		const availablePaths = new Set($notes.map((note) => note.path));
+		const remaining = new Set([...selectedPaths].filter((path) => availablePaths.has(path)));
+		if (remaining.size === selectedPaths.size) return;
+		if (remaining.size === 0) {
+			clearSelection();
+		} else {
+			selectedPaths = remaining;
+		}
 	});
 
 	// Invalidate quickaccess cache when starred notes change (e.g. from Editor star toggle)
@@ -1259,11 +1273,10 @@
 							e.dataTransfer!.effectAllowed = 'move';
 							return;
 						}
-						if (selectedPaths.size > 1 && selectedPaths.has(note.path)) {
-							e.dataTransfer!.setData('text/plain', [...selectedPaths].join('\n'));
-						} else {
-							e.dataTransfer!.setData('text/plain', note.path);
-						}
+						const dragPaths = selectedPaths.size > 1 && selectedPaths.has(note.path)
+							? selectedPaths
+							: [note.path];
+						e.dataTransfer!.setData('text/plain', encodeNoteDragPaths(dragPaths));
 						e.dataTransfer!.effectAllowed = 'move';
 					}}
 					ondragover={(e) => {

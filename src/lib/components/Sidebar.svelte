@@ -27,6 +27,7 @@
 	import { convertFileSrc } from '@tauri-apps/api/core';
 	import type { NotebookEntry } from '$lib/types';
 	import { isMobile } from '$lib/platform';
+	import { decodeNoteDragPaths } from '$lib/utils/note-drag';
 
 	let { onViewChanged = () => {} }: {
 		onViewChanged?: () => void;
@@ -340,22 +341,32 @@
 	async function handleNoteDrop(e: DragEvent, nb: NotebookEntry) {
 		e.preventDefault();
 		dropTargetPath = null;
-		const notePath = e.dataTransfer?.getData('text/plain');
-		if (!notePath) return;
-		// Don't move if already in this notebook
-		const noteDir = notePath.substring(0, notePath.lastIndexOf('/'));
-		if (noteDir === nb.path) return;
-		try {
-			const newPath = await moveNote(notePath, nb.path);
-			$notes = $notes.filter(n => n.path !== notePath);
-			if ($activeNotePath === notePath) {
-				$activeNotePath = newPath;
-				$activeNote = await readNote(newPath);
+		const payload = e.dataTransfer?.getData('text/plain') ?? '';
+		const notePaths = [...new Set(decodeNoteDragPaths(payload))]
+			.filter((path) => norm(parentOf(path)) !== norm(nb.path));
+		if (notePaths.length === 0) return;
+
+		const movedPaths = new Map<string, string>();
+		for (const notePath of notePaths) {
+			try {
+				movedPaths.set(notePath, await moveNote(notePath, nb.path));
+			} catch (e) {
+				console.error('Failed to move note:', notePath, e);
 			}
-			await refresh();
-		} catch (e) {
-			console.error('Failed to move note:', e);
 		}
+		if (movedPaths.size === 0) return;
+
+		$notes = $notes.filter((note) => !movedPaths.has(note.path));
+		const activeNewPath = $activeNotePath ? movedPaths.get($activeNotePath) : undefined;
+		if (activeNewPath) {
+			$activeNotePath = activeNewPath;
+			try {
+				$activeNote = await readNote(activeNewPath);
+			} catch (e) {
+				console.error('Failed to reload moved note:', e);
+			}
+		}
+		await refresh();
 	}
 
 	async function handleNotebookDrop(e: DragEvent, destPath: string) {
