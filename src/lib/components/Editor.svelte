@@ -301,11 +301,19 @@
 		$outlineWidth = Math.max(160, Math.min(500, $outlineWidth - delta));
 	}
 
-	function scrollToHeading(pos: number) {
+	async function scrollToHeading(pos: number) {
+		if (isMobile) {
+			showOutline = false;
+			await tick();
+		}
 		if (!editor) return;
 		editor.commands.setTextSelection(pos + 1);
 		editor.commands.scrollIntoView();
 		editor.view.focus();
+		if (isMobile) {
+			const heading = editor.view.nodeDOM(pos);
+			if (heading instanceof HTMLElement) heading.scrollIntoView({ block: 'start' });
+		}
 	}
 
 	// Version history
