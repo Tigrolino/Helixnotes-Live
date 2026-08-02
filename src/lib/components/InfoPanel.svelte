@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { showInfo, appConfig } from '$lib/stores/app';
+	import { showInfo, appConfig, activeNotePath } from '$lib/stores/app';
 	import { getVaultStats, findOrphanedAttachments, trashOrphanedAttachments } from '$lib/api';
 	import type { OrphanAttachment } from '$lib/api';
 	import { openUrl } from '$lib/api';
@@ -93,6 +93,7 @@
 	let locationCopyState = $state<'idle' | 'copied' | 'error'>('idle');
 	let locationCopyTimer: ReturnType<typeof setTimeout> | null = null;
 	const orphanTotal = $derived((orphans ?? []).reduce((a, o) => a + o.size, 0));
+	const diskLocation = $derived($activeNotePath ?? $appConfig?.active_vault ?? null);
 
 	getVersion().then(v => appVersion = v).catch(() => appVersion = '0.0.0');
 
@@ -108,17 +109,16 @@
 		openUrl(url).catch(console.error);
 	}
 
-	async function copyVaultLocation() {
-		const location = $appConfig?.active_vault;
-		if (!location) return;
+	async function copyDiskLocation() {
+		if (!diskLocation) return;
 
 		if (locationCopyTimer) clearTimeout(locationCopyTimer);
 		try {
 			if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
-			await navigator.clipboard.writeText(location);
+			await navigator.clipboard.writeText(diskLocation);
 			locationCopyState = 'copied';
 		} catch (e) {
-			console.error('Failed to copy vault location:', e);
+			console.error('Failed to copy disk location:', e);
 			locationCopyState = 'error';
 		}
 		locationCopyTimer = setTimeout(() => {
@@ -200,17 +200,17 @@
 					<p class="app-version">v{appVersion}</p>
 					<p class="app-description">A local markdown note-taking app.</p>
 
-					{#if $appConfig?.active_vault}
-						<div class="vault-location">
-							<div class="vault-location-header">
-								<span class="vault-location-label">Vault location</span>
+					{#if diskLocation}
+						<div class="disk-location">
+							<div class="disk-location-header">
+								<span class="disk-location-label">Disk location</span>
 								<button
 									class="copy-location-btn"
 									class:copied={locationCopyState === 'copied'}
 									class:error={locationCopyState === 'error'}
-									onclick={copyVaultLocation}
+									onclick={copyDiskLocation}
 									aria-live="polite"
-									title="Copy vault location"
+									title="Copy disk location"
 								>
 									{#if locationCopyState === 'copied'}
 										<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6" /></svg>
@@ -224,7 +224,7 @@
 									{/if}
 								</button>
 							</div>
-							<code class="vault-location-path" title={$appConfig.active_vault}>{$appConfig.active_vault}</code>
+							<code class="disk-location-path" title={diskLocation}>{diskLocation}</code>
 						</div>
 					{/if}
 
@@ -468,7 +468,7 @@
 		margin-top: 4px;
 	}
 
-	.vault-location {
+	.disk-location {
 		width: 100%;
 		margin-top: 18px;
 		padding: 11px 14px 12px;
@@ -478,21 +478,21 @@
 		text-align: left;
 	}
 
-	.vault-location-header {
+	.disk-location-header {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
 	}
 
-	.vault-location-label {
+	.disk-location-label {
 		color: var(--text-tertiary);
 		font-size: 11px;
 		font-weight: 600;
 		letter-spacing: 0.02em;
 	}
 
-	.vault-location-path {
+	.disk-location-path {
 		display: block;
 		margin-top: 7px;
 		color: var(--text-primary);
@@ -529,7 +529,7 @@
 		color: var(--danger);
 	}
 
-	.vault-location + .info-stats {
+	.disk-location + .info-stats {
 		margin-top: 12px;
 	}
 
