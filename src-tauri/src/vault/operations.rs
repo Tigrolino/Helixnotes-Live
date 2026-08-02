@@ -1237,3 +1237,30 @@ pub fn sanitize_filename(name: &str) -> String {
         .trim()
         .to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{helixnotes_dir, load_notebook_icons, set_notebook_icon};
+    use std::fs;
+    use uuid::Uuid;
+
+    #[test]
+    fn persists_and_removes_builtin_notebook_icons() {
+        let vault =
+            std::env::temp_dir().join(format!("helixnotes-notebook-icon-test-{}", Uuid::new_v4()));
+        let vault_path = vault.to_string_lossy();
+        fs::create_dir_all(helixnotes_dir(&vault_path)).unwrap();
+
+        set_notebook_icon(&vault_path, "Projects", Some("builtin:briefcase")).unwrap();
+        let icons = load_notebook_icons(&vault_path).unwrap();
+        assert_eq!(
+            icons.get("Projects").map(String::as_str),
+            Some("builtin:briefcase")
+        );
+
+        set_notebook_icon(&vault_path, "Projects", None).unwrap();
+        assert!(load_notebook_icons(&vault_path).unwrap().is_empty());
+
+        fs::remove_dir_all(vault).unwrap();
+    }
+}

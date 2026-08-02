@@ -28,6 +28,13 @@
 	import type { NotebookEntry } from '$lib/types';
 	import { isMobile } from '$lib/platform';
 	import { decodeNoteDragPaths } from '$lib/utils/note-drag';
+	import NotebookGlyph from './NotebookGlyph.svelte';
+	import {
+		NOTEBOOK_ICON_OPTIONS,
+		decodeBuiltinNotebookIcon,
+		encodeBuiltinNotebookIcon,
+		type NotebookIconId
+	} from '$lib/utils/notebook-icons';
 
 	let { onViewChanged = () => {} }: {
 		onViewChanged?: () => void;
@@ -79,6 +86,8 @@
 	}
 	let sortedNotebooks = $derived(sortNotebooksTree($notebooks));
 	let contextMenu = $state<{ x: number; y: number; notebook: NotebookEntry } | null>(null);
+	let iconPickerNotebook = $state<NotebookEntry | null>(null);
+	let iconPickerElement = $state<HTMLDivElement | null>(null);
 	let trashContextMenu = $state<{ x: number; y: number } | null>(null);
 	let tagsCollapsed = $state(true);
 	let deleteConfirm = $state<NotebookEntry | null>(null);
@@ -569,21 +578,38 @@
 		renameInput?.select();
 	}
 
-	async function handleSetIcon(nb: NotebookEntry) {
+	async function openIconPicker(nb: NotebookEntry) {
 		contextMenu = null;
+		iconPickerNotebook = nb;
+		await tick();
+		iconPickerElement?.focus();
+	}
+
+	async function handleBuiltinIcon(nb: NotebookEntry, icon: NotebookIconId) {
+		try {
+			const value = encodeBuiltinNotebookIcon(icon);
+			await setNotebookIcon(nb.relative_path, value);
+			$notebookIcons = { ...$notebookIcons, [nb.relative_path]: value };
+			iconPickerNotebook = null;
+		} catch (e) {
+			console.error('Failed to set notebook icon:', e);
+		}
+	}
+
+	async function handleCustomIcon(nb: NotebookEntry) {
+		iconPickerNotebook = null;
 		try {
 			const selected = await openDialog({
 				multiple: false,
 				filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'] }]
 			});
 			if (!selected) return;
-			const filePath = typeof selected === 'string' ? selected : selected;
-			// Read the file and save as attachment
-			const data = await readFile(filePath as string);
-			const fileName = (filePath as string).split('/').pop() || 'icon.png';
+			const filePath = selected as string;
+			const data = await readFile(filePath);
+			const fileName = baseOf(filePath) || 'icon.png';
 			const iconRelative = await saveAttachment(`notebook-icon-${fileName}`, Array.from(data));
 			await setNotebookIcon(nb.relative_path, iconRelative);
-			$notebookIcons = await getNotebookIcons();
+			$notebookIcons = { ...$notebookIcons, [nb.relative_path]: iconRelative };
 		} catch (e) {
 			console.error('Failed to set notebook icon:', e);
 		}
@@ -591,9 +617,12 @@
 
 	async function handleRemoveIcon(nb: NotebookEntry) {
 		contextMenu = null;
+		iconPickerNotebook = null;
 		try {
 			await setNotebookIcon(nb.relative_path, null);
-			$notebookIcons = await getNotebookIcons();
+			const icons = { ...$notebookIcons };
+			delete icons[nb.relative_path];
+			$notebookIcons = icons;
 		} catch (e) {
 			console.error('Failed to remove notebook icon:', e);
 		}
@@ -601,7 +630,7 @@
 
 	function getNotebookIconSrc(nb: NotebookEntry): string | null {
 		const iconPath = $notebookIcons[nb.relative_path];
-		if (!iconPath) return null;
+		if (!iconPath || iconPath.startsWith('builtin:')) return null;
 		const vaultRoot = $appConfig?.active_vault;
 		if (!vaultRoot) return null;
 		return convertFileSrc(`${vaultRoot}/${iconPath}`);
@@ -661,7 +690,7 @@
 	}
 </script>
 
-<svelte:window onclick={handleWindowClick} />
+<svelte:window onclick={handleWindowClick} onkeydown={(e) => { if (e.key === 'Escape') iconPickerNotebook = null; }} />
 
 <aside class="sidebar" class:collapsed={$sidebarCollapsed} class:mobile={isMobile} class:nav-empty={!anyNavItem}>
 	{#if !isMobile}
@@ -924,20 +953,57 @@
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
 			Rename
 		</button>
-		<button onclick={() => handleSetIcon(contextMenu!.notebook)}>
+		<button onclick={() => openIconPicker(contextMenu!.notebook)}>
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><line x1="9" y1="9" x2="9.01" y2="9" /><line x1="15" y1="9" x2="15.01" y2="9" /></svg>
-			Set Icon
+			{$notebookIcons[contextMenu.notebook.relative_path] ? 'Change Icon...' : 'Set Icon...'}
 		</button>
-		{#if $notebookIcons[contextMenu.notebook.relative_path]}
-			<button onclick={() => handleRemoveIcon(contextMenu!.notebook)}>
-				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
-				Remove Icon
-			</button>
-		{/if}
 		<button class="danger" onclick={() => handleDelete(contextMenu!.notebook)}>
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" /></svg>
 			Delete
 		</button>
+	</div>
+{/if}
+
+{#if iconPickerNotebook}
+	<div class="icon-picker-overlay" class:mobile={isMobile}>
+		<button class="icon-picker-backdrop" aria-label="Close icon picker" onclick={() => iconPickerNotebook = null}></button>
+		<div bind:this={iconPickerElement} class="icon-picker" role="dialog" aria-modal="true" aria-label={`Choose an icon for ${iconPickerNotebook.name}`} tabindex="-1">
+			<header class="icon-picker-header">
+				<div>
+					<h3>Notebook icon</h3>
+					<p>{iconPickerNotebook.name}</p>
+				</div>
+				<button class="icon-picker-close" aria-label="Close icon picker" onclick={() => iconPickerNotebook = null}>
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+				</button>
+			</header>
+			<div class="icon-picker-grid">
+				{#each NOTEBOOK_ICON_OPTIONS as option}
+					<button
+						class="icon-picker-option"
+						class:active={$notebookIcons[iconPickerNotebook.relative_path] === encodeBuiltinNotebookIcon(option.id)}
+						aria-label={option.label}
+						title={option.label}
+						onclick={() => handleBuiltinIcon(iconPickerNotebook!, option.id)}
+					>
+						<NotebookGlyph icon={option.id} size={20} />
+						<span>{option.label}</span>
+					</button>
+				{/each}
+			</div>
+			<div class="icon-picker-actions">
+				<button onclick={() => handleCustomIcon(iconPickerNotebook!)}>
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="m21 15-5-5L5 21" /></svg>
+					Custom image...
+				</button>
+				{#if $notebookIcons[iconPickerNotebook.relative_path]}
+					<button class="remove" onclick={() => handleRemoveIcon(iconPickerNotebook!)}>
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13" /></svg>
+						Use default
+					</button>
+				{/if}
+			</div>
+		</div>
 	</div>
 {/if}
 
@@ -975,6 +1041,7 @@
 	{@const hasChildren = nb.children.length > 0}
 	{@const isCollapsed = $collapsedNotebooks.includes(nb.path)}
 	{@const iconSrc = getNotebookIconSrc(nb)}
+	{@const builtinIcon = decodeBuiltinNotebookIcon($notebookIcons[nb.relative_path])}
 	{#if editingNotebook === nb.path}
 		<div class="notebook-item" style="padding-left: {4 + depth * 16}px">
 			<input
@@ -1063,7 +1130,9 @@
 			{:else}
 				<span class="chevron-spacer"></span>
 			{/if}
-		{#if iconSrc}
+		{#if builtinIcon}
+			<span class="notebook-builtin-icon"><NotebookGlyph icon={builtinIcon} size={18} /></span>
+		{:else if iconSrc}
 			<img class="notebook-icon" src={iconSrc} alt="" />
 		{:else if isCollapsed || nb.children.length === 0}
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.6;flex-shrink:0">
@@ -1419,6 +1488,15 @@
 		flex-shrink: 0;
 	}
 
+	.notebook-builtin-icon {
+		width: 20px;
+		height: 20px;
+		display: grid;
+		place-items: center;
+		color: var(--text-secondary);
+		flex-shrink: 0;
+	}
+
 	.notebook-name {
 		flex: 1;
 		text-align: left;
@@ -1580,6 +1658,185 @@
 		background: color-mix(in srgb, var(--danger) 10%, transparent);
 	}
 
+	.icon-picker-overlay {
+		position: fixed;
+		inset: 0;
+		z-index: 1100;
+		display: grid;
+		place-items: center;
+		padding: 20px;
+	}
+
+	.icon-picker-backdrop {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		padding: 0;
+		border: none;
+		background: rgba(8, 10, 18, 0.42);
+		cursor: default;
+	}
+
+	.icon-picker {
+		position: relative;
+		z-index: 1;
+		width: min(360px, 100%);
+		max-height: calc(100dvh - 40px);
+		overflow-y: auto;
+		background: var(--bg-primary);
+		border: 1px solid var(--border-color);
+		border-radius: 14px;
+		box-shadow: var(--shadow-lg);
+	}
+
+	.icon-picker-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16px;
+		padding: 16px 18px 12px;
+		border-bottom: 1px solid var(--border-light);
+	}
+
+	.icon-picker-header h3,
+	.icon-picker-header p {
+		margin: 0;
+	}
+
+	.icon-picker-header h3 {
+		color: var(--text-primary);
+		font-size: 15px;
+		font-weight: 650;
+	}
+
+	.icon-picker-header p {
+		margin-top: 2px;
+		color: var(--text-tertiary);
+		font-size: 12px;
+	}
+
+	.icon-picker-close {
+		width: 32px;
+		height: 32px;
+		display: grid;
+		place-items: center;
+		padding: 0;
+		border: none;
+		border-radius: 8px;
+		background: transparent;
+		color: var(--text-tertiary);
+		cursor: pointer;
+	}
+
+	.icon-picker-close:hover {
+		background: var(--bg-hover);
+		color: var(--text-primary);
+	}
+
+	.icon-picker-grid {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 7px;
+		padding: 14px;
+	}
+
+	.icon-picker-option {
+		min-width: 0;
+		min-height: 60px;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 5px;
+		padding: 7px 3px 6px;
+		border: 1px solid transparent;
+		border-radius: 9px;
+		background: var(--bg-secondary);
+		color: var(--text-secondary);
+		cursor: pointer;
+	}
+
+	.icon-picker-option span {
+		max-width: 100%;
+		overflow: hidden;
+		color: var(--text-tertiary);
+		font-size: 10px;
+		line-height: 1.1;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.icon-picker-option:hover {
+		border-color: var(--border-color);
+		background: var(--bg-hover);
+		color: var(--text-primary);
+	}
+
+	.icon-picker-option.active {
+		border-color: var(--accent);
+		background: var(--accent-light);
+		color: var(--accent);
+	}
+
+	.icon-picker-option.active span {
+		color: var(--accent);
+	}
+
+	.icon-picker-actions {
+		display: flex;
+		gap: 8px;
+		padding: 12px 14px 14px;
+		border-top: 1px solid var(--border-light);
+	}
+
+	.icon-picker-actions button {
+		flex: 1;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 7px;
+		padding: 9px 12px;
+		border: 1px solid var(--border-color);
+		border-radius: 8px;
+		background: var(--bg-secondary);
+		color: var(--text-secondary);
+		font-size: 12px;
+		cursor: pointer;
+	}
+
+	.icon-picker-actions button:hover {
+		background: var(--bg-hover);
+		color: var(--text-primary);
+	}
+
+	.icon-picker-actions button.remove {
+		background: transparent;
+	}
+
+	.icon-picker-overlay.mobile {
+		place-items: end center;
+		padding:
+			20px
+			calc(12px + env(safe-area-inset-right, 0px))
+			calc(12px + env(safe-area-inset-bottom, 0px))
+			calc(12px + env(safe-area-inset-left, 0px));
+	}
+
+	.icon-picker-overlay.mobile .icon-picker {
+		width: 100%;
+		max-height: calc(100dvh - 32px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+	}
+
+	.icon-picker-overlay.mobile .icon-picker-option {
+		min-height: 64px;
+	}
+
+	.icon-picker-overlay.mobile .icon-picker-actions button {
+		min-height: 44px;
+		font-size: 14px;
+	}
+
 	.delete-confirm-overlay {
 		position: fixed;
 		inset: 0;
@@ -1714,6 +1971,11 @@
 	}
 
 	.sidebar.mobile .notebook-icon {
+		width: 24px;
+		height: 24px;
+	}
+
+	.sidebar.mobile .notebook-builtin-icon {
 		width: 24px;
 		height: 24px;
 	}

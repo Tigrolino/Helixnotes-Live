@@ -6,9 +6,9 @@
 // vs manifest) and resolve each file as upload/download/delete, with keep-both
 // conflict copies so nothing is ever lost.
 //
-// Synced set: every `*.md` in the vault tree, plus `.helixnotes/attachments/`.
-// Everything else under `.helixnotes/` (search_index, trash, history, *.json, the
-// manifest itself) is local-only and never synced.
+// Synced set: every `*.md` in the vault tree, `.helixnotes/attachments/`, and
+// `.helixnotes/notebook_icons.json`. Search indexes, trash, history, other metadata,
+// and the manifest itself remain local-only.
 
 use crate::state::AppState;
 use crate::vault::operations::helixnotes_dir;
@@ -119,12 +119,12 @@ struct LocalFile {
     path: PathBuf,
 }
 
-/// The synced set: `*.md` anywhere outside `.helixnotes/`, plus everything under
-/// `.helixnotes/attachments/`. Applied to BOTH local and remote so pointing at a
-/// folder with unrelated files never drags them into the vault.
+/// The synced set: `*.md` anywhere outside `.helixnotes/`, everything under
+/// `.helixnotes/attachments/`, and the notebook icon mapping. Applied to BOTH local
+/// and remote so pointing at a folder with unrelated files never imports them.
 fn is_synced_relpath(rel: &str) -> bool {
     if rel.starts_with(".helixnotes/") {
-        rel.starts_with(".helixnotes/attachments/")
+        rel.starts_with(".helixnotes/attachments/") || rel == ".helixnotes/notebook_icons.json"
     } else {
         rel.ends_with(".md")
     }
@@ -723,4 +723,29 @@ pub fn run_sync(app: tauri::AppHandle, vault: String, cfg: WebdavConfig) -> Resu
         },
     );
     Ok(summary)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_synced_relpath;
+
+    #[test]
+    fn syncs_notebook_icon_mapping_and_assets_only() {
+        for path in [
+            "Notes/plan.md",
+            ".helixnotes/attachments/notebook-icon.png",
+            ".helixnotes/notebook_icons.json",
+        ] {
+            assert!(is_synced_relpath(path), "expected {path} to be synced");
+        }
+
+        for path in [
+            "Notes/image.png",
+            ".helixnotes/sync_state.json",
+            ".helixnotes/notebook_icons.json.bak",
+            ".helixnotes/attachments-old/icon.png",
+        ] {
+            assert!(!is_synced_relpath(path), "expected {path} to stay local");
+        }
+    }
 }
