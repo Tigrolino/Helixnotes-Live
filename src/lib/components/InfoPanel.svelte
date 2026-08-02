@@ -90,17 +90,41 @@
 	let orphans = $state<OrphanAttachment[] | null>(null);
 	let scanning = $state(false);
 	let trashing = $state(false);
+	let locationCopyState = $state<'idle' | 'copied' | 'error'>('idle');
+	let locationCopyTimer: ReturnType<typeof setTimeout> | null = null;
 	const orphanTotal = $derived((orphans ?? []).reduce((a, o) => a + o.size, 0));
 
 	getVersion().then(v => appVersion = v).catch(() => appVersion = '0.0.0');
 
 	function close() {
+		if (locationCopyTimer) clearTimeout(locationCopyTimer);
+		locationCopyTimer = null;
+		locationCopyState = 'idle';
 		$showInfo = false;
 		activeTab = isMobile ? 'about' : 'shortcuts';
 	}
 
 	function openLink(url: string) {
 		openUrl(url).catch(console.error);
+	}
+
+	async function copyVaultLocation() {
+		const location = $appConfig?.active_vault;
+		if (!location) return;
+
+		if (locationCopyTimer) clearTimeout(locationCopyTimer);
+		try {
+			if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+			await navigator.clipboard.writeText(location);
+			locationCopyState = 'copied';
+		} catch (e) {
+			console.error('Failed to copy vault location:', e);
+			locationCopyState = 'error';
+		}
+		locationCopyTimer = setTimeout(() => {
+			locationCopyState = 'idle';
+			locationCopyTimer = null;
+		}, 1600);
 	}
 
 	function formatSize(bytes: number): string {
@@ -144,7 +168,7 @@
 		<div class="info-panel" onclick={(e) => e.stopPropagation()}>
 			<div class="info-header">
 				<h2>Info</h2>
-				<button class="close-btn" onclick={close}>
+				<button class="close-btn" onclick={close} aria-label="Close info">
 					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 						<line x1="18" y1="6" x2="6" y2="18" />
 						<line x1="6" y1="6" x2="18" y2="18" />
@@ -175,6 +199,34 @@
 					<h3 class="app-name">HelixNotes</h3>
 					<p class="app-version">v{appVersion}</p>
 					<p class="app-description">A local markdown note-taking app.</p>
+
+					{#if $appConfig?.active_vault}
+						<div class="vault-location">
+							<div class="vault-location-header">
+								<span class="vault-location-label">Vault location</span>
+								<button
+									class="copy-location-btn"
+									class:copied={locationCopyState === 'copied'}
+									class:error={locationCopyState === 'error'}
+									onclick={copyVaultLocation}
+									aria-live="polite"
+									title="Copy vault location"
+								>
+									{#if locationCopyState === 'copied'}
+										<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6" /></svg>
+										Copied
+									{:else if locationCopyState === 'error'}
+										<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+										Copy failed
+									{:else}
+										<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" /></svg>
+										Copy
+									{/if}
+								</button>
+							</div>
+							<code class="vault-location-path" title={$appConfig.active_vault}>{$appConfig.active_vault}</code>
+						</div>
+					{/if}
 
 					{#if stats}
 						<div class="info-stats">
@@ -414,6 +466,71 @@
 		font-size: 13px;
 		color: var(--text-secondary);
 		margin-top: 4px;
+	}
+
+	.vault-location {
+		width: 100%;
+		margin-top: 18px;
+		padding: 11px 14px 12px;
+		border: 1px solid var(--border-light);
+		border-radius: 10px;
+		background: var(--bg-secondary);
+		text-align: left;
+	}
+
+	.vault-location-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+	}
+
+	.vault-location-label {
+		color: var(--text-tertiary);
+		font-size: 11px;
+		font-weight: 600;
+		letter-spacing: 0.02em;
+	}
+
+	.vault-location-path {
+		display: block;
+		margin-top: 7px;
+		color: var(--text-primary);
+		font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+		font-size: 11px;
+		line-height: 1.45;
+		overflow-wrap: anywhere;
+	}
+
+	.copy-location-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		margin: -4px -6px -4px 0;
+		padding: 4px 6px;
+		border: none;
+		border-radius: 6px;
+		background: transparent;
+		color: var(--accent);
+		font-size: 11px;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.copy-location-btn:hover {
+		background: var(--accent-light);
+	}
+
+	.copy-location-btn.copied {
+		color: var(--success);
+	}
+
+	.copy-location-btn.error {
+		color: var(--danger);
+	}
+
+	.vault-location + .info-stats {
+		margin-top: 12px;
 	}
 
 	.info-stats {
@@ -666,6 +783,12 @@
 
 		.info-header {
 			padding-top: calc(env(safe-area-inset-top, 12px) + 12px);
+		}
+
+		.copy-location-btn {
+			min-height: 44px;
+			margin-block: -10px;
+			padding-inline: 10px;
 		}
 	}
 </style>
