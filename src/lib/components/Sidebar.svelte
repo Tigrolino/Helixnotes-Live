@@ -992,6 +992,7 @@
 				{/each}
 			</div>
 			<div class="icon-picker-actions">
+				<p class="icon-picker-recommendation">Recommended custom image size: <strong>128 × 128 px</strong></p>
 				<button onclick={() => handleCustomIcon(iconPickerNotebook!)}>
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="m21 15-5-5L5 21" /></svg>
 					Custom image...
@@ -1785,9 +1786,19 @@
 
 	.icon-picker-actions {
 		display: flex;
+		flex-wrap: wrap;
 		gap: 8px;
 		padding: 12px 14px 14px;
 		border-top: 1px solid var(--border-light);
+	}
+
+	.icon-picker-recommendation {
+		flex: 0 0 100%;
+		margin: 0 0 2px;
+		color: var(--text-tertiary);
+		font-size: 12px;
+		line-height: 1.4;
+		text-align: center;
 	}
 
 	.icon-picker-actions button {
