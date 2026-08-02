@@ -26,13 +26,13 @@
           inherit pname version;
           src = ./.;
 
-          cargoHash = "sha256-oPShWgL5DjucCmQgqKbIBaxRwqyWnae52+Hj/YVIqbE=";
+          cargoHash = "sha256-P0iXImWYKYPxVj7q2JSuDmd8JvjcKW4DzFUzXeUQZPk=C";
 
           pnpmDeps = pkgs.fetchPnpmDeps {
             inherit pname version;
             src = ./.;
-            fetcherVersion = 3;
-            hash = "sha256-0TFLZY9zmRFNHPFJEiU2U8zMqSSPkeCl4bhORAbcdZY=";
+            fetcherVersion = 4;
+            hash = "sha256-odUNKO2D50DG+VpuoTEo5FLMYy5pQSHQBtfHJrhJt78=";
           };
 
           nativeBuildInputs = with pkgs; [
