@@ -1385,6 +1385,7 @@ pub fn set_general_settings(
     close_to_tray: bool,
     enable_wiki_links: bool,
     show_note_dates: bool,
+    startup_view: StartupView,
     restore_last_session: bool,
     show_all_notes: bool,
     show_quick_access: bool,
@@ -1395,6 +1396,7 @@ pub fn set_general_settings(
     let mut config = state.config.lock().map_err(|e| e.to_string())?;
     config.compact_notes = compact_notes;
     config.show_note_dates = show_note_dates;
+    config.startup_view = startup_view;
     config.restore_last_session = restore_last_session;
     config.show_all_notes = show_all_notes;
     config.show_quick_access = show_quick_access;

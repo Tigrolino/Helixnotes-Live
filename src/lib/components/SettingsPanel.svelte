@@ -7,7 +7,8 @@
 	import { getVersion } from '@tauri-apps/api/app';
 	import { getCurrentWebview } from '@tauri-apps/api/webview';
 	import { openUrl } from '$lib/api';
-	import type { ImportResult, BackupEntry, CustomTheme, CustomThemeColors } from '$lib/types';
+	import type { ImportResult, BackupEntry, CustomTheme, CustomThemeColors, StartupView } from '$lib/types';
+	import { normalizeStartupView } from '$lib/utils/startup-view';
 
 	const modKey = navigator.platform.startsWith('Mac') ? '⌘' : 'Ctrl';
 
@@ -700,6 +701,7 @@
 	// General settings
 	let compactNotes = $state($appConfig?.compact_notes ?? false);
 	let showNoteDates = $state($appConfig?.show_note_dates ?? true);
+	let startupView = $state<StartupView>(normalizeStartupView($appConfig?.startup_view));
 	let restoreLastSession = $state($appConfig?.restore_last_session ?? false);
 	let timeFormat = $state($appConfig?.time_format ?? 'relative');
 	let weekStart = $state($appConfig?.week_start ?? 'monday');
@@ -773,6 +775,7 @@
 		if ($appConfig) {
 			$appConfig.compact_notes = compactNotes;
 			$appConfig.show_note_dates = showNoteDates;
+			$appConfig.startup_view = startupView;
 			$appConfig.restore_last_session = restoreLastSession;
 			$appConfig.time_format = timeFormat;
 			$appConfig.week_start = weekStart;
@@ -795,7 +798,7 @@
 			$appConfig.show_daily_notes = showDailyNotes;
 			$appConfig.show_trash = showTrash;
 			}
-			setGeneralSettings(compactNotes, timeFormat, weekStart, dailyTitleFormat, gpuAcceleration, autostart, pdfPreview, pdfHeight, titleMode, hideTitleInBody, showLineNumbers, showLinkArrows, defaultViewMode, showTrayIcon, closeToTray, enableWikiLinks, showNoteDates, restoreLastSession, showAllNotes, showQuickAccess, showTasks, showDailyNotes, showTrash)
+			setGeneralSettings(compactNotes, timeFormat, weekStart, dailyTitleFormat, gpuAcceleration, autostart, pdfPreview, pdfHeight, titleMode, hideTitleInBody, showLineNumbers, showLinkArrows, defaultViewMode, showTrayIcon, closeToTray, enableWikiLinks, showNoteDates, startupView, restoreLastSession, showAllNotes, showQuickAccess, showTasks, showDailyNotes, showTrash)
 			.catch((e) => console.error('Failed to save general settings:', e));
 	}
 
@@ -975,6 +978,7 @@
 		if ($appConfig) {
 			compactNotes = $appConfig.compact_notes ?? false;
 			showNoteDates = $appConfig.show_note_dates ?? true;
+			startupView = normalizeStartupView($appConfig.startup_view);
 			restoreLastSession = $appConfig.restore_last_session ?? false;
 			timeFormat = $appConfig.time_format ?? 'relative';
 			weekStart = $appConfig.week_start ?? 'monday';
@@ -1152,6 +1156,29 @@
 							{/if}
 
 							<div class="settings-section">
+								<h3>Startup</h3>
+								<div class="setting-label">
+									<span class="setting-name">Default view</span>
+									<span class="setting-desc">Used when session restore is off or the previous view is unavailable.</span>
+								</div>
+								<div class="setting-options" style="margin-top: 8px;">
+									<button class="option-btn" class:active={startupView === 'all'} onclick={() => { startupView = 'all'; saveGeneralSettings(); }}>All Notes</button>
+									<button class="option-btn" class:active={startupView === 'quickaccess'} onclick={() => { startupView = 'quickaccess'; saveGeneralSettings(); }}>Quick Access</button>
+									<button class="option-btn" class:active={startupView === 'tasks'} onclick={() => { startupView = 'tasks'; saveGeneralSettings(); }}>Tasks</button>
+									<button class="option-btn" class:active={startupView === 'daily'} onclick={() => { startupView = 'daily'; saveGeneralSettings(); }}>Daily Notes</button>
+								</div>
+								<label class="setting-toggle" style="margin-top: 12px;">
+									<span class="setting-label">
+										<span class="setting-name">Restore last session on launch</span>
+										<span class="setting-desc">Reopen the last view and note when possible. This overrides the default view.</span>
+									</span>
+									<button class="toggle-switch" class:on={restoreLastSession} onclick={() => { restoreLastSession = !restoreLastSession; saveGeneralSettings(); }}>
+										<span class="toggle-knob"></span>
+									</button>
+								</label>
+							</div>
+
+							<div class="settings-section">
 								<h3>Time Format</h3>
 								<div class="setting-options">
 									<button class="option-btn" class:active={timeFormat === 'relative'} onclick={() => { timeFormat = 'relative'; saveGeneralSettings(); }}>Relative</button>
@@ -1279,15 +1306,6 @@
 										<span class="setting-desc">Notes open as read-only by default. Click the eye icon to switch to editing.</span>
 									</span>
 									<button class="toggle-switch" class:on={defaultViewMode} onclick={() => { defaultViewMode = !defaultViewMode; saveGeneralSettings(); }}>
-										<span class="toggle-knob"></span>
-									</button>
-								</label>
-								<label class="setting-toggle">
-									<span class="setting-label">
-										<span class="setting-name">Restore last session on launch</span>
-										<span class="setting-desc">Reopen the note and folder you were last using, instead of All Notes.</span>
-									</span>
-									<button class="toggle-switch" class:on={restoreLastSession} onclick={() => { restoreLastSession = !restoreLastSession; saveGeneralSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>

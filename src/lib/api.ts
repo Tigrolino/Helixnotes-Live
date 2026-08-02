@@ -16,6 +16,7 @@ import type {
   VersionEntry,
   TaskItem,
   ExternalVaultResult,
+  StartupView,
 } from "./types";
 
 export async function openVault(path: string): Promise<void> {
@@ -264,6 +265,7 @@ export async function setGeneralSettings(
   closeToTray: boolean,
   enableWikiLinks: boolean,
   showNoteDates: boolean,
+  startupView: StartupView,
   restoreLastSession: boolean,
   showAllNotes: boolean,
   showQuickAccess: boolean,
@@ -289,6 +291,7 @@ export async function setGeneralSettings(
     closeToTray,
     enableWikiLinks,
     showNoteDates,
+    startupView,
     restoreLastSession,
     showAllNotes,
     showQuickAccess,

@@ -81,6 +81,8 @@ export interface CustomTheme {
   colors: CustomThemeColors;
 }
 
+export type StartupView = "all" | "quickaccess" | "tasks" | "daily";
+
 export interface AppConfig {
   vaults: VaultConfig[];
   active_vault: string | null;
@@ -130,6 +132,7 @@ export interface AppConfig {
   show_tray_icon: boolean;
   close_to_tray: boolean;
   enable_wiki_links: boolean;
+  startup_view: StartupView;
   restore_last_session: boolean;
   sync_provider: string | null;
   webdav_url: string | null;

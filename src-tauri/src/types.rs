@@ -96,6 +96,17 @@ pub struct CustomTheme {
     pub colors: CustomThemeColors,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StartupView {
+    Daily,
+    QuickAccess,
+    Tasks,
+    #[default]
+    #[serde(other)]
+    All,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub vaults: Vec<VaultConfig>,
@@ -191,6 +202,8 @@ pub struct AppConfig {
     pub close_to_tray: bool,
     #[serde(default = "default_true")]
     pub enable_wiki_links: bool,
+    #[serde(default)]
+    pub startup_view: StartupView,
     #[serde(default)]
     pub restore_last_session: bool,
     // DEPRECATED: WebDAV sync moved to per-vault VaultConfig. Kept for one release to migrate old configs.
@@ -305,6 +318,7 @@ impl Default for AppConfig {
             show_tray_icon: false,
             close_to_tray: false,
             enable_wiki_links: true,
+            startup_view: StartupView::All,
             restore_last_session: false,
             sync_provider: None,
             webdav_url: None,
@@ -468,4 +482,29 @@ pub struct TaskItem {
     pub completed: bool,
     pub due: Option<String>,
     pub priority: Option<String>,
+}
+
+#[cfg(test)]
+mod startup_view_tests {
+    use super::StartupView;
+
+    #[test]
+    fn serializes_supported_startup_views() {
+        for (view, expected) in [
+            (StartupView::All, "\"all\""),
+            (StartupView::QuickAccess, "\"quickaccess\""),
+            (StartupView::Tasks, "\"tasks\""),
+            (StartupView::Daily, "\"daily\""),
+        ] {
+            assert_eq!(serde_json::to_string(&view).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn unknown_startup_view_falls_back_to_all_notes() {
+        assert_eq!(
+            serde_json::from_str::<StartupView>("\"future-view\"").unwrap(),
+            StartupView::All
+        );
+    }
 }

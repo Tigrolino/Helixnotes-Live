@@ -65,8 +65,10 @@
 	import { darkThemes, isAndroid } from '$lib/platform';
 	import { debounce } from '$lib/utils/debounce';
 	import { openNoteWindow } from '$lib/utils/window';
+	import { normalizeStartupView, resolveStartupTarget } from '$lib/utils/startup-view';
 	import { get } from 'svelte/store';
 	import type { VaultState, FileEvent, NotebookEntry, TaskItem } from '$lib/types';
+	import type { StartupTarget } from '$lib/utils/startup-view';
 
 	function findNotebookByPath(list: NotebookEntry[], relPath: string): NotebookEntry | null {
 		for (const nb of list) {
@@ -81,6 +83,38 @@
 	let noteList: NoteList;
 	let editor: Editor;
 	let unlistenFileChange: (() => void) | null = null;
+	async function applyStartupTarget(target: StartupTarget): Promise<boolean> {
+		if (target.mode === 'notebook') {
+			const vault = $appConfig?.active_vault;
+			const notebook = target.notebookPath === '' && vault
+				? { name: 'Unfiled Notes', path: vault, relative_path: '', children: [], note_count: $rootNoteCount }
+				: findNotebookByPath($notebooks, target.notebookPath);
+			if (!notebook) return false;
+			const changed = $viewMode !== 'notebook' || $activeNotebook?.relative_path !== notebook.relative_path;
+			$viewMode = 'notebook';
+			$activeNotebook = notebook;
+			$activeTag = null;
+			if (changed) await noteList?.refresh();
+			return true;
+		}
+
+		if (target.mode === 'tag') {
+			const changed = $viewMode !== 'tag' || $activeTag !== target.tag;
+			$viewMode = 'tag';
+			$activeTag = target.tag;
+			$activeNotebook = null;
+			if (changed) await noteList?.refresh();
+			return true;
+		}
+
+		const changed = $viewMode !== target.mode || $activeNotebook !== null || $activeTag !== null;
+		$viewMode = target.mode;
+		$activeNotebook = null;
+		$activeTag = null;
+		if (changed) await noteList?.refresh();
+		return true;
+	}
+
 	let unlistenOpenFile: (() => void) | null = null;
 
 	// Mobile editor header helpers
@@ -599,9 +633,11 @@
 			lastTag = state.last_tag ?? null;
 		} catch (_) {}
 
+		const restoreLastSession = $appConfig?.restore_last_session === true;
+
 		// On mobile, prefetch last-opened note so first tap is instant
 		let prefetchPromise: Promise<any> | null = null;
-		if (isMobile && lastNotePath) {
+		if (isMobile && restoreLastSession && lastNotePath) {
 			prefetchPromise = readNote(lastNotePath).catch(() => null);
 		}
 
@@ -637,32 +673,26 @@
 			}, 3000);
 		}
 
-		// Restore the last session (view + open note) if enabled.
-		if ($appConfig?.restore_last_session) {
-			const vault = $appConfig?.active_vault;
-			if (lastViewMode === 'notebook' && lastNotebook === '' && vault) {
-				$viewMode = 'notebook';
-				$activeNotebook = { name: 'Unfiled Notes', path: vault, relative_path: '', children: [], note_count: $rootNoteCount };
-				$activeTag = null;
-				await noteList?.refresh();
-			} else if (lastViewMode === 'notebook' && lastNotebook) {
-				const nb = findNotebookByPath($notebooks, lastNotebook);
-				if (nb) { $viewMode = 'notebook'; $activeNotebook = nb; $activeTag = null; await noteList?.refresh(); }
-			} else if (lastViewMode === 'tag' && lastTag) {
-				$viewMode = 'tag'; $activeTag = lastTag; $activeNotebook = null; await noteList?.refresh();
-			} else if (lastViewMode === 'quickaccess') {
-				$viewMode = 'quickaccess'; $activeNotebook = null; $activeTag = null; await noteList?.refresh();
-			}
-			// Open the last note on desktop (mobile reopens it via its own prefetch path below).
-			if (!isMobile && lastNotePath) {
-				try {
-					const content = await readNote(lastNotePath);
-					$activeNote = content;
-					$activeNotePath = lastNotePath;
-					$editorDirty = false;
-					editor?.loadNote(lastNotePath, content.content);
-				} catch (_) {}
-			}
+		const startupTarget = resolveStartupTarget({
+			startupView: $appConfig?.startup_view,
+			restoreLastSession,
+			lastViewMode,
+			lastNotebook,
+			lastTag
+		});
+		if (!(await applyStartupTarget(startupTarget))) {
+			await applyStartupTarget({ mode: normalizeStartupView($appConfig?.startup_view) });
+		}
+
+		// Reopen the last note only when session restoration is enabled.
+		if (restoreLastSession && !isMobile && lastNotePath) {
+			try {
+				const content = await readNote(lastNotePath);
+				$activeNote = content;
+				$activeNotePath = lastNotePath;
+				$editorDirty = false;
+				editor?.loadNote(lastNotePath, content.content);
+			} catch (_) {}
 		}
 
 		// On mobile, derive tags from the scanned notes (avoids a separate full-scan Rust call)
