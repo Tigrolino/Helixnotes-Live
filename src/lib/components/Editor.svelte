@@ -48,6 +48,7 @@
 	import { WrapSelectedText } from '$lib/editor/extensions/wrapSelectedText';
 	import { calloutGroup, calloutIcon, calloutLabel, CALLOUT_MENU, transformCalloutBlockquotes, serializeCallout } from '$lib/editor/callouts';
 	import { wrapTextareaSelection } from '$lib/editor/source/selectionPairs';
+	import { convertListNode, type MixedListName } from '$lib/editor/mixedLists';
 	import { relativePath } from '$lib/utils/paths';
 	import GraphView from './GraphView.svelte';
 	import TagSuggestInput from './TagSuggestInput.svelte';
@@ -70,6 +71,16 @@
 	const LARGE_DOC_CHARS = 100_000;
 	let isLargeDoc = $state(false);
 	let editor: Editor | null = null;
+	const MixedListShortcuts = Extension.create({
+		name: 'mixedListShortcuts',
+		priority: 1000,
+		addKeyboardShortcuts() {
+			return {
+				'Mod-Shift-8': () => toggleBulletList(),
+				'Mod-Shift-9': () => toggleTaskList(),
+			};
+		},
+	});
 	let editorReady = $state(false);
 	let sourceContent = $state('');
 	let sourceHistory: Array<{ content: string; cursor: number }> = [];
@@ -381,9 +392,9 @@
 			{ label: 'Heading 1', aliases: ['h1', 'heading1', 'title'], icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h8M4 4v16M12 4v16M17 12l3-2v8"/></svg>', action: () => editor?.chain().focus().toggleHeading({ level: 1 }).run() },
 			{ label: 'Heading 2', aliases: ['h2', 'heading2', 'subtitle'], icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h8M4 4v16M12 4v16"/><path d="M21 18h-4c0-4 4-3 4-6 0-1.5-2-2.5-4-1"/></svg>', action: () => editor?.chain().focus().toggleHeading({ level: 2 }).run() },
 			{ label: 'Heading 3', aliases: ['h3', 'heading3'], icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h8M4 4v16M12 4v16"/><path d="M17.5 10.5c1.7-1 3.5 0 3.5 1.5a2 2 0 01-2 2m2 0a2 2 0 01-2 2c-1.5 0-3.5 0-3.5-1.5"/></svg>', action: () => editor?.chain().focus().toggleHeading({ level: 3 }).run() },
-			{ label: 'Bullet List', aliases: ['ul', 'unordered', 'bullets', 'list'], icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="3" cy="6" r="1" fill="currentColor"/><circle cx="3" cy="12" r="1" fill="currentColor"/><circle cx="3" cy="18" r="1" fill="currentColor"/></svg>', action: () => editor?.chain().focus().toggleBulletList().run() },
+			{ label: 'Bullet List', aliases: ['ul', 'unordered', 'bullets', 'list'], icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="3" cy="6" r="1" fill="currentColor"/><circle cx="3" cy="12" r="1" fill="currentColor"/><circle cx="3" cy="18" r="1" fill="currentColor"/></svg>', action: toggleBulletList },
 			{ label: 'Numbered List', aliases: ['ol', 'ordered', 'number'], icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><text x="1" y="9" font-size="8" fill="currentColor" stroke="none">1</text><text x="1" y="15" font-size="8" fill="currentColor" stroke="none">2</text><text x="1" y="21" font-size="8" fill="currentColor" stroke="none">3</text></svg>', action: () => editor?.chain().focus().toggleOrderedList().run() },
-			{ label: 'Task List', aliases: ['checklist', 'checkbox', 'todo', 'check'], icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="6" height="6" rx="1"/><path d="M5 8l1.5 1.5L9 7"/><line x1="13" y1="8" x2="21" y2="8"/><rect x="3" y="14" width="6" height="6" rx="1"/><line x1="13" y1="17" x2="21" y2="17"/></svg>', action: () => editor?.chain().focus().toggleTaskList().run() },
+			{ label: 'Task List', aliases: ['checklist', 'checkbox', 'todo', 'check'], icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="6" height="6" rx="1"/><path d="M5 8l1.5 1.5L9 7"/><line x1="13" y1="8" x2="21" y2="8"/><rect x="3" y="14" width="6" height="6" rx="1"/><line x1="13" y1="17" x2="21" y2="17"/></svg>', action: toggleTaskList },
 			{ label: 'Code Block', aliases: ['code', 'codeblock', 'pre', 'snippet'], icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>', action: () => editor?.chain().focus().toggleCodeBlock().run() },
 			{ label: 'Secret', aliases: ['secret', 'encrypt', 'password', 'private'], icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>', action: () => openSecretInsert() },
 			{ label: 'Blockquote', aliases: ['quote', 'blockquote', 'citation'], icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"/></svg>', action: () => editor?.chain().focus().toggleBlockquote().run() },
@@ -4334,6 +4345,7 @@
 			element: editorElement,
 			editable: !$readOnly,
 			extensions: [
+				MixedListShortcuts,
 				StarterKit.configure({ codeBlock: false }),
 				Placeholder.configure({
 					includeChildren: true,
@@ -5141,8 +5153,52 @@
 		closeTextContextMenu();
 	}
 
+	function handleMixedListToggle(targetListName: MixedListName): boolean {
+		if (!editor) return false;
+		const { selection, schema } = editor.state;
+		const { $from: fromResolved, $to: toResolved } = selection;
+		let listDepth = -1;
+
+		for (let depth = fromResolved.depth; depth > 0; depth--) {
+			const nodeName = fromResolved.node(depth).type.name;
+			// An ordered list cannot contain task items. Keep it ordered instead of lifting its item.
+			if (nodeName === 'orderedList') return targetListName === 'taskList';
+			if (nodeName === 'bulletList' || nodeName === 'taskList') {
+				listDepth = depth;
+				break;
+			}
+		}
+
+		if (listDepth < 0 || toResolved.depth < listDepth) return false;
+		const listNode = fromResolved.node(listDepth);
+		if (listNode.type.name === targetListName || toResolved.node(listDepth) !== listNode) return false;
+
+		const convertedList = convertListNode(schema, listNode, targetListName);
+		if (!convertedList) return false;
+		const listPos = fromResolved.before(listDepth);
+		const transaction = editor.state.tr.replaceWith(
+			listPos,
+			listPos + listNode.nodeSize,
+			convertedList
+		);
+		transaction.setSelection(TextSelection.create(transaction.doc, selection.from, selection.to));
+		editor.view.dispatch(transaction.scrollIntoView());
+		editor.view.focus();
+		return true;
+	}
+
+	function toggleBulletList(): boolean {
+		if (!editor) return false;
+		return handleMixedListToggle('bulletList') || editor.chain().focus().toggleBulletList().run();
+	}
+
+	function toggleTaskList(): boolean {
+		if (!editor) return false;
+		return handleMixedListToggle('taskList') || editor.chain().focus().toggleTaskList().run();
+	}
+
 	function ctxBulletList() {
-		editor?.chain().focus().toggleBulletList().run();
+		toggleBulletList();
 		closeTextContextMenu();
 	}
 
@@ -5152,7 +5208,7 @@
 	}
 
 	function ctxTaskList() {
-		editor?.chain().focus().toggleTaskList().run();
+		toggleTaskList();
 		closeTextContextMenu();
 	}
 
@@ -6551,13 +6607,13 @@
 				<div class="fmt-sep"></div>
 
 				<!-- Lists -->
-				<button class="fmt-btn" class:active={(editorState, editor.isActive('bulletList'))} onclick={() => editor?.chain().focus().toggleBulletList().run()} title="Bullet List">
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('bulletList'))} onclick={toggleBulletList} title="Bullet List">
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h.01"/><path d="M3 12h.01"/><path d="M3 19h.01"/><path d="M8 5h13"/><path d="M8 12h13"/><path d="M8 19h13"/></svg>
 				</button>
 				<button class="fmt-btn" class:active={(editorState, editor.isActive('orderedList'))} onclick={() => editor?.chain().focus().toggleOrderedList().run()} title="Numbered List">
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5h10"/><path d="M11 12h10"/><path d="M11 19h10"/><path d="M4 4h1v5"/><path d="M4 9h2"/><path d="M6.5 20H3.4c0-1 2.6-1.925 2.6-3.5a1.5 1.5 0 00-2.6-1.02"/></svg>
 				</button>
-				<button class="fmt-btn" class:active={(editorState, editor.isActive('taskList'))} onclick={() => editor?.chain().focus().toggleTaskList().run()} title="Task List">
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('taskList'))} onclick={toggleTaskList} title="Task List">
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 5h8"/><path d="M13 12h8"/><path d="M13 19h8"/><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/></svg>
 				</button>
 
@@ -6741,13 +6797,13 @@
 				<div class="fmt-sep"></div>
 
 				<!-- Lists -->
-				<button class="fmt-btn" class:active={(editorState, editor.isActive('bulletList'))} onclick={() => editor?.chain().focus().toggleBulletList().run()} title={`Bullet List (${modKey}+Shift+8)`}>
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('bulletList'))} onclick={toggleBulletList} title={`Bullet List (${modKey}+Shift+8)`}>
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h.01"/><path d="M3 12h.01"/><path d="M3 19h.01"/><path d="M8 5h13"/><path d="M8 12h13"/><path d="M8 19h13"/></svg>
 				</button>
 				<button class="fmt-btn" class:active={(editorState, editor.isActive('orderedList'))} onclick={() => editor?.chain().focus().toggleOrderedList().run()} title={`Ordered List (${modKey}+Shift+7)`}>
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5h10"/><path d="M11 12h10"/><path d="M11 19h10"/><path d="M4 4h1v5"/><path d="M4 9h2"/><path d="M6.5 20H3.4c0-1 2.6-1.925 2.6-3.5a1.5 1.5 0 00-2.6-1.02"/></svg>
 				</button>
-				<button class="fmt-btn" class:active={(editorState, editor.isActive('taskList'))} onclick={() => editor?.chain().focus().toggleTaskList().run()} title={`Task List (${modKey}+Shift+9)`}>
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('taskList'))} onclick={toggleTaskList} title={`Task List (${modKey}+Shift+9)`}>
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 5h8"/><path d="M13 12h8"/><path d="M13 19h8"/><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/></svg>
 				</button>
 
