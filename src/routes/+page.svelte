@@ -1,10 +1,11 @@
 <script lang="ts">
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, onMount, tick } from 'svelte';
 	import { appConfig, vaultReady, theme } from '$lib/stores/app';
 	import { getAppConfig, openVault, restoreExternalVault, setFontSize } from '$lib/api';
-	import { darkThemes, isIOS } from '$lib/platform';
+	import { darkThemes, isIOS, isMobile } from '$lib/platform';
 	import { getCurrentWebview } from '@tauri-apps/api/webview';
 	import { listen } from '@tauri-apps/api/event';
+	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import VaultPicker from '$lib/components/VaultPicker.svelte';
 	import AppLayout from '$lib/components/AppLayout.svelte';
 	import NoteWindow from '$lib/components/NoteWindow.svelte';
@@ -15,6 +16,28 @@
 	let fontSizeSaveTimer: ReturnType<typeof setTimeout> | null = null;
 	let removeEditorZoomShortcuts: (() => void) | null = null;
 	let removeFontSizeListener: (() => void) | null = null;
+	let startupRevealTimer: ReturnType<typeof setTimeout> | null = null;
+	let startupWindowRevealed = false;
+
+	const STARTUP_REVEAL_FAILSAFE_MS = 4000;
+
+	async function revealStartupWindow() {
+		if (isMobile || startupWindowRevealed) return;
+		await tick();
+		// Force style resolution while the native window is still hidden so its first
+		// compositor frame already uses the selected theme.
+		getComputedStyle(document.body).backgroundColor;
+		try {
+			await getCurrentWindow().show();
+			startupWindowRevealed = true;
+			if (startupRevealTimer) {
+				clearTimeout(startupRevealTimer);
+				startupRevealTimer = null;
+			}
+		} catch {
+			// Plain-browser development has no Tauri window to reveal.
+		}
+	}
 
 	const defaultEditorFontSize = 14;
 	const minEditorFontSize = 10;
@@ -114,6 +137,9 @@
 	}
 
 	onMount(async () => {
+		if (!isMobile) {
+			startupRevealTimer = setTimeout(() => void revealStartupWindow(), STARTUP_REVEAL_FAILSAFE_MS);
+		}
 		// Check for note window mode
 		const params = new URLSearchParams(window.location.search);
 		const notePath = params.get('note');
@@ -209,6 +235,7 @@
 					console.error('Failed to apply interface scale:', e);
 				}
 			}
+			await revealStartupWindow();
 			removeEditorZoomShortcuts = installEditorZoomShortcuts();
 
 			// Auto-open last vault if available
@@ -242,14 +269,21 @@
 			}
 		} catch {
 			// First launch or no config
+		} finally {
+			loading = false;
+			await revealStartupWindow();
+			if (startupRevealTimer) {
+				clearTimeout(startupRevealTimer);
+				startupRevealTimer = null;
+			}
 		}
-		loading = false;
 	});
 
 	onDestroy(() => {
 		removeEditorZoomShortcuts?.();
 		removeFontSizeListener?.();
 		if (fontSizeSaveTimer) clearTimeout(fontSizeSaveTimer);
+		if (startupRevealTimer) clearTimeout(startupRevealTimer);
 	});
 </script>
 

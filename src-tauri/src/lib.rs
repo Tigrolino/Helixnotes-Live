@@ -313,7 +313,16 @@ pub fn run() {
         }));
 
         builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
-        builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
+        let window_state_builder = tauri_plugin_window_state::Builder::default();
+        #[cfg(target_os = "linux")]
+        let window_state_builder = window_state_builder.with_state_flags(
+            tauri_plugin_window_state::StateFlags::SIZE
+                | tauri_plugin_window_state::StateFlags::POSITION
+                | tauri_plugin_window_state::StateFlags::MAXIMIZED
+                | tauri_plugin_window_state::StateFlags::DECORATIONS
+                | tauri_plugin_window_state::StateFlags::FULLSCREEN,
+        );
+        builder = builder.plugin(window_state_builder.build());
 
         builder = builder.on_window_event(move |window, event| {
             #[cfg(target_os = "macos")]
