@@ -3562,11 +3562,12 @@
 				return `$$\n${tex}\n$$\n`;
 			}
 			case 'details': {
-				// Preserve details as raw HTML
+				// Markdown HTML blocks end at a blank line, including one inside <pre><code>.
+				// Keep the details element on one source line; HTML parsing restores each encoded newline.
 				const detDiv = document.createElement('div');
 				const detFrag = DOMSerializer.fromSchema(editor!.schema).serializeNode(node);
 				detDiv.appendChild(detFrag);
-				return detDiv.innerHTML + '\n';
+				return detDiv.innerHTML.replace(/\n/g, '&#10;') + '\n';
 			}
 			case 'image': {
 				const src = stripAssetSrc(node.attrs.src || '');
