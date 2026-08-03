@@ -4425,6 +4425,16 @@
 							props: {
 								handleDOMEvents: {
 									keydown(view, event) {
+										const isInsertDetails = (event.ctrlKey || event.metaKey)
+											&& !event.shiftKey
+											&& !event.altKey
+											&& event.code === 'Period';
+										if (isInsertDetails) {
+											if (get(readOnly)) return false;
+											event.preventDefault();
+											insertDetails();
+											return true;
+										}
 										const isTab = event.key === 'Tab' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey;
 										const isEnter = event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey;
 										if (!isTab && !isEnter) return false;
@@ -6866,7 +6876,7 @@
 				</button>
 
 				<!-- Collapsible Section -->
-				<button class="fmt-btn" class:active={(editorState, editor.isActive('details'))} onclick={() => insertDetails()} title="Collapsible Section">
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('details'))} onclick={() => insertDetails()} title={`Collapsible Section (${modKey}+.)`}>
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="13" height="7" x="8" y="3" rx="1"/><path d="m2 9 3 3-3 3"/><rect width="13" height="7" x="8" y="14" rx="1"/></svg>
 				</button>
 

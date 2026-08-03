@@ -273,6 +273,7 @@
 						<div class="shortcut-row"><span class="shortcut-desc">Strikethrough</span><span class="shortcut-keys"><kbd>{modKey}</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd></span></div>
 						<div class="shortcut-row"><span class="shortcut-desc">Code</span><span class="shortcut-keys"><kbd>{modKey}</kbd>+<kbd>E</kbd></span></div>
 						<div class="shortcut-row"><span class="shortcut-desc">Link</span><span class="shortcut-keys"><kbd>{modKey}</kbd>+<kbd>K</kbd></span></div>
+						<div class="shortcut-row"><span class="shortcut-desc">Collapsible section</span><span class="shortcut-keys"><kbd>{modKey}</kbd>+<kbd>.</kbd></span></div>
 						<div class="shortcut-row"><span class="shortcut-desc">Undo</span><span class="shortcut-keys"><kbd>{modKey}</kbd>+<kbd>Z</kbd></span></div>
 						<div class="shortcut-row"><span class="shortcut-desc">Redo</span><span class="shortcut-keys"><kbd>{modKey}</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></span></div>
 						<div class="shortcut-row"><span class="shortcut-desc">Move line up / down</span><span class="shortcut-keys"><kbd>Alt</kbd>+<kbd>↑↓</kbd></span></div>
