@@ -5709,6 +5709,13 @@
 		}
 	}
 
+	function handleImageInput(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		if (file) insertImage(file);
+		input.value = '';
+	}
+
 	async function insertPdf(file: File) {
 		try {
 			const buffer = await file.arrayBuffer();
@@ -6570,6 +6577,12 @@
 								<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 00-2.828 0L6 21"/></svg>
 								Image
 							</button>
+							{#if isAndroid}
+								<button onclick={() => { insertDropdown = false; document.querySelector<HTMLInputElement>('#insert-camera-input')?.click(); }}>
+									<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 00-2 2v9a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>
+									Take Photo
+								</button>
+							{/if}
 							<button onclick={() => { insertDropdown = false; document.querySelector<HTMLInputElement>('#insert-file-input')?.click(); }}>
 								<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22a2 2 0 01-2-2V4a2 2 0 012-2h8a2.4 2.4 0 011.704.706l3.588 3.588A2.4 2.4 0 0120 8v12a2 2 0 01-2 2z"/><path d="M14 2v5a1 1 0 001 1h5"/></svg>
 								File
@@ -7048,11 +7061,10 @@
 	{/if}
 
 	<!-- Hidden file inputs for Insert dropdown -->
-	<input type="file" id="insert-image-input" accept="image/*" style="display:none" onchange={(e) => {
-		const file = (e.target as HTMLInputElement).files?.[0];
-		if (file) insertImage(file);
-		(e.target as HTMLInputElement).value = '';
-	}} />
+	<input type="file" id="insert-image-input" accept="image/*" style="display:none" onchange={handleImageInput} />
+	{#if isAndroid}
+		<input type="file" id="insert-camera-input" accept="image/*" capture="environment" style="display:none" onchange={handleImageInput} />
+	{/if}
 	<input type="file" id="insert-file-input" style="display:none" onchange={(e) => {
 		const file = (e.target as HTMLInputElement).files?.[0];
 		if (file) {
