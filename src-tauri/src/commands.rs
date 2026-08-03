@@ -597,6 +597,20 @@ pub fn save_note(
 }
 
 #[tauri::command]
+pub fn duplicate_note(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<crate::types::NoteEntry, String> {
+    let config = state.config.lock().map_err(|e| e.to_string())?;
+    let vault = config.active_vault.as_ref().ok_or("No active vault")?.clone();
+    drop(config);
+
+    let entry = operations::duplicate_note(&path, &vault)?;
+    index_note_bg(&state, &entry.path);
+    Ok(entry)
+}
+
+#[tauri::command]
 pub fn create_note(
     state: State<'_, AppState>,
     notebook_relative: Option<String>,

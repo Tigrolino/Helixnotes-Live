@@ -141,6 +141,10 @@ export async function createNote(
   return invoke("create_note", { notebookRelative, title });
 }
 
+export async function duplicateNote(path: string): Promise<NoteEntry> {
+  return invoke("duplicate_note", { path });
+}
+
 export async function createDailyNote(date?: string): Promise<NoteEntry> {
   return invoke("create_daily_note", { date: date ?? null });
 }

@@ -150,6 +150,7 @@ pub fn run() {
             commands::read_note,
             commands::save_note,
             commands::create_note,
+            commands::duplicate_note,
             commands::create_daily_note,
             commands::rename_note,
             commands::delete_note,

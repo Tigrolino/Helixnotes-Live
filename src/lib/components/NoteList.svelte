@@ -23,6 +23,7 @@
 		getNotes,
 		readNote,
 		createNote,
+		duplicateNote,
 		deleteNote,
 		renameNote,
 		saveNote,
@@ -47,10 +48,11 @@
 	import TagSuggestInput from './TagSuggestInput.svelte';
 	import { isMobile, isAndroid } from '$lib/platform';
 
-	let { onNoteSelected = (_path: string, _content: string, _task?: TaskItem) => {}, onNoteMoved = () => {}, onBeforeNoteSwitch = () => {}, onNoteCreated = () => {}, onToggleTask = async (_t: TaskItem) => {}, onSetTaskPriority = async (_t: TaskItem, _p: string | null) => {}, onSetTaskDue = async (_t: TaskItem, _d: string | null) => {} }: {
+	let { onNoteSelected = (_path: string, _content: string, _task?: TaskItem) => {}, onNoteMoved = () => {}, onBeforeNoteSwitch = () => {}, onBeforeNoteDuplicate = async () => true, onNoteCreated = () => {}, onToggleTask = async (_t: TaskItem) => {}, onSetTaskPriority = async (_t: TaskItem, _p: string | null) => {}, onSetTaskDue = async (_t: TaskItem, _d: string | null) => {} }: {
 		onNoteSelected?: (path: string, content: string, task?: TaskItem) => void;
 		onNoteMoved?: () => void;
 		onBeforeNoteSwitch?: () => void;
+		onBeforeNoteDuplicate?: () => Promise<boolean>;
 		onNoteCreated?: () => void;
 		onToggleTask?: (t: TaskItem) => Promise<void>;
 		onSetTaskPriority?: (t: TaskItem, p: string | null) => Promise<void>;
@@ -465,6 +467,27 @@
 			onNoteCreated();
 		} catch (e) {
 			console.error('Failed to create note:', e);
+		}
+	}
+
+	async function handleDuplicate(note: NoteEntry) {
+		contextMenu = null;
+		try {
+			if ($activeNotePath === note.path && $editorDirty) {
+				const saved = await onBeforeNoteDuplicate();
+				if (!saved) {
+					console.error('Failed to save note before duplicating');
+					return;
+				}
+			}
+
+			const entry = await duplicateNote(note.path);
+			if ($sortMode === 'custom') appendManualNoteOrder(entry.path);
+			noteCache.clear();
+			if ($viewMode !== 'quickaccess') $notes = [entry, ...$notes];
+			await selectNote(entry);
+		} catch (e) {
+			console.error('Failed to duplicate note:', e);
 		}
 	}
 
@@ -1385,7 +1408,7 @@
 </div>
 
 {#if contextMenu}
-	<div class="context-menu" style="left: {contextMenu.x}px; top: {contextMenu.y}px" onclick={(e) => e.stopPropagation()} role="menu">
+	<div class="context-menu" class:mobile={isMobile} style="left: {contextMenu.x}px; top: {contextMenu.y}px" onclick={(e) => e.stopPropagation()} role="menu">
 		{#if selectedPaths.size > 1 && selectedPaths.has(contextMenu.note.path)}
 			<!-- Batch context menu -->
 			{#if $viewMode === 'trash'}
@@ -1548,6 +1571,12 @@
 					<path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/>
 				</svg>
 				Rename
+			</button>
+			<button onclick={() => handleDuplicate(contextMenu!.note)}>
+				<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+					<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 00-2-2H5a2 2 0 00-2 2v9a2 2 0 002 2h3"/>
+				</svg>
+				Duplicate Note
 			</button>
 			<button onclick={() => { movePickerNote = contextMenu!.note; }}>
 				<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -2291,13 +2320,15 @@
 		border-radius: 10px;
 	}
 
-	.note-list.mobile .context-menu {
+	.context-menu.mobile {
 		min-width: 220px;
 		border-radius: 12px;
 		padding: 6px;
+		max-height: calc(100dvh - 16px);
+		overflow-y: auto;
 	}
 
-	.note-list.mobile .context-menu button {
+	.context-menu.mobile button {
 		padding: 12px 16px;
 		font-size: 15px;
 		min-height: 44px;

@@ -476,6 +476,75 @@ pub fn create_note(
     })
 }
 
+pub fn duplicate_note(path: &str, vault_path: &str) -> Result<NoteEntry, String> {
+    let src = Path::new(path);
+    if !src.is_file() {
+        return Err("Note does not exist".to_string());
+    }
+
+    let parent = src
+        .parent()
+        .ok_or_else(|| "Note has no parent directory".to_string())?;
+    let raw = fs::read_to_string(src).map_err(|e| e.to_string())?;
+    let filename = src
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let (mut meta, body) = frontmatter::parse_note(&raw, &filename);
+    let source_title = meta.title.clone();
+    let base_title = format!("{} copy", source_title.trim_end());
+    let mut copy_title = base_title.clone();
+    let mut copy_number = 2;
+    let mut copy_path = parent.join(format!("{}.md", sanitize_filename(&copy_title)));
+
+    while copy_path.exists() {
+        copy_title = format!("{} {}", base_title, copy_number);
+        copy_number += 1;
+        copy_path = parent.join(format!("{}.md", sanitize_filename(&copy_title)));
+    }
+
+    let now = Utc::now();
+    meta.id = Uuid::new_v4().to_string();
+    meta.title = copy_title;
+    meta.pinned = false;
+    meta.created = now;
+    meta.modified = now;
+
+    let body = retitle_leading_heading(&body, &source_title, &meta.title);
+    let copy_raw = frontmatter::merge_frontmatter(&raw, &meta, &body);
+    fs::write(&copy_path, copy_raw).map_err(|e| e.to_string())?;
+
+    read_note_entry(&copy_path, Path::new(vault_path))
+}
+
+fn retitle_leading_heading(body: &str, old_title: &str, new_title: &str) -> String {
+    let trimmed = body.trim_start();
+    let leading_len = body.len() - trimmed.len();
+    let first_line_end = trimmed.find('\n').unwrap_or(trimmed.len());
+    let first_line = &trimmed[..first_line_end];
+    let heading_len = first_line.chars().take_while(|&c| c == '#').count();
+
+    if !(1..=6).contains(&heading_len) {
+        return body.to_string();
+    }
+
+    let Some(heading_title) = first_line[heading_len..].strip_prefix(' ') else {
+        return body.to_string();
+    };
+    if !heading_title.trim().eq_ignore_ascii_case(old_title.trim()) {
+        return body.to_string();
+    }
+
+    let mut retitled = String::with_capacity(body.len() + new_title.len());
+    retitled.push_str(&body[..leading_len]);
+    retitled.push_str(&"#".repeat(heading_len));
+    retitled.push(' ');
+    retitled.push_str(new_title);
+    retitled.push_str(&trimmed[first_line_end..]);
+    retitled
+}
+
 fn get_system_locale() -> Locale {
     let sys = sys_locale::get_locale().unwrap_or_else(|| "en-US".to_string());
     let lang = sys.split(&['-', '_', '.'][..]).next().unwrap_or("en");
@@ -1240,7 +1309,7 @@ pub fn sanitize_filename(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{helixnotes_dir, load_notebook_icons, set_notebook_icon};
+    use super::{duplicate_note, helixnotes_dir, load_notebook_icons, set_notebook_icon};
     use std::fs;
     use uuid::Uuid;
 
@@ -1260,6 +1329,38 @@ mod tests {
 
         set_notebook_icon(&vault_path, "Projects", None).unwrap();
         assert!(load_notebook_icons(&vault_path).unwrap().is_empty());
+
+        fs::remove_dir_all(vault).unwrap();
+    }
+
+    #[test]
+    fn duplicates_note_content_and_assigns_unique_identity_and_name() {
+        let vault =
+            std::env::temp_dir().join(format!("helixnotes-duplicate-note-test-{}", Uuid::new_v4()));
+        let notebook = vault.join("Projects");
+        fs::create_dir_all(&notebook).unwrap();
+        let source_path = notebook.join("Project.md");
+        let source_raw = "---\nid: source-id\ntitle: Project\ntags:\n  - work\npinned: true\ncreated: 2020-01-01T00:00:00Z\nmodified: 2020-01-02T00:00:00Z\naliases:\n  - Plan\n---\n# Project\n\nOriginal body.\n";
+        fs::write(&source_path, source_raw).unwrap();
+
+        let vault_path = vault.to_string_lossy();
+        let first = duplicate_note(&source_path.to_string_lossy(), &vault_path).unwrap();
+        let second = duplicate_note(&source_path.to_string_lossy(), &vault_path).unwrap();
+
+        assert_eq!(first.meta.title, "Project copy");
+        assert_eq!(second.meta.title, "Project copy 2");
+        assert_eq!(first.meta.tags, vec!["work"]);
+        assert!(!first.meta.pinned);
+        assert_ne!(first.meta.id, "source-id");
+        assert_ne!(first.meta.id, second.meta.id);
+        assert_eq!(first.relative_path, "Projects/Project copy.md");
+        assert_eq!(second.relative_path, "Projects/Project copy 2.md");
+
+        let first_raw = fs::read_to_string(&first.path).unwrap();
+        assert!(first_raw.contains("aliases:\n- Plan"));
+        assert!(first_raw.contains("# Project copy\n\nOriginal body."));
+        assert!(!first_raw.contains("\n# Project\n"));
+        assert_eq!(fs::read_to_string(&source_path).unwrap(), source_raw);
 
         fs::remove_dir_all(vault).unwrap();
     }
