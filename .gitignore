@@ -13,6 +13,9 @@ bun.lockb
 /.svelte-kit
 /build
 
+# Local tests
+/tests/
+
 # Nix
 /result
 
