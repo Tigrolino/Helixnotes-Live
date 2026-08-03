@@ -57,6 +57,10 @@
 	import { isMobile, isAndroid } from '$lib/platform';
 	import ResizeHandle from './ResizeHandle.svelte';
 
+	let { onMoveToTrash = async () => false }: {
+		onMoveToTrash?: (path: string) => Promise<boolean>;
+	} = $props();
+
 	const modKey = navigator.platform.startsWith('Mac') ? '⌘' : 'Ctrl';
 	const sourceHighlighter = hljs.newInstance();
 	sourceHighlighter.registerLanguage('markdown', markdownLanguage);
@@ -103,6 +107,7 @@
 	let pendingContent = $state<string | null>(null);
 	let ignoreNextUpdate = false;
 	let isLoadingNote = false;
+	let trashingNote = $state(false);
 	let fixingBlobsPromise: Promise<void> = Promise.resolve();
 	let hasPendingBlobs = false;
 	let lastSourceMode = $sourceMode;
@@ -2993,8 +2998,16 @@
 		return src;
 	}
 
+	let saveQueue: Promise<void> = Promise.resolve();
+
+	function queueSave(task: () => Promise<void>): Promise<void> {
+		const queued = saveQueue.then(task);
+		saveQueue = queued.catch(() => {});
+		return queued;
+	}
+
 	const autoSave = debounce(async () => {
-		if (get(viewerNote)) return; // never autosave external viewer files
+		if (get(viewerNote) || trashingNote) return; // never autosave external viewer files or a note being trashed
 		if (!$activeNote || !$activeNotePath || !$editorDirty) return;
 		// Only fix blob images if a paste occurred (avoids full doc scan on every save)
 		if (hasPendingBlobs) {
@@ -3002,38 +3015,65 @@
 			fixingBlobsPromise = fixBlobImages();
 		}
 		await fixingBlobsPromise;
+		if (trashingNote || !$activeNote || !$activeNotePath) return;
 		try {
+			const path = $activeNotePath;
+			const note = $activeNote;
 			const body = $sourceMode
 				? restoreTitleH1(sourceContent)
 				: editorToMarkdown();
 			// Safety: never save empty/near-empty body over a note that had real content
 			const trimmed = body.replace(/^#.*\n?/, '').trim();
-			if (!trimmed && $activeNote.content && $activeNote.content.trim().length > 10) {
+			if (!trimmed && note.content && note.content.trim().length > 10) {
 				console.warn('Auto-save blocked: refusing to overwrite note with empty content');
 				return;
 			}
-			await saveNote($activeNotePath, $activeNote.meta, body);
-			$editorDirty = false;
+			await queueSave(() => saveNote(path, note.meta, body));
+			if ($activeNotePath === path) $editorDirty = false;
 		} catch (e) {
 			console.error('Auto-save failed:', e);
 		}
 	}, isMobile ? 1500 : 500);
 
-	export async function forceSave() {
-		if (get(viewerNote)) return; // viewer files are never written back
-		if (!$activeNote || !$activeNotePath) return;
+	export async function forceSave(allowWhileTrashing = false): Promise<boolean> {
+		if (get(viewerNote) || (trashingNote && !allowWhileTrashing)) return false;
+		if (!$activeNote || !$activeNotePath) return false;
 		await fixingBlobsPromise;
+		if (trashingNote && !allowWhileTrashing) return false;
+		if (!$activeNote || !$activeNotePath) return false;
 		try {
+			const path = $activeNotePath;
+			const note = $activeNote;
 			const body = $sourceMode ? restoreTitleH1(sourceContent) : editorToMarkdown();
 			const trimmed = body.replace(/^#.*\n?/, '').trim();
-			if (!trimmed && $activeNote.content && $activeNote.content.trim().length > 10) {
+			if (!trimmed && note.content && note.content.trim().length > 10) {
 				console.warn('Force-save blocked: refusing to overwrite note with empty content');
-				return;
+				return false;
 			}
-			await saveNote($activeNotePath, $activeNote.meta, body);
-			$editorDirty = false;
+			await queueSave(() => saveNote(path, note.meta, body));
+			if ($activeNotePath === path) $editorDirty = false;
+			return true;
 		} catch (e) {
 			console.error('Save failed:', e);
+			return false;
+		}
+	}
+
+	export async function moveOpenNoteToTrash(): Promise<boolean> {
+		if (trashingNote || !$activeNotePath || $viewerNote) return false;
+		const path = $activeNotePath;
+		const wasDirty = $editorDirty;
+		trashingNote = true;
+		try {
+			// Drain any save already in flight, then persist the latest editor state.
+			await saveQueue;
+			if (wasDirty && !(await forceSave(true))) return false;
+			if ($activeNotePath !== path) return false;
+			// A queued debounce observes this flag and cannot recreate the moved note.
+			$editorDirty = false;
+			return await onMoveToTrash(path);
+		} finally {
+			trashingNote = false;
 		}
 	}
 
@@ -6050,6 +6090,13 @@
 					}}
 				/>
 			</div>
+			{#if isMobile}
+				<button type="button" class="icon-btn editor-trash-btn mobile" onclick={moveOpenNoteToTrash} disabled={trashingNote} title="Move to Trash" aria-label="Move note to Trash">
+					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<path d="M3 6h18"/><path d="M19 6v14H5V6"/><path d="M8 6V4h8v2"/><path d="M10 11v5"/><path d="M14 11v5"/>
+					</svg>
+				</button>
+			{/if}
 			{#if !isMobile}
 			<div class="toolbar-actions">
 				{#if $canGoBack || $canGoForward}
@@ -6196,6 +6243,11 @@
 				>
 					<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
 						<path d="M5.854 4.854a.5.5 0 10-.708-.708l-3.5 3.5a.5.5 0 000 .708l3.5 3.5a.5.5 0 00.708-.708L2.707 8l3.147-3.146zm4.292 0a.5.5 0 01.708-.708l3.5 3.5a.5.5 0 010 .708l-3.5 3.5a.5.5 0 01-.708-.708L13.293 8l-3.147-3.146z" />
+					</svg>
+				</button>
+				<button type="button" class="icon-btn editor-trash-btn" onclick={moveOpenNoteToTrash} disabled={trashingNote} title="Move to Trash" aria-label="Move note to Trash">
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<path d="M3 6h18"/><path d="M19 6v14H5V6"/><path d="M8 6V4h8v2"/><path d="M10 11v5"/><path d="M14 11v5"/>
 					</svg>
 				</button>
 			</div>
@@ -8154,6 +8206,17 @@
 	.icon-btn:hover {
 		background: var(--bg-hover);
 		color: var(--text-primary);
+	}
+
+	.editor-trash-btn:hover,
+	.editor-trash-btn:focus-visible {
+		color: var(--danger);
+		background: color-mix(in srgb, var(--danger) 12%, transparent);
+	}
+
+	.editor-trash-btn:disabled {
+		opacity: 0.45;
+		cursor: default;
 	}
 
 	.icon-btn.active {
@@ -11295,9 +11358,9 @@
 	.editor-container.mobile .editor-toolbar {
 		padding: 8px 16px 6px 16px;
 		flex-shrink: 0;
-		flex-direction: column;
-		align-items: stretch;
-		gap: 2px;
+		flex-direction: row;
+		align-items: center;
+		gap: 8px;
 	}
 
 	.toolbar-actions.mobile {
@@ -11320,6 +11383,20 @@
 	.editor-container.mobile .editor-title input {
 		font-size: 20px;
 		padding: 4px 0;
+	}
+
+	.editor-container.mobile .editor-trash-btn.mobile {
+		width: 44px;
+		height: 44px;
+		padding: 0;
+		flex-shrink: 0;
+		justify-content: center;
+		border-radius: 8px;
+	}
+
+	.editor-container.mobile .editor-trash-btn.mobile:active {
+		color: var(--danger);
+		background: color-mix(in srgb, var(--danger) 12%, transparent);
 	}
 
 	.editor-container.mobile .editor-body-wrapper {

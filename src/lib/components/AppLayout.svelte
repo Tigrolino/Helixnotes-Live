@@ -61,7 +61,7 @@
 	const appWindow = getCurrentWindow();
 	const isMac = navigator.platform.startsWith('Mac');
 	const isMobile = $derived($platformIsMobile);
-	import { loadVaultState, saveVaultState, readNote, createDailyNote, createBackup, getPendingOpenFile, addQuickAccess, removeQuickAccess, getQuickAccess, setTheme, syncNow, getAppConfig, setTaskDone, setTaskPriority, setTaskDue, findOrphanedAttachments, trashOrphanedAttachments } from '$lib/api';
+	import { loadVaultState, saveVaultState, readNote, deleteNote, createDailyNote, createBackup, getPendingOpenFile, addQuickAccess, removeQuickAccess, getQuickAccess, setTheme, syncNow, getAppConfig, setTaskDone, setTaskPriority, setTaskDue, findOrphanedAttachments, trashOrphanedAttachments } from '$lib/api';
 	import { darkThemes, isAndroid } from '$lib/platform';
 	import { debounce } from '$lib/utils/debounce';
 	import { openNoteWindow } from '$lib/utils/window';
@@ -449,6 +449,28 @@
 		else if ($mobileView === 'notelist') $mobileView = 'sidebar';
 	}
 
+	async function trashOpenNote(path: string): Promise<boolean> {
+		if (path !== $activeNotePath || $viewerNote || $viewMode === 'trash') return false;
+		try {
+			await deleteNote(path);
+			if (Object.hasOwn($noteOrder, path)) {
+				const { [path]: _, ...rest } = $noteOrder;
+				$noteOrder = rest;
+			}
+			$notes = $notes.filter((note) => note.path !== path);
+			if ($activeNotePath === path) {
+				$activeNote = null;
+				$activeNotePath = null;
+			}
+			noteList?.refresh(true).catch((error) => console.error('Failed to refresh notes after trashing:', error));
+			if (isMobile) $mobileView = 'notelist';
+			return true;
+		} catch (error) {
+			console.error('Failed to move open note to Trash:', error);
+			return false;
+		}
+	}
+
 	function handleMouseDown(e: MouseEvent) {
 		if (e.button === 3) { e.preventDefault(); navigateHistory(-1); }
 		if (e.button === 4) { e.preventDefault(); navigateHistory(1); }
@@ -467,7 +489,7 @@
 		// Ctrl/Cmd+Shift+Delete: move the open note to the trash.
 		if (mod && e.shiftKey && code === 'Delete' && $activeNotePath) {
 			e.preventDefault();
-			noteList?.trashActiveNote();
+			editor?.moveOpenNoteToTrash();
 			return;
 		}
 
@@ -951,7 +973,7 @@
 				<NoteList bind:this={noteList} onNoteSelected={handleNoteSelected} onBeforeNoteSwitch={() => editor?.flushSave()} onNoteMoved={() => sidebar?.refresh()} onNoteCreated={() => { editor?.focusTitle(); }} onToggleTask={toggleTask} onSetTaskPriority={changeTaskPriority} onSetTaskDue={changeTaskDue} />
 			</div>
 			<div class="mobile-panel" class:active={$mobileView === 'editor'}>
-				<Editor bind:this={editor} />
+				<Editor bind:this={editor} onMoveToTrash={trashOpenNote} />
 			</div>
 		</div>
 
@@ -1028,7 +1050,7 @@
 			{/if}
 
 			<div class="editor-panel">
-				<Editor bind:this={editor} />
+				<Editor bind:this={editor} onMoveToTrash={trashOpenNote} />
 				{#if $viewMode === 'tasks' && !taskNoteOpened}
 					<div class="tasks-editor-placeholder">
 						<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">

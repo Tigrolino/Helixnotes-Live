@@ -519,12 +519,6 @@
 		}
 	}
 
-	// Move the currently open note to the trash (keyboard shortcut from the editor).
-	export async function trashActiveNote() {
-		if ($viewMode === 'trash' || !$activeNotePath) return;
-		const note = $notes.find(n => n.path === $activeNotePath);
-		if (note) await handleDelete(note);
-	}
 
 	async function handleRestore(note: NoteEntry) {
 		contextMenu = null;
