@@ -217,6 +217,10 @@ export async function saveVaultState(vaultState: VaultState): Promise<void> {
   return invoke("save_vault_state", { vaultState });
 }
 
+export async function copyTextToClipboard(text: string): Promise<void> {
+  return invoke("copy_text_to_clipboard", { text });
+}
+
 export async function readClipboardImage(): Promise<number[]> {
   return invoke("read_clipboard_image");
 }

@@ -1231,6 +1231,23 @@ pub fn save_vault_state(state: State<'_, AppState>, vault_state: VaultState) -> 
 
 // ── Clipboard ──
 
+/// Copy text to the system clipboard through the native backend.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn copy_text_to_clipboard(text: String) -> Result<(), String> {
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|e| format!("Clipboard init failed: {}", e))?;
+    clipboard
+        .set_text(text)
+        .map_err(|e| format!("Failed to copy text: {}", e))
+}
+
+#[cfg(mobile)]
+#[tauri::command]
+pub fn copy_text_to_clipboard(_text: String) -> Result<(), String> {
+    Err("Text clipboard copy is only supported on desktop".to_string())
+}
+
 /// Read image from system clipboard (bypasses WebKitGTK clipboard bug).
 /// Returns PNG bytes as Vec<u8>, or error if no image on clipboard.
 #[cfg(desktop)]

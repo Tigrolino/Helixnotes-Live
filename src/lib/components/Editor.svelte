@@ -37,7 +37,7 @@
 	import { convertFileSrc } from '@tauri-apps/api/core';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { readFile } from '@tauri-apps/plugin-fs';
-	import { openFile, openUrl, copyFileTo, copyImageToClipboard as copyImageToClipboardCmd, writeBytesTo, copyPngToClipboard } from '$lib/api';
+	import { openFile, openUrl, copyFileTo, copyImageToClipboard as copyImageToClipboardCmd, writeBytesTo, copyPngToClipboard, copyTextToClipboard } from '$lib/api';
 	import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 	import { activeNote, activeNotePath, appConfig, editorDirty, sourceMode, focusMode, readOnly, quickAccessPaths, notes, navHistory, canGoBack, canGoForward, viewerNote, notebooks, outlineWidth } from '$lib/stores/app';
 	import { saveNote, saveImage, saveAttachment, readClipboardImage, addQuickAccess, removeQuickAccess, getQuickAccess, getNoteVersions, getNoteVersionContent, createVersion, aiAsk, getAllNoteTitles, readNote, renameNote } from '$lib/api';
@@ -331,6 +331,15 @@
 	let infoToggleBtnEl = $state<HTMLElement | null>(null);
 	let wordCount = $state(0);
 	let charCount = $state(0);
+	let infoPathCopyState = $state<'idle' | 'copied' | 'error'>('idle');
+	let infoPathCopyTimer: ReturnType<typeof setTimeout> | null = null;
+
+	$effect(() => {
+		$activeNotePath;
+		infoPathCopyState = 'idle';
+		if (infoPathCopyTimer) clearTimeout(infoPathCopyTimer);
+		infoPathCopyTimer = null;
+	});
 
 	// In-note search
 	let noteSearchOpen = $state(false);
@@ -3066,17 +3075,25 @@
 
 	const scheduleCounts = debounce(updateCounts, 250);
 
-	async function toggleInfo() {
-		if (!showInfo && $activeNote) {
-			historyLoading = true;
-			try {
-				historyVersions = await getNoteVersions($activeNote.meta.id);
-			} catch {
-				historyVersions = [];
-			}
-			historyLoading = false;
-		}
+	function toggleInfo() {
 		showInfo = !showInfo;
+	}
+
+	async function copyActiveNotePath() {
+		const path = $activeNotePath;
+		if (!path) return;
+		if (infoPathCopyTimer) clearTimeout(infoPathCopyTimer);
+		try {
+			await copyTextToClipboard(path);
+			infoPathCopyState = 'copied';
+		} catch (e) {
+			console.error('Failed to copy note path:', e);
+			infoPathCopyState = 'error';
+		}
+		infoPathCopyTimer = setTimeout(() => {
+			infoPathCopyState = 'idle';
+			infoPathCopyTimer = null;
+		}, 1600);
 	}
 
 	async function toggleHistory() {
@@ -5806,6 +5823,7 @@
 		clearTaskReveal();
 		destroyEditor();
 		unlistenFileChange?.();
+		if (infoPathCopyTimer) clearTimeout(infoPathCopyTimer);
 	});
 </script>
 
@@ -6401,37 +6419,35 @@
 							</span>
 						</div>
 						{/if}
-					</div>
-
-					<div class="info-section info-section-versions">
-						<div class="info-section-header">
-							<div class="info-section-label">Snapshots</div>
-							<button class="info-snapshot-btn" onclick={handleCreateVersion} title="Save snapshot">
-								<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-									<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-								</svg>
-								Save now
-							</button>
-						</div>
-						{#if historyLoading}
-							<div class="info-empty">Loading...</div>
-						{:else if historyVersions.length === 0}
-							<div class="info-empty">No snapshots yet. They're created automatically as you edit.</div>
-						{:else}
-							<div class="info-versions-list">
-								{#each historyVersions as v}
-									<button
-										class="info-version-item"
-										class:active={historySelected?.timestamp === v.timestamp}
-										onclick={() => { previewVersion(v); showHistory = true; showInfo = false; }}
-									>
-										<span class="info-version-date">{formatVersionDate(v.timestamp)}</span>
-										<span class="info-version-size">{formatVersionSize(v.size)}</span>
-									</button>
-								{/each}
+						{#if !isMobile && $activeNotePath}
+						<div class="info-note-path">
+							<div class="info-note-path-header">
+								<span class="info-key">Path on disk</span>
+								<button
+									type="button"
+									class="info-copy-path-btn"
+									class:copied={infoPathCopyState === 'copied'}
+									class:error={infoPathCopyState === 'error'}
+									onclick={copyActiveNotePath}
+									aria-live="polite"
+									title="Copy note path"
+								>
+									{#if infoPathCopyState === 'copied'}
+										<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6" /></svg>
+										Copied
+									{:else if infoPathCopyState === 'error'}
+										Copy failed
+									{:else}
+										<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" /></svg>
+										Copy
+									{/if}
+								</button>
 							</div>
+							<code class="info-note-path-value" title={$activeNotePath}>{$activeNotePath}</code>
+						</div>
 						{/if}
 					</div>
+
 				</div>
 			{/if}
 			</div>
@@ -11402,13 +11418,6 @@
 		flex: 1;
 	}
 
-	.info-section-header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		margin-bottom: 8px;
-	}
-
 	.info-section-label {
 		font-size: 11px;
 		font-weight: 600;
@@ -11416,28 +11425,6 @@
 		letter-spacing: 0.06em;
 		color: var(--text-tertiary);
 		margin-bottom: 8px;
-	}
-
-	.info-section-header .info-section-label {
-		margin-bottom: 0;
-	}
-
-	.info-snapshot-btn {
-		display: flex;
-		align-items: center;
-		gap: 4px;
-		background: none;
-		border: 1px solid var(--border-color);
-		border-radius: 4px;
-		color: var(--text-secondary);
-		cursor: pointer;
-		padding: 3px 7px;
-		font-size: 11px;
-	}
-
-	.info-snapshot-btn:hover {
-		background: var(--bg-hover);
-		color: var(--text-primary);
 	}
 
 	.info-row {
@@ -11472,6 +11459,64 @@
 		max-width: 140px;
 	}
 
+	.info-note-path {
+		min-width: 0;
+		margin-top: 8px;
+		padding-top: 8px;
+		border-top: 1px solid var(--border-light);
+	}
+
+	.info-note-path-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+
+	.info-copy-path-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		margin: -3px -4px -3px 0;
+		padding: 3px 5px;
+		border: none;
+		border-radius: 4px;
+		background: transparent;
+		color: var(--accent);
+		font-size: 11px;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.info-copy-path-btn:hover {
+		background: var(--accent-light);
+	}
+
+	.info-copy-path-btn:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 1px;
+	}
+
+	.info-copy-path-btn.copied {
+		color: var(--success);
+	}
+
+	.info-copy-path-btn.error {
+		color: var(--danger);
+	}
+
+	.info-note-path-value {
+		display: block;
+		margin-top: 4px;
+		overflow: hidden;
+		color: var(--text-secondary);
+		font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+		font-size: 10px;
+		line-height: 1.4;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
 	.info-tags {
 		display: flex;
 		flex-wrap: wrap;
@@ -11485,51 +11530,6 @@
 		background: var(--bg-tertiary);
 		border-radius: 3px;
 		padding: 1px 5px;
-	}
-
-	.info-empty {
-		font-size: 12px;
-		color: var(--text-tertiary);
-		line-height: 1.5;
-		padding: 4px 0;
-	}
-
-	.info-versions-list {
-		display: flex;
-		flex-direction: column;
-		gap: 1px;
-		margin-top: 4px;
-	}
-
-	.info-version-item {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: 6px 8px;
-		border-radius: 5px;
-		background: none;
-		border: none;
-		cursor: pointer;
-		text-align: left;
-		width: 100%;
-	}
-
-	.info-version-item:hover {
-		background: var(--bg-hover);
-	}
-
-	.info-version-item.active {
-		background: var(--bg-active);
-	}
-
-	.info-version-date {
-		font-size: 12px;
-		color: var(--text-primary);
-	}
-
-	.info-version-size {
-		font-size: 11px;
-		color: var(--text-tertiary);
 	}
 
 	.editor-container.mobile .editor-body-row:has(.info-panel) > .editor-body {
