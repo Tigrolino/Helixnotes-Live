@@ -6235,6 +6235,11 @@
 					</svg>
 				</button>
 				{/if}
+				<button type="button" class="icon-btn editor-trash-btn" onclick={moveOpenNoteToTrash} disabled={trashingNote} title="Move to Trash" aria-label="Move note to Trash">
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<path d="M3 6h18"/><path d="M19 6v14H5V6"/><path d="M8 6V4h8v2"/><path d="M10 11v5"/><path d="M14 11v5"/>
+					</svg>
+				</button>
 				<button
 					class="icon-btn"
 					class:active={$sourceMode}
@@ -6243,11 +6248,6 @@
 				>
 					<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
 						<path d="M5.854 4.854a.5.5 0 10-.708-.708l-3.5 3.5a.5.5 0 000 .708l3.5 3.5a.5.5 0 00.708-.708L2.707 8l3.147-3.146zm4.292 0a.5.5 0 01.708-.708l3.5 3.5a.5.5 0 010 .708l-3.5 3.5a.5.5 0 01-.708-.708L13.293 8l-3.147-3.146z" />
-					</svg>
-				</button>
-				<button type="button" class="icon-btn editor-trash-btn" onclick={moveOpenNoteToTrash} disabled={trashingNote} title="Move to Trash" aria-label="Move note to Trash">
-					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-						<path d="M3 6h18"/><path d="M19 6v14H5V6"/><path d="M8 6V4h8v2"/><path d="M10 11v5"/><path d="M14 11v5"/>
 					</svg>
 				</button>
 			</div>
