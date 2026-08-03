@@ -51,6 +51,7 @@
 	import { calloutGroup, calloutIcon, calloutLabel, CALLOUT_MENU, transformCalloutBlockquotes, serializeCallout } from '$lib/editor/callouts';
 	import { wrapTextareaSelection } from '$lib/editor/source/selectionPairs';
 	import { convertListNode, type MixedListName } from '$lib/editor/mixedLists';
+	import { serializeInlineMarkdown } from '$lib/editor/markdown';
 	import { relativePath } from '$lib/utils/paths';
 	import GraphView from './GraphView.svelte';
 	import TagSuggestInput from './TagSuggestInput.svelte';
@@ -3666,68 +3667,7 @@
 	}
 
 	function serializeInline(node: any): string {
-		if (node.childCount === 0) return '';
-		const parts: string[] = [];
-		node.forEach((child: any, _offset: number, index: number) => {
-			if (child.isText) {
-				let text = child.text || '';
-				// Preserve leading tabs/em-spaces as HTML entities so they survive markdown roundtrip
-				// (markdown parsers strip tab whitespace, but &emsp; passes through as HTML)
-				// Tabs come from initial indent; em-spaces (U+2003) come from prior &emsp; roundtrips
-				if (index === 0) {
-					text = text.replace(/^[\t\u2003]+/, (ws) => '&emsp;'.repeat(ws.length));
-				}
-				// Apply marks
-				for (const mark of child.marks) {
-					switch (mark.type.name) {
-						case 'bold': text = `**${text}**`; break;
-						case 'italic': text = `*${text}*`; break;
-						case 'strike': text = `~~${text}~~`; break;
-						case 'code': text = `\`${text}\``; break;
-						case 'underline': text = `<u>${text}</u>`; break;
-						case 'subscript': text = `~${text}~`; break;
-						case 'superscript': text = `^${text}^`; break;
-						case 'highlight': {
-							const color = mark.attrs?.color;
-							if (color) {
-								text = `<mark data-color="${color}">${text}</mark>`;
-							} else {
-								text = `==${text}==`;
-							}
-							break;
-						}
-						case 'textStyle': {
-							const c = mark.attrs?.color;
-							if (c) text = `<span style="color: ${c}">${text}</span>`;
-							break;
-						}
-						case 'link': text = `[${text}](${mark.attrs.href})`; break;
-						case 'wikiLink': {
-							const wlTitle = mark.attrs.title || text;
-							// If display text differs from the reference, emit [[ref|display]] (Obsidian alias syntax)
-							text = wlTitle !== text ? `[[${wlTitle}|${text}]]` : `[[${wlTitle}]]`;
-							break;
-						}
-					}
-				}
-				parts.push(text);
-			} else if (child.type.name === 'image') {
-				const src = stripAssetSrc(child.attrs.src || '');
-				if (!src) return; // Skip images with unresolved blob: URLs
-				const alt = child.attrs.alt || '';
-				const size = child.attrs['data-size'] || child.attrs.size || 'full';
-				const sizeSuffix = size && size !== 'full' ? `|size=${size}` : '';
-				if (parts.length > 0 && parts[parts.length - 1] !== '\n') {
-					parts.push('\n');
-				}
-				parts.push(`![${alt}${sizeSuffix}](${src})`);
-			} else if (child.type.name === 'mathInline') {
-				parts.push(`$${child.attrs.tex || ''}$`);
-			} else if (child.type.name === 'hardBreak') {
-				parts.push('  \n');
-			}
-		});
-		return parts.join('');
+		return serializeInlineMarkdown(node, stripAssetSrc);
 	}
 
 	function autofocus(el: HTMLElement) {
