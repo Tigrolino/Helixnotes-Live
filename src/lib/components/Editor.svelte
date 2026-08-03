@@ -87,6 +87,9 @@
 	let sourceHistoryIndex = -1;
 	let sourceHistoryTimer: ReturnType<typeof setTimeout> | null = null;
 	let loadedPath = '';
+	type NoteScrollPosition = { rich: number; source: number };
+	const MAX_NOTE_SCROLL_POSITIONS = 200;
+	const noteScrollPositions = new Map<string, NoteScrollPosition>();
 	let pendingContent = $state<string | null>(null);
 	let ignoreNextUpdate = false;
 	let isLoadingNote = false;
@@ -3236,7 +3239,34 @@
 		$editorDirty = false;
 	}
 
+	function rememberLoadedNoteScroll() {
+		if (!loadedPath) return;
+		const previous = noteScrollPositions.get(loadedPath) ?? { rich: 0, source: 0 };
+		const editorBody = editorElement?.closest('.editor-body') as HTMLElement | null;
+		const position = $sourceMode
+			? { ...previous, source: sourceElement?.scrollTop ?? previous.source }
+			: { ...previous, rich: editorBody?.scrollTop ?? previous.rich };
+
+		// Refresh insertion order so the cap evicts the least recently viewed note.
+		noteScrollPositions.delete(loadedPath);
+		noteScrollPositions.set(loadedPath, position);
+		if (noteScrollPositions.size > MAX_NOTE_SCROLL_POSITIONS) {
+			const oldestPath = noteScrollPositions.keys().next().value;
+			if (oldestPath) noteScrollPositions.delete(oldestPath);
+		}
+	}
+
+	function restoreNoteScroll(surface: HTMLElement, scrollTop: number, path: string) {
+		const apply = () => {
+			if (loadedPath === path && surface.isConnected) surface.scrollTop = scrollTop;
+		};
+		apply();
+		requestAnimationFrame(apply);
+	}
+
 	export function loadNote(path: string, content: string, taskTarget?: TaskRecord) {
+		rememberLoadedNoteScroll();
+		const scrollPosition = taskTarget ? undefined : noteScrollPositions.get(path);
 		clearTaskReveal();
 		const revealRequest = ++taskRevealRequest;
 		const revealTarget = taskTarget ? resolveTaskTarget(taskTarget, content) : null;
@@ -3256,6 +3286,9 @@
 			sourceContent = stripTitleH1(content);
 			resetSourceHistory(sourceContent);
 			if (editorBody) editorBody.scrollTop = 0;
+			tick().then(() => {
+				if (sourceElement) restoreNoteScroll(sourceElement, scrollPosition?.source ?? 0, path);
+			});
 			isLoadingNote = false;
 			updateCounts();
 		} else if (editorElement && editor) {
@@ -3268,9 +3301,10 @@
 			const text = editor.state.doc.textContent;
 			wordCount = countWords(text);
 			charCount = text.replace(/\s/g, '').length;
-			// Reset scroll and cursor after all ProseMirror/Svelte DOM updates settle
+			// Restore scroll and reset the cursor after all ProseMirror/Svelte DOM updates settle.
 			tick().then(() => {
-				if (editorBody) editorBody.scrollTop = 0;
+				if (path !== loadedPath) return;
+				if (editorBody) restoreNoteScroll(editorBody, scrollPosition?.rich ?? 0, path);
 				// Explicitly reset ProseMirror selection to start so TipTap's focus()
 				// (triggered by checkbox clicks etc.) doesn't scroll to the old note's cursor position.
 				if (editor) {
@@ -3278,15 +3312,14 @@
 					// No tr.scrollIntoView() - must not trigger any scroll
 					editor.view.dispatch(tr);
 				}
-				requestAnimationFrame(() => { if (editorBody) editorBody.scrollTop = 0; });
 				isLoadingNote = false;
 			});
 		} else {
-		// Editor element not in DOM yet (first note load).
-		// Store content and let the $effect on editorElement handle init.
-		pendingContent = content;
-		isLoadingNote = false;
-	}
+			// Editor element not in DOM yet (first note load).
+			// Store content and let the $effect on editorElement handle init.
+			pendingContent = content;
+			isLoadingNote = false;
+		}
 		if (!isMobile && showOutline) scheduleOutline();
 		scheduleTaskReveal(path, revealTarget, revealRequest);
 	}
