@@ -55,6 +55,7 @@
 	import { relativePath } from '$lib/utils/paths';
 	import GraphView from './GraphView.svelte';
 	import TagSuggestInput from './TagSuggestInput.svelte';
+	import ImageViewer from './ImageViewer.svelte';
 	import { isMobile, isAndroid } from '$lib/platform';
 	import ResizeHandle from './ResizeHandle.svelte';
 
@@ -471,7 +472,8 @@
 	let tableContextMenu = $state<{ x: number; y: number; hasStyling: boolean } | null>(null);
 	let tablePickerOpen = $state(false);
 	let tablePickerHover = $state({ rows: 0, cols: 0 });
-	let imageToolbar = $state<{ pos: number; x: number; y: number; size: string; src: string } | null>(null);
+	let imageToolbar = $state<{ pos: number; x: number; y: number; size: string; src: string; alt: string } | null>(null);
+	let imageViewer = $state<{ src: string; alt: string } | null>(null);
 	let copyToast = $state<'copying' | 'done' | null>(null);
 
 	$effect(() => {
@@ -4828,17 +4830,24 @@
 			const node = editor.state.doc.nodeAt(pos);
 			const currentSize = node?.attrs.size || 'full';
 			const imgSrc = node?.attrs.src || (target as HTMLImageElement).src || '';
-			const toolbarW = isMobile ? 130 : 250;
-			const toolbarH = 38;
-			const x = Math.min(event.clientX, window.innerWidth - toolbarW - 8);
-			const y = Math.min(event.clientY, window.innerHeight - toolbarH - 8);
-			imageToolbar = { pos, x, y, size: currentSize, src: imgSrc };
+			const imgAlt = node?.attrs.alt || (target as HTMLImageElement).alt || '';
+			const toolbarW = isAndroid ? 188 : isMobile ? 130 : 250;
+			const toolbarH = isAndroid ? 48 : 38;
+			const x = Math.max(8, Math.min(event.clientX, window.innerWidth - toolbarW - 8));
+			const y = Math.max(8, Math.min(event.clientY, window.innerHeight - toolbarH - 8));
+			imageToolbar = { pos, x, y, size: currentSize, src: imgSrc, alt: imgAlt };
 			// Move cursor after the image to clear ProseMirror's node selection highlight
 			const afterPos = pos + (node?.nodeSize || 1);
 			editor.chain().setTextSelection(afterPos).run();
 			return;
 		}
 
+		imageToolbar = null;
+	}
+
+	function openImageViewer() {
+		if (!imageToolbar) return;
+		imageViewer = { src: imageToolbar.src, alt: imageToolbar.alt };
 		imageToolbar = null;
 	}
 
@@ -7345,10 +7354,16 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div class="img-toolbar-overlay" onclick={() => (imageToolbar = null)}>
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="img-toolbar" style="left: {imageToolbar.x}px; top: {imageToolbar.y}px" onclick={(e) => e.stopPropagation()}>
+		<div class="img-toolbar" class:mobile-viewer-toolbar={isAndroid} style="left: {imageToolbar.x}px; top: {imageToolbar.y}px" onclick={(e) => e.stopPropagation()}>
 			<button class:active={imageToolbar.size === 'small'} onclick={() => setImageSize('small')} title="Small (33%)">S</button>
 			<button class:active={imageToolbar.size === 'medium'} onclick={() => setImageSize('medium')} title="Medium (50%)">M</button>
 			<button class:active={imageToolbar.size === 'full'} onclick={() => setImageSize('full')} title="Full width">L</button>
+			{#if isAndroid}
+				<span class="img-toolbar-sep"></span>
+				<button class="img-toolbar-view" onclick={openImageViewer} title="View and zoom image" aria-label="View and zoom image">
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 00-2 2v3M16 3h3a2 2 0 012 2v3M8 21H5a2 2 0 01-2-2v-3M16 21h3a2 2 0 002-2v-3"/></svg>
+				</button>
+			{/if}
 			{#if !isMobile && !imageToolbar.src.startsWith('imgproxy:') && !imageToolbar.src.startsWith('http://imgproxy.localhost')}
 				<span class="img-toolbar-sep"></span>
 				<button onclick={copyImageToClipboard} title="Copy image">
@@ -7360,6 +7375,10 @@
 			{/if}
 		</div>
 	</div>
+{/if}
+
+{#if imageViewer}
+	<ImageViewer src={imageViewer.src} alt={imageViewer.alt} onclose={() => (imageViewer = null)} />
 {/if}
 
 {#if copyToast}
@@ -10001,6 +10020,12 @@
 
 	.img-toolbar button svg {
 		display: block;
+	}
+
+	.img-toolbar.mobile-viewer-toolbar button {
+		min-width: 40px;
+		min-height: 40px;
+		padding: 8px 12px;
 	}
 
 	.copy-toast {
