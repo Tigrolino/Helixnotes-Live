@@ -717,6 +717,7 @@
 	let showLineNumbers = $state($appConfig?.show_line_numbers ?? false);
 	let showLinkArrows = $state($appConfig?.show_link_arrows ?? true);
 	let defaultViewMode = $state($appConfig?.default_view_mode ?? false);
+	let newNotesInSourceMode = $state($appConfig?.new_notes_in_source_mode ?? false);
 	let showTrayIcon = $state($appConfig?.show_tray_icon ?? false);
 	let closeToTray = $state($appConfig?.close_to_tray ?? false);
 	let enableWikiLinks = $state($appConfig?.enable_wiki_links ?? true);
@@ -789,6 +790,7 @@
 			$appConfig.show_line_numbers = showLineNumbers;
 			$appConfig.show_link_arrows = showLinkArrows;
 			$appConfig.default_view_mode = defaultViewMode;
+			$appConfig.new_notes_in_source_mode = newNotesInSourceMode;
 			$appConfig.show_tray_icon = showTrayIcon;
 			$appConfig.close_to_tray = closeToTray;
 			$appConfig.enable_wiki_links = enableWikiLinks;
@@ -798,7 +800,7 @@
 			$appConfig.show_daily_notes = showDailyNotes;
 			$appConfig.show_trash = showTrash;
 			}
-			setGeneralSettings(compactNotes, timeFormat, weekStart, dailyTitleFormat, gpuAcceleration, autostart, pdfPreview, pdfHeight, titleMode, hideTitleInBody, showLineNumbers, showLinkArrows, defaultViewMode, showTrayIcon, closeToTray, enableWikiLinks, showNoteDates, startupView, restoreLastSession, showAllNotes, showQuickAccess, showTasks, showDailyNotes, showTrash)
+			setGeneralSettings(compactNotes, timeFormat, weekStart, dailyTitleFormat, gpuAcceleration, autostart, pdfPreview, pdfHeight, titleMode, hideTitleInBody, showLineNumbers, showLinkArrows, defaultViewMode, newNotesInSourceMode, showTrayIcon, closeToTray, enableWikiLinks, showNoteDates, startupView, restoreLastSession, showAllNotes, showQuickAccess, showTasks, showDailyNotes, showTrash)
 			.catch((e) => console.error('Failed to save general settings:', e));
 	}
 
@@ -988,6 +990,7 @@
 			pdfPreview = $appConfig.pdf_preview ?? false;
 			pdfHeight = $appConfig.pdf_height ?? 600;
 			titleMode = $appConfig.title_mode ?? 'input';
+			newNotesInSourceMode = $appConfig.new_notes_in_source_mode ?? false;
 			showAllNotes = $appConfig.show_all_notes ?? true;
 			showQuickAccess = $appConfig.show_quick_access ?? true;
 			showTasks = $appConfig.show_tasks ?? true;
@@ -1309,7 +1312,17 @@
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
+								<label class="setting-toggle" style="margin-top: 12px;">
+									<span class="setting-label">
+										<span class="setting-name">Open new notes in source mode</span>
+										<span class="setting-desc">Start empty notes in the plain-text Markdown editor instead of rich-text mode</span>
+									</span>
+									<button class="toggle-switch" class:on={newNotesInSourceMode} onclick={() => { newNotesInSourceMode = !newNotesInSourceMode; saveGeneralSettings(); }}>
+										<span class="toggle-knob"></span>
+									</button>
+								</label>
 							</div>
+
 
 							<div class="settings-section">
 								<h3>Wiki Links & Graph</h3>

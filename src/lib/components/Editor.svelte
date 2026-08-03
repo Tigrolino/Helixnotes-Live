@@ -24,6 +24,8 @@
 	import TextAlign from '@tiptap/extension-text-align';
 	import { common, createLowlight } from 'lowlight';
 	import powershell from 'highlight.js/lib/languages/powershell';
+	import hljs from 'highlight.js/lib/core';
+	import markdownLanguage from 'highlight.js/lib/languages/markdown';
 	import MarkdownIt from 'markdown-it';
 	import markdownItMark from 'markdown-it-mark';
 	import markdownItSup from 'markdown-it-sup';
@@ -56,6 +58,9 @@
 	import ResizeHandle from './ResizeHandle.svelte';
 
 	const modKey = navigator.platform.startsWith('Mac') ? '⌘' : 'Ctrl';
+	const sourceHighlighter = hljs.newInstance();
+	sourceHighlighter.registerLanguage('markdown', markdownLanguage);
+	const SOURCE_HIGHLIGHT_MAX_CHARS = 32_000;
 
 	// Track virtual keyboard height on mobile via visualViewport
 	let keyboardHeight = $state(0);
@@ -68,6 +73,7 @@
 
 	let editorElement = $state<HTMLDivElement>(null!);
 	let sourceElement = $state<HTMLTextAreaElement>(null!);
+	let sourceHighlightElement = $state<HTMLPreElement>(null!);
 	const LARGE_DOC_CHARS = 100_000;
 	let isLargeDoc = $state(false);
 	let editor: Editor | null = null;
@@ -83,6 +89,10 @@
 	});
 	let editorReady = $state(false);
 	let sourceContent = $state('');
+	let sourceHighlightHtml = $derived.by(() => {
+		if (sourceContent.length > SOURCE_HIGHLIGHT_MAX_CHARS) return escapeHtml(sourceContent);
+		return sourceHighlighter.highlight(sourceContent, { language: 'markdown', ignoreIllegals: true }).value;
+	});
 	let sourceHistory: Array<{ content: string; cursor: number }> = [];
 	let sourceHistoryIndex = -1;
 	let sourceHistoryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -121,6 +131,18 @@
 		requestAnimationFrame(() => {
 			editorBody.scrollTop = editorBody.scrollHeight;
 		});
+	}
+
+	function syncSourceEditorScroll() {
+		if (sourceHighlightElement && sourceElement) {
+			sourceHighlightElement.scrollTop = sourceElement.scrollTop;
+			sourceHighlightElement.scrollLeft = sourceElement.scrollLeft;
+		}
+		if ($appConfig?.show_line_numbers && sourceElement) {
+			const clip = sourceElement.closest('.editor-body')?.querySelector('.line-numbers-clip');
+			const gutter = clip?.firstElementChild as HTMLElement | null;
+			if (gutter) gutter.style.transform = `translateY(-${sourceElement.scrollTop}px)`;
+		}
 	}
 
 	function clearTaskReveal() {
@@ -3271,13 +3293,16 @@
 		const revealRequest = ++taskRevealRequest;
 		const revealTarget = taskTarget ? resolveTaskTarget(taskTarget, content) : null;
 		loadedPath = path;
-		lastSourceMode = $sourceMode;
 		isLoadingNote = true;
 		isLargeDoc = content.length > LARGE_DOC_CHARS;
-		// Apply default view mode when switching notes - but new notes always open in edit mode.
-		// Viewer mode (external file) always forces read-only.
+		// Viewer mode (external file) always forces read-only. New notes stay editable and
+		// can opt into source mode without changing how existing notes choose their mode.
 		const isViewer = !!get(viewerNote);
 		const isNewNote = $activeNote?.meta.title === 'Untitled' && !content.replace(/^---[\s\S]*?---\s*/, '').trim();
+		if (isNewNote && ($appConfig?.new_notes_in_source_mode ?? false)) {
+			$sourceMode = true;
+		}
+		lastSourceMode = $sourceMode;
 		const shouldBeReadOnly = isViewer ? true : (isNewNote ? false : ($appConfig?.default_view_mode ?? false));
 		$readOnly = shouldBeReadOnly;
 		if (editor) editor.setEditable(!shouldBeReadOnly);
@@ -6240,9 +6265,10 @@
 			<div class="editor-body">
 				{#if isMobile}
 					<!-- Mobile: both views always in DOM, toggled via display to avoid slow editor re-creation -->
+					<div class="source-editor-layer" style={$sourceMode ? '' : 'display:none'}>
+						<pre class="source-highlight" aria-hidden="true" bind:this={sourceHighlightElement}><code>{@html sourceHighlightHtml}</code></pre>
 					<textarea
 						class="source-editor"
-						style={$sourceMode ? '' : 'display:none'}
 						bind:this={sourceElement}
 						bind:value={sourceContent}
 						readonly={$readOnly}
@@ -6282,8 +6308,10 @@
 								return;
 							}
 						}}
+						onscroll={syncSourceEditorScroll}
 						spellcheck="false"
 					></textarea>
+					</div>
 					<!-- svelte-ignore a11y_no_static_element_interactions -->
 					<div class="tiptap-wrapper" class:large-doc={isLargeDoc} style={$sourceMode ? 'display:none' : ''} spellcheck="false" bind:this={editorElement} onclick={(e) => { closeLinkContextMenu(); handleEditorClick(e); }}></div>
 				{:else}
@@ -6298,6 +6326,8 @@
 								</div>
 							</div>
 						{/if}
+						<div class="source-editor-layer" class:with-line-numbers={$appConfig?.show_line_numbers}>
+							<pre class="source-highlight" aria-hidden="true" bind:this={sourceHighlightElement}><code>{@html sourceHighlightHtml}</code></pre>
 						<textarea
 							class="source-editor"
 							class:with-line-numbers={$appConfig?.show_line_numbers}
@@ -6381,17 +6411,10 @@
 									autoSave();
 								}
 							}}
-							onscroll={() => {
-								if ($appConfig?.show_line_numbers) {
-									const clip = sourceElement?.previousElementSibling as HTMLElement;
-									const gutter = clip?.firstElementChild as HTMLElement;
-									if (gutter) {
-										gutter.style.transform = `translateY(-${sourceElement.scrollTop}px)`;
-									}
-								}
-							}}
+							onscroll={syncSourceEditorScroll}
 							spellcheck="false"
 						></textarea>
+						</div>
 					{:else}
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
 						<div class="tiptap-wrapper" class:large-doc={isLargeDoc} spellcheck="false" bind:this={editorElement} onclick={(e) => { closeLinkContextMenu(); handleEditorClick(e); }} oncontextmenu={handleEditorContextMenu}></div>
@@ -8587,36 +8610,74 @@
 	.outline-level-5 { padding-left: 62px; }
 	.outline-level-6 { padding-left: 74px; }
 
+	.source-editor-layer {
+		position: relative;
+		width: 100%;
+		height: 100%;
+		max-width: var(--editor-content-width, none);
+		margin: 0 auto;
+	}
+
+	.source-highlight,
 	.source-editor {
+		box-sizing: border-box;
 		width: 100%;
 		height: 100%;
 		border: none;
-		background: none;
-		color: var(--text-primary);
 		font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
 		font-size: var(--editor-font-size, 14px);
 		line-height: 1.3;
-		resize: none;
-		outline: none;
 		padding: 0 0 var(--editor-scroll-past-end, 65vh);
-		margin: 0 auto;
-		max-width: var(--editor-content-width, none);
-		user-select: text;
-		/* Wrap long lines instead of horizontal-scrolling (matches mobile). (issue #100) */
 		white-space: pre-wrap;
 		word-break: break-word;
+	}
+
+	.source-highlight {
+		position: absolute;
+		inset: 0;
+		z-index: 0;
+		margin: 0;
+		overflow: hidden;
+		pointer-events: none;
+		user-select: none;
+		color: var(--text-primary);
+	}
+
+	.source-highlight code {
+		font: inherit;
+		white-space: inherit;
+		color: inherit;
+	}
+
+	.source-editor {
+		position: absolute;
+		inset: 0;
+		z-index: 1;
+		background: transparent;
+		color: transparent;
+		caret-color: var(--text-primary);
+		resize: none;
+		outline: none;
+		user-select: text;
 		overflow-x: hidden;
 	}
 
-	.source-editor.with-line-numbers {
+	.source-editor-layer.with-line-numbers {
+		max-width: none;
+		margin: 0;
+	}
+
+	.source-editor.with-line-numbers,
+	.source-editor-layer.with-line-numbers .source-highlight {
 		padding-left: 48px;
 		/* The line-number gutter has one fixed row per line, so wrapping would desync it.
 		   Keep no-wrap (horizontal scroll) whenever line numbers are on. (issue #100) */
 		white-space: pre;
+		word-break: normal;
+	}
+
+	.source-editor.with-line-numbers {
 		overflow-x: auto;
-		/* The line-number gutter is pinned to the left edge, so don't center/cap here. (#137) */
-		max-width: none;
-		margin: 0;
 	}
 
 	.line-numbers-clip {
@@ -8644,6 +8705,36 @@
 	.line-numbers span {
 		display: block;
 		padding-right: 12px;
+	}
+
+	/* Markdown source highlighting stays color-only so glyph metrics match the textarea caret. */
+	:global(.source-highlight .hljs-section),
+	:global(.source-highlight .hljs-strong) {
+		color: var(--accent);
+		font-weight: inherit;
+	}
+
+	:global(.source-highlight .hljs-string),
+	:global(.source-highlight .hljs-link) {
+		color: color-mix(in srgb, var(--accent) 78%, var(--text-primary));
+	}
+
+	:global(.source-highlight .hljs-bullet),
+	:global(.source-highlight .hljs-symbol),
+	:global(.source-highlight .hljs-meta),
+	:global(.source-highlight .hljs-attr) {
+		color: var(--success);
+	}
+
+	:global(.source-highlight .hljs-quote),
+	:global(.source-highlight .hljs-code) {
+		color: var(--text-secondary);
+		font-style: inherit;
+	}
+
+	:global(.source-highlight .hljs-emphasis) {
+		color: color-mix(in srgb, var(--accent) 60%, var(--text-primary));
+		font-style: inherit;
 	}
 
 	.tiptap-wrapper {
@@ -11326,6 +11417,7 @@
 		font-size: var(--editor-font-size, 16px) !important;
 	}
 
+	.editor-container.mobile .source-highlight,
 	.editor-container.mobile .source-editor {
 		padding: 8px 16px 220px;
 		font-size: var(--editor-font-size, 15px);

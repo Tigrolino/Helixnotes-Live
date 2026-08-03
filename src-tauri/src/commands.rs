@@ -1398,6 +1398,7 @@ pub fn set_general_settings(
     show_line_numbers: bool,
     show_link_arrows: bool,
     default_view_mode: bool,
+    new_notes_in_source_mode: bool,
     show_tray_icon: bool,
     close_to_tray: bool,
     enable_wiki_links: bool,
@@ -1432,6 +1433,7 @@ pub fn set_general_settings(
     config.show_line_numbers = show_line_numbers;
     config.show_link_arrows = show_link_arrows;
     config.default_view_mode = default_view_mode;
+    config.new_notes_in_source_mode = new_notes_in_source_mode;
     config.show_tray_icon = show_tray_icon;
     config.close_to_tray = close_to_tray;
     config.enable_wiki_links = enable_wiki_links;
