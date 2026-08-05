@@ -26,8 +26,13 @@
 		'--bg-primary', '--bg-secondary', '--bg-tertiary',
 		'--bg-hover', '--bg-active', '--bg-editor',
 		'--text-primary', '--text-secondary', '--border-color',
+		'--border-light', '--text-tertiary',
 	];
 
+	// A custom theme carries nine colors, but the stylesheet also reads --border-light and
+	// --text-tertiary. Named themes set those in their own :root[data-theme] block; a custom theme
+	// has no such block, so without these they fall back to the light defaults in app.css and a dark
+	// custom theme draws near-white dividers. Derive them from the closest color the theme does have.
 	function applyCustomThemeVars(root: HTMLElement, ct: CustomTheme) {
 		root.style.setProperty('--bg-primary', ct.colors.bg_primary);
 		root.style.setProperty('--bg-secondary', ct.colors.bg_secondary);
@@ -38,6 +43,8 @@
 		root.style.setProperty('--text-primary', ct.colors.text_primary);
 		root.style.setProperty('--text-secondary', ct.colors.text_secondary);
 		root.style.setProperty('--border-color', ct.colors.border_color);
+		root.style.setProperty('--border-light', ct.colors.border_color);
+		root.style.setProperty('--text-tertiary', ct.colors.text_secondary);
 	}
 
 	function clearCustomThemeVars(root: HTMLElement) {

@@ -585,12 +585,14 @@
 		root.style.setProperty('--text-primary', customThemeEditing.colors.text_primary);
 		root.style.setProperty('--text-secondary', customThemeEditing.colors.text_secondary);
 		root.style.setProperty('--border-color', customThemeEditing.colors.border_color);
+		root.style.setProperty('--border-light', customThemeEditing.colors.border_color);
+		root.style.setProperty('--text-tertiary', customThemeEditing.colors.text_secondary);
 		root.classList.toggle('dark', customThemeEditing.is_dark);
 	}
 
 	function restoreCurrentTheme() {
 		const root = document.documentElement;
-		const varsToClear = ['--bg-primary','--bg-secondary','--bg-tertiary','--bg-hover','--bg-active','--bg-editor','--text-primary','--text-secondary','--border-color'];
+		const varsToClear = ['--bg-primary','--bg-secondary','--bg-tertiary','--bg-hover','--bg-active','--bg-editor','--text-primary','--text-secondary','--border-color','--border-light','--text-tertiary'];
 		root.classList.remove('dark');
 		root.removeAttribute('data-theme');
 		for (const v of varsToClear) root.style.removeProperty(v);
@@ -607,6 +609,8 @@
 				root.style.setProperty('--text-primary', ct.colors.text_primary);
 				root.style.setProperty('--text-secondary', ct.colors.text_secondary);
 				root.style.setProperty('--border-color', ct.colors.border_color);
+				root.style.setProperty('--border-light', ct.colors.border_color);
+				root.style.setProperty('--text-tertiary', ct.colors.text_secondary);
 				if (ct.is_dark) root.classList.add('dark');
 			}
 		} else if (namedThemes.includes($theme)) {
