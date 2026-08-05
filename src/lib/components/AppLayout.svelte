@@ -21,6 +21,7 @@
 		showSearch,
 		showCommandPalette,
 		theme,
+		resolvedTheme,
 		focusMode,
 		readOnly,
 		activeNote,
@@ -507,7 +508,7 @@
 					createAndFocusNote();
 					return;
 				case 'toggle-theme': {
-					const isDark = $theme === 'dark' || ($theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+					const isDark = darkThemes.includes($resolvedTheme);
 					const next = isDark ? 'light' : 'dark';
 					$theme = next;
 					setTheme(next);
@@ -573,7 +574,7 @@
 		if (namedThemes.includes(t)) {
 			root.setAttribute('data-theme', t);
 			if (darkThemes.includes(t)) root.classList.add('dark');
-		} else if (t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+		} else if (t === 'dark') {
 			root.classList.add('dark');
 		}
 	}
@@ -663,11 +664,9 @@
 			prefetchPromise = readNote(lastNotePath).catch(() => null);
 		}
 
-		applyTheme($theme);
-
-		window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-			if ($theme === 'system') applyTheme('system');
-		});
+		// One-off apply to avoid a flash before the layout's reactive effect runs; OS appearance
+		// changes are picked up by resolvedTheme, so no media-query listener is needed here.
+		applyTheme($resolvedTheme);
 
 		// Run sidebar and note list refresh in parallel
 		await Promise.all([sidebar?.refresh(), noteList?.refresh()]);

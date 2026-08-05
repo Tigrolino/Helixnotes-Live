@@ -155,8 +155,13 @@
 			});
 			$theme = config.theme || 'system';
 
-			// Apply theme immediately to prevent flash
-			const themeValue = config.theme || 'system';
+			// Apply theme immediately to prevent flash. Runs before the stores settle, so resolve
+			// "system" against the configured pair here the same way resolvedTheme does.
+			const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+			const rawTheme = config.theme || 'system';
+			const themeValue = rawTheme === 'system'
+				? (prefersDark ? config.system_dark_theme || 'dark' : config.system_light_theme || 'light')
+				: rawTheme;
 			const root = document.documentElement;
 			const namedThemes = ['solarized-light', 'solarized-dark', 'catppuccin', 'nord', 'tokyo-night', 'github-light', 'github-dark', 'dracula', 'blueberry', 'forest-green', 'gruvbox', 'midnight-tide', 'cherry-blossom', 'synthwave', 'ember', 'moonlit', 'light-coffee', 'dark-coffee', 'cotton-candy', 'crimson', 'cloud', 'peach', 'material-dark', 'material-light', 'monokai', 'rose-pine', 'everforest', 'horizon', 'cyberpunk', 'black', 'one-dark'];
 			root.classList.remove('dark');
@@ -164,7 +169,7 @@
 			if (namedThemes.includes(themeValue)) {
 				root.setAttribute('data-theme', themeValue);
 				if (darkThemes.includes(themeValue)) root.classList.add('dark');
-			} else if (themeValue === 'dark' || (themeValue === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+			} else if (themeValue === 'dark') {
 				root.classList.add('dark');
 			}
 
@@ -192,8 +197,7 @@
 			}
 			// Apply saved accent
 			if (config.accent_color) {
-				const themeVal = config.theme || 'light';
-				const isDark = darkThemes.includes(themeVal) || (themeVal === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+				const isDark = darkThemes.includes(themeValue);
 				let color: string | null = null;
 				if (config.accent_color.startsWith('#')) {
 					color = config.accent_color;

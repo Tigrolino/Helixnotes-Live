@@ -114,6 +114,12 @@ pub struct AppConfig {
     #[serde(default)]
     pub active_bookmark_id: Option<String>,
     pub theme: String,
+    /// Themes used when `theme` is "system": the frontend picks one by the OS color scheme.
+    /// Default to the plain "light"/"dark" schemes so existing configs keep their behavior.
+    #[serde(default = "default_system_light_theme")]
+    pub system_light_theme: String,
+    #[serde(default = "default_system_dark_theme")]
+    pub system_dark_theme: String,
     #[serde(default)]
     pub accent_color: Option<String>,
     #[serde(default)]
@@ -269,6 +275,14 @@ fn default_ai_model() -> String {
     "claude-sonnet-4-6".to_string()
 }
 
+fn default_system_light_theme() -> String {
+    "light".to_string()
+}
+
+fn default_system_dark_theme() -> String {
+    "dark".to_string()
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -276,6 +290,8 @@ impl Default for AppConfig {
             active_vault: None,
             active_bookmark_id: None,
             theme: "system".to_string(),
+            system_light_theme: default_system_light_theme(),
+            system_dark_theme: default_system_dark_theme(),
             accent_color: None,
             font_size: None,
             font_family: None,

@@ -43,6 +43,10 @@ export async function setTheme(theme: string): Promise<void> {
   return invoke("set_theme", { theme });
 }
 
+export async function setSystemThemes(light: string, dark: string): Promise<void> {
+  return invoke("set_system_themes", { light, dark });
+}
+
 export async function setAccentColor(color: string): Promise<void> {
   return invoke("set_accent_color", { color });
 }

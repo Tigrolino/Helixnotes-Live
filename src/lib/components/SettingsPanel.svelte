@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { showSettings, theme, appConfig, activeVaultConfig, updateAvailable as globalUpdateAvailable, updateObj as globalUpdateObj, installType, settingsTab, vaultReady, androidApkUrl, checkForUpdateMobile, notebookSortMode, isManagedInstall, customThemes } from '$lib/stores/app';
-	import { setTheme, setAccentColor, setFontSize, setFontFamily, setLineHeight, setUiScale, setContentWidth, setGeneralSettings, importObsidian, createBackup, listBackups, restoreBackup, deleteBackup, setBackupSettings, setAiSettings, testAiConnection, setSyncSettings, testSyncConnection, syncNow, getAppConfig, saveCustomTheme, deleteCustomTheme, exportCustomTheme, importCustomThemes } from '$lib/api';
+	import { showSettings, theme, resolvedTheme, appConfig, activeVaultConfig, updateAvailable as globalUpdateAvailable, updateObj as globalUpdateObj, installType, settingsTab, vaultReady, androidApkUrl, checkForUpdateMobile, notebookSortMode, isManagedInstall, customThemes } from '$lib/stores/app';
+	import { setTheme, setSystemThemes, setAccentColor, setFontSize, setFontFamily, setLineHeight, setUiScale, setContentWidth, setGeneralSettings, importObsidian, createBackup, listBackups, restoreBackup, deleteBackup, setBackupSettings, setAiSettings, testAiConnection, setSyncSettings, testSyncConnection, syncNow, getAppConfig, saveCustomTheme, deleteCustomTheme, exportCustomTheme, importCustomThemes } from '$lib/api';
 	import { darkThemes, isMobile, isAndroid } from '$lib/platform';
 	import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 	import { listen } from '@tauri-apps/api/event';
@@ -418,11 +418,12 @@
 	}
 
 	let isThemeDark = $derived(
-		darkThemes.includes($theme) || ($theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) ||
-		($theme.startsWith('custom-') && ($customThemes.find(c => c.id === $theme)?.is_dark ?? false))
+		darkThemes.includes($resolvedTheme) ||
+		($resolvedTheme.startsWith('custom-') && ($customThemes.find(c => c.id === $resolvedTheme)?.is_dark ?? false))
 	);
 
 	const themePresets = [
+		{ id: 'system', label: 'System', bg: '#ffffff', sidebar: '#1a1b26', accent: '#5b6abf' },
 		{ id: 'light', label: 'Light', bg: '#ffffff', sidebar: '#f8f9fa', accent: '#5b6abf' },
 		{ id: 'dark', label: 'Dark', bg: '#1a1b26', sidebar: '#1f2029', accent: '#89b4fa' },
 		{ id: 'solarized-light', label: 'Solarized Light', bg: '#fdf6e3', sidebar: '#eee8d5', accent: '#268bd2' },
@@ -527,7 +528,45 @@
 	let themeDropdownOpen = $state(false);
 	let accentDropdownOpen = $state(false);
 	let activeCustomTheme = $derived($customThemes.find(c => c.id === $theme) ?? null);
-	let activeThemePreset = $derived(themePresets.find(p => p.id === $theme) ?? themePresets[0]);
+	let activeThemePreset = $derived(
+		themePresets.find(p => p.id === $theme) ?? themePresets.find(p => p.id === 'light')!
+	);
+
+	// Which theme each OS appearance maps to while `theme` is "system". Custom themes are offered
+	// alongside the built-ins so a light/dark pair can be built out of them.
+	let systemLightTheme = $state($appConfig?.system_light_theme ?? 'light');
+	let systemDarkTheme = $state($appConfig?.system_dark_theme ?? 'dark');
+	let systemPairOpen = $state<'light' | 'dark' | null>(null);
+
+	let pairPresets = $derived([
+		...themePresets.filter(p => p.id !== 'system'),
+		...$customThemes.map(ct => ({
+			id: ct.id,
+			label: ct.name,
+			bg: ct.colors.bg_primary,
+			sidebar: ct.colors.bg_secondary,
+			accent: ct.colors.text_primary,
+		})),
+	]);
+
+	let systemPairRows = $derived([
+		{ key: 'light' as const, title: 'Light appearance', selected: systemLightTheme },
+		{ key: 'dark' as const, title: 'Dark appearance', selected: systemDarkTheme },
+	]);
+
+	function selectSystemPairTheme(which: 'light' | 'dark', id: string) {
+		if (which === 'light') systemLightTheme = id;
+		else systemDarkTheme = id;
+		systemPairOpen = null;
+		if ($appConfig) {
+			$appConfig.system_light_theme = systemLightTheme;
+			$appConfig.system_dark_theme = systemDarkTheme;
+			$appConfig = { ...$appConfig };
+		}
+		setSystemThemes(systemLightTheme, systemDarkTheme).catch((e) =>
+			console.error('Failed to save system themes:', e)
+		);
+	}
 	let activeAccentPreset = $derived(accentPresets.find(p => p.name === activeAccent) ?? accentPresets[0]);
 	let isCustomAccent = $derived(activeAccent.startsWith('#'));
 	let activeAccentColor = $derived(
@@ -553,7 +592,7 @@
 	let customThemeImporting = $state(false);
 
 	function openNewCustomThemeEditor() {
-		const isDark = darkThemes.includes($theme) || ($theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) || $theme.startsWith('custom-') && ($customThemes.find(c => c.id === $theme)?.is_dark ?? false);
+		const isDark = isThemeDark;
 		customThemeEditing = {
 			id: `custom-${Date.now()}`,
 			name: '',
@@ -595,8 +634,8 @@
 		root.removeAttribute('data-theme');
 		for (const v of varsToClear) root.style.removeProperty(v);
 		const namedThemes = ['solarized-light','solarized-dark','catppuccin','nord','tokyo-night','github-light','github-dark','dracula','blueberry','forest-green','gruvbox','midnight-tide','cherry-blossom','synthwave','ember','moonlit','light-coffee','dark-coffee','cotton-candy','crimson','cloud','peach','material-dark','material-light','monokai','rose-pine','everforest','horizon','cyberpunk','black','one-dark'];
-		if ($theme.startsWith('custom-')) {
-			const ct = $customThemes.find(c => c.id === $theme);
+		if ($resolvedTheme.startsWith('custom-')) {
+			const ct = $customThemes.find(c => c.id === $resolvedTheme);
 			if (ct) {
 				root.style.setProperty('--bg-primary', ct.colors.bg_primary);
 				root.style.setProperty('--bg-secondary', ct.colors.bg_secondary);
@@ -609,10 +648,10 @@
 				root.style.setProperty('--border-color', ct.colors.border_color);
 				if (ct.is_dark) root.classList.add('dark');
 			}
-		} else if (namedThemes.includes($theme)) {
-			root.setAttribute('data-theme', $theme);
-			if (darkThemes.includes($theme)) root.classList.add('dark');
-		} else if ($theme === 'dark' || ($theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+		} else if (namedThemes.includes($resolvedTheme)) {
+			root.setAttribute('data-theme', $resolvedTheme);
+			if (darkThemes.includes($resolvedTheme)) root.classList.add('dark');
+		} else if ($resolvedTheme === 'dark') {
 			root.classList.add('dark');
 		}
 	}
@@ -812,7 +851,9 @@
 		$theme = preset.id;
 		setTheme(preset.id);
 		themeDropdownOpen = false;
-		selectCustomAccent(preset.accent);
+		// "System" has no palette of its own, it defers to whichever paired theme is active, so it
+		// must not overwrite the accent the way a concrete theme does.
+		if (preset.id !== 'system') selectCustomAccent(preset.accent);
 	}
 
 	function selectAccent(preset: typeof accentPresets[0]) {
@@ -823,7 +864,7 @@
 
 	function applyAccent(preset: typeof accentPresets[0]) {
 		const root = document.documentElement;
-		const isDark = darkThemes.includes($theme) || ($theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+		const isDark = isThemeDark;
 		const color = isDark ? preset.dark : preset.light;
 
 		root.style.setProperty('--accent', color);
@@ -846,7 +887,7 @@
 
 	function applyCustomAccent(hex: string) {
 		const root = document.documentElement;
-		const isDark = darkThemes.includes($theme) || ($theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+		const isDark = isThemeDark;
 		root.style.setProperty('--accent', hex);
 		root.style.setProperty('--text-accent', hex);
 		root.style.setProperty('--accent-hover', hex);
@@ -1415,6 +1456,9 @@
 										</div>
 									{/if}
 								</div>
+								{#if $theme === 'system'}
+									<span class="setting-hint">Follows the operating system appearance.</span>
+								{/if}
 							</div>
 
 							<div class="settings-section">
@@ -1463,6 +1507,54 @@
 									{/if}
 								</div>
 							</div>
+
+							{#if $theme === 'system'}
+								{#each systemPairRows as row}
+									<div class="settings-section">
+										<h3>{row.title}</h3>
+										<div class="dropdown-wrap">
+											<button
+												class="dropdown-trigger"
+												class:open={systemPairOpen === row.key}
+												onclick={() => { systemPairOpen = systemPairOpen === row.key ? null : row.key; themeDropdownOpen = false; accentDropdownOpen = false; }}
+											>
+												{#each pairPresets.filter(p => p.id === row.selected) as preset}
+													<span class="dropdown-preview" style="--preview-bg: {preset.bg}; --preview-sidebar: {preset.sidebar}; --preview-accent: {preset.accent}">
+														<span class="preview-sidebar"></span>
+														<span class="preview-main">
+															<span class="preview-accent-bar"></span>
+														</span>
+													</span>
+													<span class="dropdown-trigger-label">{preset.label}</span>
+												{/each}
+												<svg class="dropdown-chevron" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+											</button>
+											{#if systemPairOpen === row.key}
+												<div class="dropdown-list" use:clickOutside={() => systemPairOpen = null}>
+													{#each pairPresets as preset}
+														<button
+															class="dropdown-item"
+															class:active={row.selected === preset.id}
+															onclick={() => selectSystemPairTheme(row.key, preset.id)}
+														>
+															<span class="dropdown-preview" style="--preview-bg: {preset.bg}; --preview-sidebar: {preset.sidebar}; --preview-accent: {preset.accent}">
+																<span class="preview-sidebar"></span>
+																<span class="preview-main">
+																	<span class="preview-accent-bar"></span>
+																</span>
+															</span>
+															<span class="dropdown-item-label">{preset.label}</span>
+															{#if row.selected === preset.id}
+																<svg class="dropdown-check" viewBox="0 0 16 16" fill="none"><path d="M3 8l4 4 6-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+															{/if}
+														</button>
+													{/each}
+												</div>
+											{/if}
+										</div>
+									</div>
+								{/each}
+							{/if}
 							</div>
 
 							<!-- Custom Themes -->
