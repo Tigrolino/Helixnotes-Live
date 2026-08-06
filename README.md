@@ -14,25 +14,41 @@ No cloud, no lock-in.
 
 ### Linux
 
-#### Arch / Manjaro (AUR)
+#### AppImage
+
+The AppImage works only on Fedora 43+, Arch Linux, and openSUSE Tumbleweed (x86_64).
+
+[Download AppImage](https://download.helixnotes.com/releases/v1.3.4/HelixNotes_1.3.4_amd64.AppImage)
+
+#### Distro-specific packages
+
+##### Fedora 43+ (DNF)
 
 ```bash
-yay -S helixnotes-appimage-bin
+sudo dnf config-manager addrepo \
+  --from-repofile=https://repo.arkhost.com/helixnotes.repo
+sudo dnf install helix-notes
 ```
 
-#### Debian / Ubuntu / Mint (APT)
+##### Debian / Ubuntu / Mint (APT)
 
 ```bash
 curl -fsSL https://repo.arkhost.com/gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/arkhost.gpg && echo "deb [signed-by=/usr/share/keyrings/arkhost.gpg arch=amd64] https://repo.arkhost.com stable main" | sudo tee /etc/apt/sources.list.d/helixnotes.list && sudo apt update && sudo apt install helix-notes
 ```
 
-#### Solus (EOPKG)
+##### Arch / Manjaro (AUR)
+
+```bash
+yay -S helixnotes-appimage-bin
+```
+
+##### Solus (EOPKG)
 
 ```bash
 sudo eopkg it helixnotes
 ```
 
-#### NixOS
+##### NixOS
 
 <details>
 <summary>flake.nix</summary>
@@ -90,17 +106,10 @@ sudo eopkg it helixnotes
 ```
 </details>
 
-#### AppImage (Arch, Fedora 43+, openSUSE Tumbleweed)
+#### Manual package downloads
 
-[Download AppImage](https://download.helixnotes.com/releases/v1.3.4/HelixNotes_1.3.4_amd64.AppImage)
-
-#### .deb (manual)
-
-[Download .deb](https://download.helixnotes.com/releases/v1.3.4/HelixNotes_1.3.4_amd64.deb) (Ubuntu 22.04+)
-
-#### .rpm (manual)
-
-[Download .rpm](https://download.helixnotes.com/releases/v1.3.4/HelixNotes-1.3.4-1.x86_64.rpm)
+- [.deb](https://download.helixnotes.com/releases/v1.3.4/HelixNotes_1.3.4_amd64.deb) (Ubuntu 22.04+)
+- [.rpm](https://download.helixnotes.com/releases/v1.3.4/HelixNotes-1.3.4-1.x86_64.rpm)
 
 ### Windows
 
