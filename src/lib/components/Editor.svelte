@@ -370,8 +370,6 @@
 
 	// Info panel
 	let showInfo = $state(false);
-	let infoPanelEl = $state<HTMLElement | null>(null);
-	let infoToggleBtnEl = $state<HTMLElement | null>(null);
 	let wordCount = $state(0);
 	let charCount = $state(0);
 	let infoPathCopyState = $state<'idle' | 'copied' | 'error'>('idle');
@@ -4316,21 +4314,6 @@
 		if ($sourceMode) updateCounts();
 	});
 
-	// Auto-close info panel on click outside
-	$effect(() => {
-		if (!showInfo) return;
-		function onInfoClickAway(e: MouseEvent) {
-			if (
-				infoPanelEl && !infoPanelEl.contains(e.target as Node) &&
-				infoToggleBtnEl && !infoToggleBtnEl.contains(e.target as Node)
-			) {
-				showInfo = false;
-			}
-		}
-		document.addEventListener('mousedown', onInfoClickAway);
-		return () => document.removeEventListener('mousedown', onInfoClickAway);
-	});
-
 	// Close in-note search when switching notes
 	let prevSearchPath = '';
 	$effect(() => {
@@ -6142,7 +6125,6 @@
 					</svg>
 				</button>
 				<button
-					bind:this={infoToggleBtnEl}
 					class="icon-btn"
 					class:active={showInfo}
 					onclick={toggleInfo}
@@ -6487,7 +6469,7 @@
 				</div>
 			{/if}
 			{#if showInfo && $activeNote}
-				<div class="info-panel" bind:this={infoPanelEl}>
+				<div class="info-panel">
 					<div class="info-panel-header">
 						<span class="info-panel-title">Note Info</span>
 						<button class="info-close-btn" onclick={() => showInfo = false}>
