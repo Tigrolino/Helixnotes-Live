@@ -332,6 +332,15 @@ pub fn set_theme(state: State<'_, AppState>, theme: String) -> Result<(), String
 }
 
 #[tauri::command]
+pub fn set_system_themes(state: State<'_, AppState>, light: String, dark: String) -> Result<(), String> {
+    let mut config = state.config.lock().map_err(|e| e.to_string())?;
+    config.system_light_theme = light;
+    config.system_dark_theme = dark;
+    save_app_config(&config)?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn set_accent_color(state: State<'_, AppState>, color: String) -> Result<(), String> {
     let mut config = state.config.lock().map_err(|e| e.to_string())?;
     config.accent_color = Some(color);

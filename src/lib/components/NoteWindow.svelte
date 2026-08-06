@@ -9,7 +9,7 @@
 		editorDirty,
 		readOnly,
 		sourceMode,
-		theme
+		resolvedTheme
 	} from '$lib/stores/app';
 	import { readNote } from '$lib/api';
 	import { keybindings, matchAction } from '$lib/keybindings';
@@ -37,7 +37,7 @@
 	});
 
 	$effect(() => {
-		const t = $theme || 'system';
+		const t = $resolvedTheme || 'light';
 		const namedThemes = ['solarized-light', 'solarized-dark', 'catppuccin', 'nord', 'tokyo-night', 'github-light', 'github-dark', 'dracula', 'blueberry', 'forest-green', 'gruvbox', 'midnight-tide', 'cherry-blossom', 'synthwave', 'ember', 'moonlit', 'light-coffee', 'dark-coffee', 'cotton-candy', 'crimson', 'cloud', 'peach', 'material-dark', 'material-light', 'monokai', 'rose-pine', 'everforest', 'horizon', 'cyberpunk', 'black', 'one-dark'];
 		const root = document.documentElement;
 		root.classList.remove('dark');
@@ -45,7 +45,7 @@
 		if (namedThemes.includes(t)) {
 			root.setAttribute('data-theme', t);
 			if (darkThemes.includes(t)) root.classList.add('dark');
-		} else if (t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+		} else if (t === 'dark') {
 			root.classList.add('dark');
 		}
 	});

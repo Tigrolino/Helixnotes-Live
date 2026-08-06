@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { showCommandPalette, showSearch, theme, sourceMode, viewMode, activeNotebook, activeTag } from '$lib/stores/app';
+	import { showCommandPalette, showSearch, theme, resolvedTheme, sourceMode, viewMode, activeNotebook, activeTag } from '$lib/stores/app';
 	import { setTheme, reindex } from '$lib/api';
 	import { darkThemes } from '$lib/platform';
 
@@ -89,7 +89,7 @@
 			action: () => {
 				$theme = 'system';
 				setTheme('system');
-				applyTheme('system');
+				applyTheme($resolvedTheme);
 				$showCommandPalette = false;
 			}
 		},
@@ -187,7 +187,7 @@
 		if (namedThemes.includes(t)) {
 			root.setAttribute('data-theme', t);
 			if (darkThemes.includes(t)) root.classList.add('dark');
-		} else if (t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+		} else if (t === 'dark') {
 			root.classList.add('dark');
 		}
 	}

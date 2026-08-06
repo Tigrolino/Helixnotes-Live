@@ -88,6 +88,8 @@ export interface AppConfig {
   active_vault: string | null;
   active_bookmark_id?: string | null;
   theme: string;
+  system_light_theme: string;
+  system_dark_theme: string;
   accent_color: string | null;
   font_size: number | null;
   font_family: string | null;

@@ -89,6 +89,24 @@ export const readOnly = writable(false);
 export const theme = writable<string>("system");
 export const customThemes = derived(appConfig, ($c): CustomTheme[] => $c?.custom_themes ?? []);
 
+// Whether the OS is currently in dark mode. Held in a store (rather than read at each call site)
+// so the theme re-resolves when the user flips appearance while the app is open.
+const darkQuery =
+  typeof window !== "undefined" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+export const systemPrefersDark = writable<boolean>(darkQuery?.matches ?? false);
+darkQuery?.addEventListener("change", (e) => systemPrefersDark.set(e.matches));
+
+// The theme to actually render: "system" resolves to the configured light/dark pair, everything
+// else passes through. Falls back to the plain schemes when no pair is configured yet.
+export const resolvedTheme = derived(
+  [theme, appConfig, systemPrefersDark],
+  ([$theme, $config, $prefersDark]): string => {
+    if ($theme !== "system") return $theme;
+    const paired = $prefersDark ? $config?.system_dark_theme : $config?.system_light_theme;
+    return paired || ($prefersDark ? "dark" : "light");
+  },
+);
+
 // Sync (WebDAV) - global status so the top-bar button reflects any sync,
 // whoever triggered it (manual button, settings, interval, on-change).
 export const syncState = writable<{ running: boolean; error: string | null }>({

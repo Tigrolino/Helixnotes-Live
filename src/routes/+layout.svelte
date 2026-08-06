@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import '../app.css';
-	import { theme, appConfig, activeNote, activeNotePath, installType, platformIsMobile, checkForUpdate, checkForUpdateMobile, isManagedInstall, customThemes } from '$lib/stores/app';
+	import { resolvedTheme, appConfig, activeNote, activeNotePath, installType, platformIsMobile, checkForUpdate, checkForUpdateMobile, isManagedInstall, customThemes } from '$lib/stores/app';
 	import { openFile, openUrl, readNote, getInstallType, isMobilePlatform } from '$lib/api';
 	import { get } from 'svelte/store';
 	import { darkThemes, isMobile, isAndroid } from '$lib/platform';
@@ -10,9 +10,11 @@
 
 	let { children } = $props();
 
-	// Reactively apply theme class to <html> whenever $theme or custom themes change
+	// Reactively apply theme class to <html> whenever the resolved theme or custom themes change.
+	// $resolvedTheme already maps "system" onto the configured light/dark pair, so flipping the OS
+	// appearance re-runs this effect.
 	$effect(() => {
-		applyTheme($theme, $customThemes);
+		applyTheme($resolvedTheme, $customThemes);
 	});
 
 	// Apply link arrow visibility from config

@@ -130,6 +130,7 @@ pub fn run() {
             commands::remove_vault,
             commands::get_app_config,
             commands::set_theme,
+            commands::set_system_themes,
             commands::set_accent_color,
             commands::save_custom_theme,
             commands::delete_custom_theme,
