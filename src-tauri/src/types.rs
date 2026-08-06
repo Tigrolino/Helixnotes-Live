@@ -505,7 +505,7 @@ pub struct TaskItem {
 
 #[cfg(test)]
 mod startup_view_tests {
-    use super::StartupView;
+    use super::{AppConfig, StartupView};
 
     #[test]
     fn serializes_supported_startup_views() {
@@ -525,5 +525,18 @@ mod startup_view_tests {
             serde_json::from_str::<StartupView>("\"future-view\"").unwrap(),
             StartupView::All
         );
+    }
+
+    #[test]
+    fn existing_configs_default_system_theme_pair() {
+        let mut value = serde_json::to_value(AppConfig::default()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("system_light_theme");
+        object.remove("system_dark_theme");
+
+        let config: AppConfig = serde_json::from_value(value).unwrap();
+
+        assert_eq!(config.system_light_theme, "light");
+        assert_eq!(config.system_dark_theme, "dark");
     }
 }

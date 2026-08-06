@@ -690,9 +690,15 @@
 	async function removeCustomTheme(ct: CustomTheme) {
 		try {
 			await deleteCustomTheme(ct.id);
+			if (systemLightTheme === ct.id) systemLightTheme = 'light';
+			if (systemDarkTheme === ct.id) systemDarkTheme = 'dark';
 			if ($appConfig) {
-				$appConfig.custom_themes = $appConfig.custom_themes.filter(t => t.id !== ct.id);
-				$appConfig = { ...$appConfig };
+				$appConfig = {
+					...$appConfig,
+					custom_themes: $appConfig.custom_themes.filter(t => t.id !== ct.id),
+					system_light_theme: systemLightTheme,
+					system_dark_theme: systemDarkTheme,
+				};
 			}
 			if ($theme === ct.id) {
 				$theme = 'system';
@@ -1044,9 +1050,9 @@
 		}
 	});
 
-	// Re-apply when theme changes
+	// Re-apply when the concrete theme changes, including an OS appearance switch.
 	$effect(() => {
-		const _ = $theme;
+		const _ = $resolvedTheme;
 		const preset = accentPresets.find(p => p.name === activeAccent);
 		if (preset) {
 			applyAccent(preset);

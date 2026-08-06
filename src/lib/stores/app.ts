@@ -102,8 +102,13 @@ export const resolvedTheme = derived(
   [theme, appConfig, systemPrefersDark],
   ([$theme, $config, $prefersDark]): string => {
     if ($theme !== "system") return $theme;
+    const fallback = $prefersDark ? "dark" : "light";
     const paired = $prefersDark ? $config?.system_dark_theme : $config?.system_light_theme;
-    return paired || ($prefersDark ? "dark" : "light");
+    if (!paired) return fallback;
+    if (paired.startsWith("custom-") && !$config?.custom_themes.some((item) => item.id === paired)) {
+      return fallback;
+    }
+    return paired;
   },
 );
 

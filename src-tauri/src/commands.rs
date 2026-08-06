@@ -332,7 +332,11 @@ pub fn set_theme(state: State<'_, AppState>, theme: String) -> Result<(), String
 }
 
 #[tauri::command]
-pub fn set_system_themes(state: State<'_, AppState>, light: String, dark: String) -> Result<(), String> {
+pub fn set_system_themes(
+    state: State<'_, AppState>,
+    light: String,
+    dark: String,
+) -> Result<(), String> {
     let mut config = state.config.lock().map_err(|e| e.to_string())?;
     config.system_light_theme = light;
     config.system_dark_theme = dark;
@@ -363,12 +367,41 @@ pub fn save_custom_theme(state: State<'_, AppState>, theme: crate::types::Custom
 #[tauri::command]
 pub fn delete_custom_theme(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let mut config = state.config.lock().map_err(|e| e.to_string())?;
+    clear_custom_theme_references(&mut config, &id);
+    save_app_config(&config)?;
+    Ok(())
+}
+
+fn clear_custom_theme_references(config: &mut AppConfig, id: &str) {
     config.custom_themes.retain(|t| t.id != id);
     if config.theme == id {
         config.theme = "system".to_string();
     }
-    save_app_config(&config)?;
-    Ok(())
+    if config.system_light_theme == id {
+        config.system_light_theme = "light".to_string();
+    }
+    if config.system_dark_theme == id {
+        config.system_dark_theme = "dark".to_string();
+    }
+}
+
+#[cfg(test)]
+mod custom_theme_reference_tests {
+    use super::*;
+
+    #[test]
+    fn deleting_custom_theme_resets_system_pair_references() {
+        let mut config = AppConfig::default();
+        config.theme = "custom-work".to_string();
+        config.system_light_theme = "custom-work".to_string();
+        config.system_dark_theme = "custom-work".to_string();
+
+        clear_custom_theme_references(&mut config, "custom-work");
+
+        assert_eq!(config.theme, "system");
+        assert_eq!(config.system_light_theme, "light");
+        assert_eq!(config.system_dark_theme, "dark");
+    }
 }
 
 #[tauri::command]

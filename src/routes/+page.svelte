@@ -197,7 +197,8 @@
 			}
 			// Apply saved accent
 			if (config.accent_color) {
-				const isDark = darkThemes.includes(themeValue);
+				const customTheme = config.custom_themes.find(theme => theme.id === themeValue);
+				const isDark = darkThemes.includes(themeValue) || (customTheme?.is_dark ?? false);
 				let color: string | null = null;
 				if (config.accent_color.startsWith('#')) {
 					color = config.accent_color;

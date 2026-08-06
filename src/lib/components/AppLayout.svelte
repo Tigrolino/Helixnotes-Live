@@ -22,6 +22,7 @@
 		showCommandPalette,
 		theme,
 		resolvedTheme,
+		customThemes,
 		focusMode,
 		readOnly,
 		activeNote,
@@ -508,7 +509,8 @@
 					createAndFocusNote();
 					return;
 				case 'toggle-theme': {
-					const isDark = darkThemes.includes($resolvedTheme);
+					const customTheme = $customThemes.find(theme => theme.id === $resolvedTheme);
+					const isDark = darkThemes.includes($resolvedTheme) || (customTheme?.is_dark ?? false);
 					const next = isDark ? 'light' : 'dark';
 					$theme = next;
 					setTheme(next);
@@ -565,23 +567,6 @@
 			else if ($showCommandPalette) $showCommandPalette = false;
 		}
 	}
-
-	function applyTheme(t: string) {
-		const namedThemes = ['solarized-light', 'solarized-dark', 'catppuccin', 'nord', 'tokyo-night', 'github-light', 'github-dark', 'dracula', 'blueberry', 'forest-green', 'gruvbox', 'midnight-tide', 'cherry-blossom', 'synthwave', 'ember', 'moonlit', 'light-coffee', 'dark-coffee', 'cotton-candy', 'crimson', 'cloud', 'peach', 'material-dark', 'material-light', 'monokai', 'rose-pine', 'everforest', 'horizon', 'cyberpunk', 'black', 'one-dark'];
-		const root = document.documentElement;
-		root.classList.remove('dark');
-		root.removeAttribute('data-theme');
-		if (namedThemes.includes(t)) {
-			root.setAttribute('data-theme', t);
-			if (darkThemes.includes(t)) root.classList.add('dark');
-		} else if (t === 'dark') {
-			root.classList.add('dark');
-		}
-	}
-
-	$effect(() => {
-		applyTheme($theme);
-	});
 
 	$effect(() => {
 		$collapsedNotebooks;
@@ -663,10 +648,6 @@
 		if (isMobile && restoreLastSession && lastNotePath) {
 			prefetchPromise = readNote(lastNotePath).catch(() => null);
 		}
-
-		// One-off apply to avoid a flash before the layout's reactive effect runs; OS appearance
-		// changes are picked up by resolvedTheme, so no media-query listener is needed here.
-		applyTheme($resolvedTheme);
 
 		// Run sidebar and note list refresh in parallel
 		await Promise.all([sidebar?.refresh(), noteList?.refresh()]);

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { showCommandPalette, showSearch, theme, resolvedTheme, sourceMode, viewMode, activeNotebook, activeTag } from '$lib/stores/app';
+	import { showCommandPalette, showSearch, theme, sourceMode, viewMode, activeNotebook, activeTag } from '$lib/stores/app';
 	import { setTheme, reindex } from '$lib/api';
 	import { darkThemes } from '$lib/platform';
 
@@ -89,7 +89,6 @@
 			action: () => {
 				$theme = 'system';
 				setTheme('system');
-				applyTheme($resolvedTheme);
 				$showCommandPalette = false;
 			}
 		},
