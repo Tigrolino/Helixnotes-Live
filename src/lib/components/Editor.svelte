@@ -41,7 +41,7 @@
 	import { readFile } from '@tauri-apps/plugin-fs';
 	import { openFile, openUrl, copyFileTo, copyImageToClipboard as copyImageToClipboardCmd, writeBytesTo, copyPngToClipboard, copyTextToClipboard } from '$lib/api';
 	import { save as saveDialog } from '@tauri-apps/plugin-dialog';
-	import { activeNote, activeNotePath, appConfig, editorDirty, sourceMode, focusMode, readOnly, quickAccessPaths, notes, navHistory, canGoBack, canGoForward, viewerNote, notebooks, outlineWidth } from '$lib/stores/app';
+	import { activeNote, activeNotePath, appConfig, editorDirty, sourceMode, focusMode, readOnly, quickAccessPaths, notes, navHistory, canGoBack, canGoForward, viewerNote, viewMode, notebooks, outlineWidth } from '$lib/stores/app';
 	import { saveNote, saveImage, saveAttachment, readClipboardImage, addQuickAccess, removeQuickAccess, getQuickAccess, getNoteVersions, getNoteVersionContent, createVersion, aiAsk, getAllNoteTitles, readNote, renameNote } from '$lib/api';
 	import type { VersionEntry, AiStreamEvent, NoteTitleEntry, TaskItem as TaskRecord } from '$lib/types';
 	import { listen } from '@tauri-apps/api/event';
@@ -59,7 +59,7 @@
 	import { isMobile, isAndroid } from '$lib/platform';
 	import ResizeHandle from './ResizeHandle.svelte';
 
-	let { onMoveToTrash = async () => false }: {
+	let { onMoveToTrash }: {
 		onMoveToTrash?: (path: string) => Promise<boolean>;
 	} = $props();
 
@@ -3063,7 +3063,8 @@
 	}
 
 	export async function moveOpenNoteToTrash(): Promise<boolean> {
-		if (trashingNote || !$activeNotePath || $viewerNote) return false;
+		const moveToTrash = onMoveToTrash;
+		if (trashingNote || !$activeNotePath || $viewerNote || !moveToTrash) return false;
 		const path = $activeNotePath;
 		const wasDirty = $editorDirty;
 		trashingNote = true;
@@ -3074,7 +3075,7 @@
 			if ($activeNotePath !== path) return false;
 			// A queued debounce observes this flag and cannot recreate the moved note.
 			$editorDirty = false;
-			return await onMoveToTrash(path);
+			return await moveToTrash(path);
 		} finally {
 			trashingNote = false;
 		}
@@ -6039,13 +6040,6 @@
 					}}
 				/>
 			</div>
-			{#if isMobile}
-				<button type="button" class="icon-btn editor-trash-btn mobile" onclick={moveOpenNoteToTrash} disabled={trashingNote} title="Move to Trash" aria-label="Move note to Trash">
-					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-						<path d="M3 6h18"/><path d="M19 6v14H5V6"/><path d="M8 6V4h8v2"/><path d="M10 11v5"/><path d="M14 11v5"/>
-					</svg>
-				</button>
-			{/if}
 			{#if !isMobile}
 			<div class="toolbar-actions">
 				{#if $canGoBack || $canGoForward}
@@ -6184,11 +6178,6 @@
 					</svg>
 				</button>
 				{/if}
-				<button type="button" class="icon-btn editor-trash-btn" onclick={moveOpenNoteToTrash} disabled={trashingNote} title="Move to Trash" aria-label="Move note to Trash">
-					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-						<path d="M3 6h18"/><path d="M19 6v14H5V6"/><path d="M8 6V4h8v2"/><path d="M10 11v5"/><path d="M14 11v5"/>
-					</svg>
-				</button>
 				<button
 					class="icon-btn"
 					class:active={$sourceMode}
@@ -6524,7 +6513,7 @@
 						</div>
 					</div>
 
-					<div class="info-section">
+					<div class="info-section info-details">
 						<div class="info-section-label">Details</div>
 						<div class="info-row">
 							<span class="info-key">Modified</span>
@@ -6578,6 +6567,17 @@
 						</div>
 						{/if}
 					</div>
+
+					{#if onMoveToTrash && $viewMode !== 'trash'}
+						<div class="info-section info-actions">
+							<button type="button" class="info-trash-btn" onclick={moveOpenNoteToTrash} disabled={trashingNote}>
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+									<path d="M3 6h18"/><path d="M19 6v14H5V6"/><path d="M8 6V4h8v2"/><path d="M10 11v5"/><path d="M14 11v5"/>
+								</svg>
+								{trashingNote ? 'Moving to Trash...' : 'Move to Trash'}
+							</button>
+						</div>
+					{/if}
 
 				</div>
 			{/if}
@@ -8165,17 +8165,6 @@
 	.icon-btn:hover {
 		background: var(--bg-hover);
 		color: var(--text-primary);
-	}
-
-	.editor-trash-btn:hover,
-	.editor-trash-btn:focus-visible {
-		color: var(--danger);
-		background: color-mix(in srgb, var(--danger) 12%, transparent);
-	}
-
-	.editor-trash-btn:disabled {
-		opacity: 0.45;
-		cursor: default;
 	}
 
 	.icon-btn.active {
@@ -11323,9 +11312,9 @@
 	.editor-container.mobile .editor-toolbar {
 		padding: 8px 16px 6px 16px;
 		flex-shrink: 0;
-		flex-direction: row;
-		align-items: center;
-		gap: 8px;
+		flex-direction: column;
+		align-items: stretch;
+		gap: 2px;
 	}
 
 	.toolbar-actions.mobile {
@@ -11348,20 +11337,6 @@
 	.editor-container.mobile .editor-title input {
 		font-size: 20px;
 		padding: 4px 0;
-	}
-
-	.editor-container.mobile .editor-trash-btn.mobile {
-		width: 44px;
-		height: 44px;
-		padding: 0;
-		flex-shrink: 0;
-		justify-content: center;
-		border-radius: 8px;
-	}
-
-	.editor-container.mobile .editor-trash-btn.mobile:active {
-		color: var(--danger);
-		background: color-mix(in srgb, var(--danger) 12%, transparent);
 	}
 
 	.editor-container.mobile .editor-body-wrapper {
@@ -11661,7 +11636,45 @@
 
 	.info-section:last-child {
 		border-bottom: none;
+	}
+
+	.info-details {
 		flex: 1;
+	}
+
+	.info-actions {
+		padding: 12px 14px;
+	}
+
+	.info-trash-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 7px;
+		width: 100%;
+		min-height: 36px;
+		border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border-color));
+		border-radius: 6px;
+		background: transparent;
+		color: var(--danger);
+		font: inherit;
+		font-size: 12px;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.info-trash-btn:hover {
+		background: color-mix(in srgb, var(--danger) 10%, transparent);
+	}
+
+	.info-trash-btn:focus-visible {
+		outline: 2px solid var(--danger);
+		outline-offset: 2px;
+	}
+
+	.info-trash-btn:disabled {
+		opacity: 0.45;
+		cursor: default;
 	}
 
 	.info-section-label {
@@ -11786,5 +11799,10 @@
 		width: 100%;
 		border-left: none;
 		border-top: 1px solid var(--border-light);
+	}
+
+	.editor-container.mobile .info-trash-btn {
+		min-height: 44px;
+		font-size: 14px;
 	}
 </style>
