@@ -2,10 +2,16 @@
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { vaultReady, focusMode, readOnly, updateAvailable, showSettings, settingsTab, appConfig, activeVaultConfig, syncState } from '$lib/stores/app';
 	import { syncNow } from '$lib/api';
+	import NoteSwitcher from './NoteSwitcher.svelte';
 
-	let { onNewNote = () => {}, onDailyNote = () => {} }: {
+	let {
+		onNewNote = () => {},
+		onDailyNote = () => {},
+		onSelectNote
+	}: {
 		onNewNote?: () => void;
 		onDailyNote?: () => void;
+		onSelectNote?: (path: string) => Promise<boolean>;
 	} = $props();
 
 	const appWindow = getCurrentWindow();
@@ -30,7 +36,7 @@
 	function handleMouseDown(e: MouseEvent) {
 		if (e.button !== 0) return;
 		const target = e.target as HTMLElement;
-		if (target.closest('.titlebar-controls') || target.closest('.titlebar-actions')) return;
+		if (target.closest('.titlebar-controls') || target.closest('.titlebar-actions') || target.closest('.titlebar-note-switcher')) return;
 
 		// Don't start dragging near window edges - let Tauri handle resize
 		if (!maximized) {
@@ -81,6 +87,11 @@
 			</button>
 		{/if}
 	</div>
+	{#if $appConfig?.show_note_switcher}
+		<div class="titlebar-note-switcher">
+			<NoteSwitcher {onSelectNote} />
+		</div>
+	{/if}
 	<div class="titlebar-actions">
 		<button class="switch-vault-btn" onclick={() => ($vaultReady = false)} title="Switch Vault">
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -173,7 +184,13 @@
 		gap: 8px;
 		padding-left: 14px;
 		pointer-events: none;
-		flex: 1;
+	}
+
+	.titlebar-note-switcher {
+		display: flex;
+		align-items: center;
+		margin-left: 16px;
+		-webkit-app-region: no-drag;
 	}
 
 	.titlebar-title {
@@ -205,6 +222,7 @@
 		display: flex;
 		align-items: center;
 		gap: 6px;
+		margin-left: auto;
 		margin-right: 8px;
 		-webkit-app-region: no-drag;
 	}

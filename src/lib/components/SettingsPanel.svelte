@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { showSettings, theme, resolvedTheme, appConfig, activeVaultConfig, updateAvailable as globalUpdateAvailable, updateObj as globalUpdateObj, installType, settingsTab, vaultReady, androidApkUrl, checkForUpdateMobile, notebookSortMode, isManagedInstall, customThemes } from '$lib/stores/app';
+	import { showSettings, theme, resolvedTheme, appConfig, platformIsMobile, activeVaultConfig, updateAvailable as globalUpdateAvailable, updateObj as globalUpdateObj, installType, settingsTab, vaultReady, androidApkUrl, checkForUpdateMobile, notebookSortMode, isManagedInstall, customThemes } from '$lib/stores/app';
 	import { setTheme, setSystemThemes, setAccentColor, setFontSize, setFontFamily, setLineHeight, setUiScale, setContentWidth, setGeneralSettings, importObsidian, createBackup, listBackups, restoreBackup, deleteBackup, setBackupSettings, setAiSettings, testAiConnection, setSyncSettings, testSyncConnection, syncNow, getAppConfig, saveCustomTheme, deleteCustomTheme, exportCustomTheme, importCustomThemes } from '$lib/api';
 	import { darkThemes, isMobile, isAndroid } from '$lib/platform';
 	import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
@@ -750,6 +750,7 @@
 	// General settings
 	let compactNotes = $state($appConfig?.compact_notes ?? false);
 	let showNoteDates = $state($appConfig?.show_note_dates ?? true);
+	let showNoteSwitcher = $state($appConfig?.show_note_switcher ?? false);
 	let startupView = $state<StartupView>(normalizeStartupView($appConfig?.startup_view));
 	let restoreLastSession = $state($appConfig?.restore_last_session ?? false);
 	let timeFormat = $state($appConfig?.time_format ?? 'relative');
@@ -825,6 +826,7 @@
 		if ($appConfig) {
 			$appConfig.compact_notes = compactNotes;
 			$appConfig.show_note_dates = showNoteDates;
+			$appConfig.show_note_switcher = showNoteSwitcher;
 			$appConfig.startup_view = startupView;
 			$appConfig.restore_last_session = restoreLastSession;
 			$appConfig.time_format = timeFormat;
@@ -849,7 +851,7 @@
 			$appConfig.show_daily_notes = showDailyNotes;
 			$appConfig.show_trash = showTrash;
 			}
-			setGeneralSettings(compactNotes, timeFormat, weekStart, dailyTitleFormat, gpuAcceleration, autostart, pdfPreview, pdfHeight, titleMode, hideTitleInBody, showLineNumbers, showLinkArrows, defaultViewMode, newNotesInSourceMode, showTrayIcon, closeToTray, enableWikiLinks, showNoteDates, startupView, restoreLastSession, showAllNotes, showQuickAccess, showTasks, showDailyNotes, showTrash)
+			setGeneralSettings(compactNotes, timeFormat, weekStart, dailyTitleFormat, gpuAcceleration, autostart, pdfPreview, pdfHeight, titleMode, hideTitleInBody, showLineNumbers, showLinkArrows, defaultViewMode, newNotesInSourceMode, showTrayIcon, closeToTray, enableWikiLinks, showNoteDates, showNoteSwitcher, startupView, restoreLastSession, showAllNotes, showQuickAccess, showTasks, showDailyNotes, showTrash)
 			.catch((e) => console.error('Failed to save general settings:', e));
 	}
 
@@ -1031,6 +1033,7 @@
 		if ($appConfig) {
 			compactNotes = $appConfig.compact_notes ?? false;
 			showNoteDates = $appConfig.show_note_dates ?? true;
+			showNoteSwitcher = $appConfig.show_note_switcher ?? false;
 			startupView = normalizeStartupView($appConfig.startup_view);
 			restoreLastSession = $appConfig.restore_last_session ?? false;
 			timeFormat = $appConfig.time_format ?? 'relative';
@@ -1203,6 +1206,21 @@
 								<label class="setting-toggle">
 									<span class="setting-label"><span class="setting-name">Trash</span></span>
 									<button class="toggle-switch" class:on={showTrash} onclick={() => { showTrash = !showTrash; saveGeneralSettings(); }}>
+										<span class="toggle-knob"></span>
+									</button>
+								</label>
+							</div>
+							{/if}
+
+							{#if !$platformIsMobile}
+							<div class="settings-section">
+								<h3>Interface</h3>
+								<label class="setting-toggle">
+									<span class="setting-label">
+										<span class="setting-name">Show note switcher in title bar</span>
+										<span class="setting-desc">Show recent and Quick Access notes in the title bar.</span>
+									</span>
+									<button class="toggle-switch" class:on={showNoteSwitcher} onclick={() => { showNoteSwitcher = !showNoteSwitcher; saveGeneralSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>

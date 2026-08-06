@@ -137,6 +137,8 @@ pub struct AppConfig {
     #[serde(default = "default_true")]
     pub show_note_dates: bool,
     #[serde(default)]
+    pub show_note_switcher: bool,
+    #[serde(default)]
     pub time_format: String,
     #[serde(default = "default_week_start")]
     pub week_start: String,
@@ -300,6 +302,7 @@ impl Default for AppConfig {
             content_width: None,
             compact_notes: false,
             show_note_dates: true,
+            show_note_switcher: false,
             time_format: "relative".to_string(),
             week_start: "monday".to_string(),
             daily_title_format: "localized".to_string(),
@@ -538,5 +541,20 @@ mod startup_view_tests {
 
         assert_eq!(config.system_light_theme, "light");
         assert_eq!(config.system_dark_theme, "dark");
+    }
+
+    #[test]
+    fn note_switcher_is_opt_in_for_new_and_existing_configs() {
+        let config = AppConfig::default();
+        assert!(!config.show_note_switcher);
+
+        let mut value = serde_json::to_value(config).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("show_note_switcher");
+        let config: AppConfig = serde_json::from_value(value).unwrap();
+
+        assert!(!config.show_note_switcher);
     }
 }

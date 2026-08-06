@@ -98,6 +98,7 @@ export interface AppConfig {
   content_width: number | null;
   compact_notes: boolean;
   show_note_dates: boolean;
+  show_note_switcher: boolean;
   time_format: string;
   week_start: string;
   daily_title_format: string;

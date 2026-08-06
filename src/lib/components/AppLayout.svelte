@@ -296,6 +296,24 @@
 		if (isMobile) $mobileView = 'editor';
 	}
 
+	async function selectNoteFromSwitcher(path: string): Promise<boolean> {
+		const currentPath = $activeNotePath;
+		if (currentPath && currentPath.replace(/\\/g, '/') === path.replace(/\\/g, '/')) return true;
+		editor?.flushSave();
+		try {
+			const content = await readNote(path);
+			$viewerNote = null;
+			$activeNote = content;
+			$activeNotePath = path;
+			$editorDirty = false;
+			handleNoteSelected(path, content.content);
+			return true;
+		} catch (e) {
+			console.error('Failed to switch note:', e);
+			return false;
+		}
+	}
+
 	function handleViewChanged() {
 		taskNoteOpened = false;
 		// Picking a notebook/tag/Tasks/etc. in the sidebar is a request to browse that view's
@@ -997,7 +1015,7 @@
 				</div>
 			</div>
 		{:else}
-			<TitleBar onNewNote={createAndFocusNote} onDailyNote={handleDailyNote} />
+			<TitleBar onNewNote={createAndFocusNote} onDailyNote={handleDailyNote} onSelectNote={selectNoteFromSwitcher} />
 		{/if}
 		<div class="app-layout">
 			{#if !$focusMode}
