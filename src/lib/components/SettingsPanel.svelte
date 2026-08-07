@@ -1,12 +1,13 @@
 <script lang="ts">
 	import { showSettings, theme, resolvedTheme, appConfig, platformIsMobile, activeVaultConfig, updateAvailable as globalUpdateAvailable, updateObj as globalUpdateObj, installType, settingsTab, vaultReady, androidApkUrl, checkForUpdateMobile, notebookSortMode, isManagedInstall, customThemes } from '$lib/stores/app';
-	import { setTheme, setSystemThemes, setAccentColor, setFontSize, setFontFamily, setLineHeight, setUiScale, setContentWidth, setGeneralSettings, importObsidian, createBackup, listBackups, restoreBackup, deleteBackup, setBackupSettings, setAiSettings, testAiConnection, setSyncSettings, testSyncConnection, syncNow, getAppConfig, saveCustomTheme, deleteCustomTheme, exportCustomTheme, importCustomThemes } from '$lib/api';
+	import { setTheme, setSystemThemes, setAccentColor, setFontSize, setFontFamily, setLineHeight, setUiScale, setContentWidth, setGeneralSettings, importObsidian, createBackup, listBackups, restoreBackup, deleteBackup, setBackupSettings, setAiSettings, testAiConnection, setSyncSettings, testSyncConnection, syncNow, getAppConfig, saveCustomTheme, deleteCustomTheme, exportCustomTheme, importCustomThemes, findOrphanedAttachments, trashOrphanedAttachments } from '$lib/api';
 	import { darkThemes, isMobile, isAndroid } from '$lib/platform';
 	import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 	import { listen } from '@tauri-apps/api/event';
 	import { getVersion } from '@tauri-apps/api/app';
 	import { getCurrentWebview } from '@tauri-apps/api/webview';
 	import { openUrl } from '$lib/api';
+	import type { OrphanAttachment } from '$lib/api';
 	import type { ImportResult, BackupEntry, CustomTheme, CustomThemeColors, StartupView } from '$lib/types';
 	import { normalizeStartupView } from '$lib/utils/startup-view';
 
@@ -113,6 +114,47 @@
 			updateMessage = { type: 'error', text: `Update failed: ${e}` };
 		} finally {
 			updateDownloading = false;
+		}
+	}
+
+	// Vault maintenance state
+	let orphanedAttachments = $state<OrphanAttachment[] | null>(null);
+	let scanningOrphanedAttachments = $state(false);
+	let trashingOrphanedAttachments = $state(false);
+	const orphanedAttachmentTotal = $derived((orphanedAttachments ?? []).reduce((total, attachment) => total + attachment.size, 0));
+
+	$effect(() => {
+		if (!$showSettings) orphanedAttachments = null;
+	});
+
+	function formatAttachmentSize(bytes: number): string {
+		if (bytes < 1024) return `${bytes} B`;
+		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+		if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+		return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+	}
+
+	async function scanOrphanedAttachments() {
+		scanningOrphanedAttachments = true;
+		try {
+			orphanedAttachments = await findOrphanedAttachments();
+		} catch (error) {
+			console.error(error);
+		} finally {
+			scanningOrphanedAttachments = false;
+		}
+	}
+
+	async function trashFoundOrphanedAttachments() {
+		if (!orphanedAttachments || orphanedAttachments.length === 0) return;
+		trashingOrphanedAttachments = true;
+		try {
+			await trashOrphanedAttachments(orphanedAttachments.map((attachment) => attachment.name));
+			orphanedAttachments = null;
+		} catch (error) {
+			console.error(error);
+		} finally {
+			trashingOrphanedAttachments = false;
 		}
 	}
 
@@ -1290,6 +1332,47 @@
 								</button>
 							</div>
 							{/if}
+
+							<div class="settings-section">
+								<h3>Vault Maintenance</h3>
+								<div class="vault-maintenance">
+									<div class="setting-label">
+										<span class="setting-name">Orphaned attachments</span>
+										<span class="setting-desc">Find files in the vault's attachments folder that are not referenced by any note.</span>
+									</div>
+									{#if orphanedAttachments === null}
+										<button class="import-btn cleanup-action" onclick={scanOrphanedAttachments} disabled={scanningOrphanedAttachments}>
+											{#if scanningOrphanedAttachments}
+												<svg class="spinner-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" opacity="0.25" /><path d="M12 2a10 10 0 019.95 9" /></svg>
+												Scanning…
+											{:else}
+												Find orphaned attachments
+											{/if}
+										</button>
+									{:else if orphanedAttachments.length === 0}
+										<p class="cleanup-message">No orphaned attachments. Nothing to clean up.</p>
+									{:else}
+										<p class="cleanup-message">{orphanedAttachments.length} {orphanedAttachments.length === 1 ? 'attachment is' : 'attachments are'} not referenced by any note ({formatAttachmentSize(orphanedAttachmentTotal)}).</p>
+										<div class="cleanup-list">
+											{#each orphanedAttachments as attachment}
+												<div class="cleanup-row">
+													<span class="cleanup-name" title={attachment.name}>{attachment.name}</span>
+													<span class="cleanup-size">{formatAttachmentSize(attachment.size)}</span>
+												</div>
+											{/each}
+										</div>
+										<button class="import-btn cleanup-action" onclick={trashFoundOrphanedAttachments} disabled={trashingOrphanedAttachments}>
+											{#if trashingOrphanedAttachments}
+												<svg class="spinner-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" opacity="0.25" /><path d="M12 2a10 10 0 019.95 9" /></svg>
+												Moving…
+											{:else}
+												Move {orphanedAttachments.length} to Trash
+											{/if}
+										</button>
+										<p class="cleanup-hint">Moved to the vault's trash folder (recoverable), not permanently deleted.</p>
+									{/if}
+								</div>
+							</div>
 
 							{#if !isMobile}
 							<div class="settings-section">
@@ -2960,6 +3043,58 @@
 	.import-btn:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
+	}
+
+	.vault-maintenance {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 10px;
+	}
+
+	.cleanup-action {
+		min-height: 44px;
+	}
+
+	.cleanup-message {
+		margin: 0;
+		font-size: 13px;
+		color: var(--text-secondary);
+	}
+
+	.cleanup-list {
+		width: 100%;
+		max-height: 140px;
+		overflow-y: auto;
+		background: var(--bg-secondary);
+		border: 1px solid var(--border-light);
+		border-radius: 8px;
+	}
+
+	.cleanup-row {
+		display: flex;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 5px 12px;
+		font-size: 12px;
+	}
+
+	.cleanup-name {
+		color: var(--text-secondary);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.cleanup-size {
+		color: var(--text-tertiary);
+		flex-shrink: 0;
+	}
+
+	.cleanup-hint {
+		margin: 0;
+		font-size: 11px;
+		color: var(--text-tertiary);
 	}
 
 	.spinner-icon {

@@ -1,8 +1,6 @@
 <script lang="ts">
 	import { showInfo } from '$lib/stores/app';
-	import { getVaultStats, findOrphanedAttachments, trashOrphanedAttachments } from '$lib/api';
-	import type { OrphanAttachment } from '$lib/api';
-	import { openUrl } from '$lib/api';
+	import { getVaultStats, openUrl } from '$lib/api';
 	import { getVersion } from '@tauri-apps/api/app';
 	import type { VaultStats } from '$lib/types';
 	import {
@@ -87,10 +85,6 @@
 	let stats = $state<VaultStats | null>(null);
 	let activeTab = $state<'about' | 'shortcuts'>(isMobile ? 'about' : 'shortcuts');
 	let appVersion = $state('...');
-	let orphans = $state<OrphanAttachment[] | null>(null);
-	let scanning = $state(false);
-	let trashing = $state(false);
-	const orphanTotal = $derived((orphans ?? []).reduce((a, o) => a + o.size, 0));
 
 	getVersion().then(v => appVersion = v).catch(() => appVersion = '0.0.0');
 
@@ -115,26 +109,9 @@
 			getVaultStats().then((s) => { stats = s; }).catch(console.error);
 		} else {
 			stats = null;
-			orphans = null;
 		}
 	});
 
-	async function scanOrphans() {
-		scanning = true;
-		try { orphans = await findOrphanedAttachments(); }
-		catch (e) { console.error(e); }
-		finally { scanning = false; }
-	}
-	async function trashOrphans() {
-		if (!orphans || orphans.length === 0) return;
-		trashing = true;
-		try {
-			await trashOrphanedAttachments(orphans.map((o) => o.name));
-			orphans = null;
-			getVaultStats().then((sv) => { stats = sv; }).catch(console.error);
-		} catch (e) { console.error(e); }
-		finally { trashing = false; }
-	}
 </script>
 
 {#if $showInfo}
@@ -201,24 +178,6 @@
 						</div>
 					{/if}
 
-					{#if stats}
-						<div class="info-cleanup">
-							{#if orphans === null}
-								<button class="cleanup-btn" onclick={scanOrphans} disabled={scanning}>{#if scanning}<svg class="spinner-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" opacity="0.25" /><path d="M12 2a10 10 0 019.95 9" /></svg>Scanning…{:else}Find orphaned attachments{/if}</button>
-							{:else if orphans.length === 0}
-								<p class="cleanup-msg">No orphaned attachments. Nothing to clean up.</p>
-							{:else}
-								<p class="cleanup-msg">{orphans.length} {orphans.length === 1 ? 'attachment is' : 'attachments are'} not referenced by any note ({formatSize(orphanTotal)}).</p>
-								<div class="cleanup-list">
-									{#each orphans as o}
-										<div class="cleanup-row"><span class="cleanup-name" title={o.name}>{o.name}</span><span class="cleanup-size">{formatSize(o.size)}</span></div>
-									{/each}
-								</div>
-								<button class="cleanup-btn" onclick={trashOrphans} disabled={trashing}>{#if trashing}<svg class="spinner-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" opacity="0.25" /><path d="M12 2a10 10 0 019.95 9" /></svg>Moving…{:else}Move {orphans.length} to Trash{/if}</button>
-								<p class="cleanup-hint">Moved to the vault's trash folder (recoverable), not permanently deleted.</p>
-							{/if}
-						</div>
-					{/if}
 
 					<div class="info-credits">
 						<p>Created by <strong>Yuri Karamian</strong></p>
@@ -480,71 +439,6 @@
 
 	.info-link:hover {
 		background: var(--accent-light);
-	}
-	.info-cleanup {
-		width: 100%;
-		margin-top: 16px;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		gap: 8px;
-	}
-	.cleanup-btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 6px;
-		background: var(--bg-secondary);
-		border: 1px solid var(--border-color);
-		border-radius: 8px;
-		color: var(--text-primary);
-		font-size: 13px;
-		padding: 7px 14px;
-		cursor: pointer;
-	}
-	.cleanup-btn:hover:not(:disabled) { background: var(--bg-hover); }
-	.cleanup-btn:disabled { opacity: 0.6; cursor: default; }
-	.cleanup-msg {
-		font-size: 13px;
-		color: var(--text-secondary);
-		text-align: center;
-	}
-	.cleanup-list {
-		width: 100%;
-		max-height: 140px;
-		overflow-y: auto;
-		background: var(--bg-secondary);
-		border: 1px solid var(--border-light);
-		border-radius: 8px;
-	}
-	.cleanup-row {
-		display: flex;
-		justify-content: space-between;
-		gap: 12px;
-		padding: 5px 12px;
-		font-size: 12px;
-	}
-	.cleanup-name {
-		color: var(--text-secondary);
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.cleanup-size {
-		color: var(--text-tertiary);
-		flex-shrink: 0;
-	}
-	.cleanup-hint {
-		font-size: 11px;
-		color: var(--text-tertiary);
-		text-align: center;
-	}
-	.spinner-icon {
-		animation: spin 0.8s linear infinite;
-	}
-	@keyframes spin {
-		from { transform: rotate(0deg); }
-		to { transform: rotate(360deg); }
 	}
 
 	.shortcuts-section {
