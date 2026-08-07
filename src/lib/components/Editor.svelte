@@ -48,6 +48,7 @@
 	import { debounce } from '$lib/utils/debounce';
 	import { encryptSecretText, decryptSecretText, readSecretTitle } from '$lib/utils/secrets';
 	import { WrapSelectedText } from '$lib/editor/extensions/wrapSelectedText';
+	import { CodeBlockInputScroll } from '$lib/editor/extensions/codeBlockInputScroll';
 	import { calloutGroup, calloutIcon, calloutLabel, CALLOUT_MENU, transformCalloutBlockquotes, serializeCallout } from '$lib/editor/callouts';
 	import { wrapTextareaSelection } from '$lib/editor/source/selectionPairs';
 	import { convertListNode, type MixedListName } from '$lib/editor/mixedLists';
@@ -4396,6 +4397,7 @@
 				TextStyle,
 				Color,
 				CodeBlockLowlight.configure({ lowlight, enableTabIndentation: true, defaultLanguage: 'text' }),
+				CodeBlockInputScroll,
 				CodeBlockLanguageSelect,
 				CopyButtonExtension,
 				MermaidRenderer,
