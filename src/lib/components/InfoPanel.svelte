@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { showInfo } from '$lib/stores/app';
-	import { getVaultStats, openUrl } from '$lib/api';
+	import { openUrl } from '$lib/api';
 	import { getVersion } from '@tauri-apps/api/app';
-	import type { VaultStats } from '$lib/types';
 	import {
 		ACTIONS,
 		keybindings,
@@ -82,7 +81,6 @@
 		if (capturingId === id) stopCapture();
 	}
 
-	let stats = $state<VaultStats | null>(null);
 	let activeTab = $state<'about' | 'shortcuts'>(isMobile ? 'about' : 'shortcuts');
 	let appVersion = $state('...');
 
@@ -97,20 +95,6 @@
 		openUrl(url).catch(console.error);
 	}
 
-	function formatSize(bytes: number): string {
-		if (bytes < 1024) return `${bytes} B`;
-		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-		if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-		return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-	}
-
-	$effect(() => {
-		if ($showInfo) {
-			getVaultStats().then((s) => { stats = s; }).catch(console.error);
-		} else {
-			stats = null;
-		}
-	});
 
 </script>
 
@@ -153,30 +137,6 @@
 					<p class="app-version">v{appVersion}</p>
 					<p class="app-description">A local markdown note-taking app.</p>
 
-					{#if stats}
-						<div class="info-stats">
-							<div class="stat-row">
-								<span class="stat-label">Notes</span>
-								<span class="stat-value">{stats.total_notes}</span>
-							</div>
-							<div class="stat-row">
-								<span class="stat-label">Attachments</span>
-								<span class="stat-value">{stats.total_attachments}</span>
-							</div>
-							<div class="stat-row">
-								<span class="stat-label">Notes size</span>
-								<span class="stat-value">{formatSize(stats.notes_size)}</span>
-							</div>
-							<div class="stat-row">
-								<span class="stat-label">Attachments size</span>
-								<span class="stat-value">{formatSize(stats.attachments_size)}</span>
-							</div>
-							<div class="stat-row stat-total">
-								<span class="stat-label">Total vault size</span>
-								<span class="stat-value">{formatSize(stats.total_size)}</span>
-							</div>
-						</div>
-					{/if}
 
 
 					<div class="info-credits">
@@ -376,39 +336,6 @@
 		margin-top: 4px;
 	}
 
-	.info-stats {
-		width: 100%;
-		margin-top: 20px;
-		background: var(--bg-secondary);
-		border: 1px solid var(--border-light);
-		border-radius: 10px;
-		padding: 4px 0;
-	}
-
-	.stat-row {
-		display: flex;
-		justify-content: space-between;
-		padding: 7px 16px;
-	}
-
-	.stat-label {
-		font-size: 13px;
-		color: var(--text-secondary);
-	}
-
-	.stat-value {
-		font-size: 13px;
-		font-weight: 600;
-		color: var(--text-primary);
-	}
-
-	.stat-total {
-		border-top: 1px solid var(--border-light);
-	}
-
-	.stat-total .stat-value {
-		color: var(--accent);
-	}
 
 	.info-credits {
 		margin-top: 20px;

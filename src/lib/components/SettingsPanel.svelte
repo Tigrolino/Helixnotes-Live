@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { showSettings, theme, resolvedTheme, appConfig, platformIsMobile, activeVaultConfig, updateAvailable as globalUpdateAvailable, updateObj as globalUpdateObj, installType, settingsTab, vaultReady, androidApkUrl, checkForUpdateMobile, notebookSortMode, isManagedInstall, customThemes } from '$lib/stores/app';
-	import { setTheme, setSystemThemes, setAccentColor, setFontSize, setFontFamily, setLineHeight, setUiScale, setContentWidth, setGeneralSettings, importObsidian, createBackup, listBackups, restoreBackup, deleteBackup, setBackupSettings, setAiSettings, testAiConnection, setSyncSettings, testSyncConnection, syncNow, getAppConfig, saveCustomTheme, deleteCustomTheme, exportCustomTheme, importCustomThemes, findOrphanedAttachments, trashOrphanedAttachments } from '$lib/api';
+	import { setTheme, setSystemThemes, setAccentColor, setFontSize, setFontFamily, setLineHeight, setUiScale, setContentWidth, setGeneralSettings, importObsidian, createBackup, listBackups, restoreBackup, deleteBackup, setBackupSettings, setAiSettings, testAiConnection, setSyncSettings, testSyncConnection, syncNow, getAppConfig, saveCustomTheme, deleteCustomTheme, exportCustomTheme, importCustomThemes, getVaultStats, findOrphanedAttachments, trashOrphanedAttachments } from '$lib/api';
 	import { darkThemes, isMobile, isAndroid } from '$lib/platform';
 	import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 	import { listen } from '@tauri-apps/api/event';
@@ -8,12 +8,12 @@
 	import { getCurrentWebview } from '@tauri-apps/api/webview';
 	import { openUrl } from '$lib/api';
 	import type { OrphanAttachment } from '$lib/api';
-	import type { ImportResult, BackupEntry, CustomTheme, CustomThemeColors, StartupView } from '$lib/types';
+	import type { ImportResult, BackupEntry, CustomTheme, CustomThemeColors, StartupView, VaultStats } from '$lib/types';
 	import { normalizeStartupView } from '$lib/utils/startup-view';
 
 	const modKey = navigator.platform.startsWith('Mac') ? '⌘' : 'Ctrl';
 
-	type Tab = 'general' | 'editor' | 'styling' | 'import' | 'backup' | 'ai' | 'sync' | 'updates';
+	type Tab = 'general' | 'editor' | 'styling' | 'import' | 'backup' | 'maintenance' | 'ai' | 'sync' | 'updates';
 	let activeTab = $state<Tab>('styling');
 
 	// Updates state
@@ -118,16 +118,35 @@
 	}
 
 	// Vault maintenance state
+	let vaultStats = $state<VaultStats | null>(null);
+	let vaultStatsError = $state(false);
 	let orphanedAttachments = $state<OrphanAttachment[] | null>(null);
 	let scanningOrphanedAttachments = $state(false);
 	let trashingOrphanedAttachments = $state(false);
 	const orphanedAttachmentTotal = $derived((orphanedAttachments ?? []).reduce((total, attachment) => total + attachment.size, 0));
 
 	$effect(() => {
-		if (!$showSettings) orphanedAttachments = null;
+		if (!$showSettings) {
+			vaultStats = null;
+			vaultStatsError = false;
+			orphanedAttachments = null;
+			return;
+		}
+		if (activeTab === 'maintenance') void loadVaultStats();
 	});
 
-	function formatAttachmentSize(bytes: number): string {
+	async function loadVaultStats() {
+		vaultStatsError = false;
+		try {
+			vaultStats = await getVaultStats();
+		} catch (error) {
+			vaultStats = null;
+			vaultStatsError = true;
+			console.error('Failed to load vault statistics:', error);
+		}
+	}
+
+	function formatVaultSize(bytes: number): string {
 		if (bytes < 1024) return `${bytes} B`;
 		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
 		if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -151,6 +170,7 @@
 		try {
 			await trashOrphanedAttachments(orphanedAttachments.map((attachment) => attachment.name));
 			orphanedAttachments = null;
+			void loadVaultStats();
 		} catch (error) {
 			console.error(error);
 		} finally {
@@ -1156,6 +1176,12 @@
 						Backup
 					</button>
 					{/if}
+					<button class="tab-btn" class:active={activeTab === 'maintenance'} onclick={() => activeTab = 'maintenance'}>
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<line x1="22" x2="2" y1="12" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/><line x1="6" x2="6.01" y1="16" y2="16"/><line x1="10" x2="10.01" y1="16" y2="16"/>
+						</svg>
+						Maintenance
+					</button>
 					<button class="tab-btn" class:active={activeTab === 'ai'} onclick={() => activeTab = 'ai'}>
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 							<path d="M12 8V4l-2-2"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M9 13v2"/><path d="M15 13v2"/>
@@ -1333,46 +1359,6 @@
 							</div>
 							{/if}
 
-							<div class="settings-section">
-								<h3>Vault Maintenance</h3>
-								<div class="vault-maintenance">
-									<div class="setting-label">
-										<span class="setting-name">Orphaned attachments</span>
-										<span class="setting-desc">Find files in the vault's attachments folder that are not referenced by any note.</span>
-									</div>
-									{#if orphanedAttachments === null}
-										<button class="import-btn cleanup-action" onclick={scanOrphanedAttachments} disabled={scanningOrphanedAttachments}>
-											{#if scanningOrphanedAttachments}
-												<svg class="spinner-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" opacity="0.25" /><path d="M12 2a10 10 0 019.95 9" /></svg>
-												Scanning…
-											{:else}
-												Find orphaned attachments
-											{/if}
-										</button>
-									{:else if orphanedAttachments.length === 0}
-										<p class="cleanup-message">No orphaned attachments. Nothing to clean up.</p>
-									{:else}
-										<p class="cleanup-message">{orphanedAttachments.length} {orphanedAttachments.length === 1 ? 'attachment is' : 'attachments are'} not referenced by any note ({formatAttachmentSize(orphanedAttachmentTotal)}).</p>
-										<div class="cleanup-list">
-											{#each orphanedAttachments as attachment}
-												<div class="cleanup-row">
-													<span class="cleanup-name" title={attachment.name}>{attachment.name}</span>
-													<span class="cleanup-size">{formatAttachmentSize(attachment.size)}</span>
-												</div>
-											{/each}
-										</div>
-										<button class="import-btn cleanup-action" onclick={trashFoundOrphanedAttachments} disabled={trashingOrphanedAttachments}>
-											{#if trashingOrphanedAttachments}
-												<svg class="spinner-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" opacity="0.25" /><path d="M12 2a10 10 0 019.95 9" /></svg>
-												Moving…
-											{:else}
-												Move {orphanedAttachments.length} to Trash
-											{/if}
-										</button>
-										<p class="cleanup-hint">Moved to the vault's trash folder (recoverable), not permanently deleted.</p>
-									{/if}
-								</div>
-							</div>
 
 							{#if !isMobile}
 							<div class="settings-section">
@@ -1421,6 +1407,78 @@
 								{/if}
 							</div>
 						{/if}
+						</div>
+					{:else if activeTab === 'maintenance'}
+						<div class="tab-content">
+							<div class="settings-section">
+								<h3>Vault Overview</h3>
+								{#if vaultStats}
+									<div class="maintenance-stats">
+										<div class="maintenance-stat-row">
+											<span class="maintenance-stat-label">Notes</span>
+											<span class="maintenance-stat-value">{vaultStats.total_notes}</span>
+										</div>
+										<div class="maintenance-stat-row">
+											<span class="maintenance-stat-label">Attachments</span>
+											<span class="maintenance-stat-value">{vaultStats.total_attachments}</span>
+										</div>
+										<div class="maintenance-stat-row">
+											<span class="maintenance-stat-label">Notes size</span>
+											<span class="maintenance-stat-value">{formatVaultSize(vaultStats.notes_size)}</span>
+										</div>
+										<div class="maintenance-stat-row">
+											<span class="maintenance-stat-label">Attachments size</span>
+											<span class="maintenance-stat-value">{formatVaultSize(vaultStats.attachments_size)}</span>
+										</div>
+										<div class="maintenance-stat-row maintenance-stat-total">
+											<span class="maintenance-stat-label">Total vault size</span>
+											<span class="maintenance-stat-value">{formatVaultSize(vaultStats.total_size)}</span>
+										</div>
+									</div>
+								{:else if vaultStatsError}
+									<p class="setting-desc">Vault statistics could not be loaded.</p>
+								{:else}
+									<p class="setting-desc">Loading vault statistics…</p>
+								{/if}
+							</div>
+
+							<div class="settings-section">
+								<h3>Orphaned Attachments</h3>
+								<div class="vault-maintenance">
+									<p class="setting-desc">Find files in the vault's attachments folder that are not referenced by any note.</p>
+									{#if orphanedAttachments === null}
+										<button class="import-btn cleanup-action" onclick={scanOrphanedAttachments} disabled={scanningOrphanedAttachments}>
+											{#if scanningOrphanedAttachments}
+												<svg class="spinner-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" opacity="0.25" /><path d="M12 2a10 10 0 019.95 9" /></svg>
+												Scanning…
+											{:else}
+												Find orphaned attachments
+											{/if}
+										</button>
+									{:else if orphanedAttachments.length === 0}
+										<p class="cleanup-message">No orphaned attachments. Nothing to clean up.</p>
+									{:else}
+										<p class="cleanup-message">{orphanedAttachments.length} {orphanedAttachments.length === 1 ? 'attachment is' : 'attachments are'} not referenced by any note ({formatVaultSize(orphanedAttachmentTotal)}).</p>
+										<div class="cleanup-list">
+											{#each orphanedAttachments as attachment}
+												<div class="cleanup-row">
+													<span class="cleanup-name" title={attachment.name}>{attachment.name}</span>
+													<span class="cleanup-size">{formatVaultSize(attachment.size)}</span>
+												</div>
+											{/each}
+										</div>
+										<button class="import-btn cleanup-action" onclick={trashFoundOrphanedAttachments} disabled={trashingOrphanedAttachments}>
+											{#if trashingOrphanedAttachments}
+												<svg class="spinner-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" opacity="0.25" /><path d="M12 2a10 10 0 019.95 9" /></svg>
+												Moving…
+											{:else}
+												Move {orphanedAttachments.length} to Trash
+											{/if}
+										</button>
+										<p class="cleanup-hint">Moved to the vault's trash folder (recoverable), not permanently deleted.</p>
+									{/if}
+								</div>
+							</div>
 						</div>
 					{:else if activeTab === 'editor'}
 						<div class="tab-content">
@@ -3043,6 +3101,39 @@
 	.import-btn:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
+	}
+
+	.maintenance-stats {
+		width: 100%;
+		background: var(--bg-secondary);
+		border: 1px solid var(--border-light);
+		border-radius: 10px;
+		padding: 4px 0;
+	}
+
+	.maintenance-stat-row {
+		display: flex;
+		justify-content: space-between;
+		padding: 7px 16px;
+	}
+
+	.maintenance-stat-label {
+		font-size: 13px;
+		color: var(--text-secondary);
+	}
+
+	.maintenance-stat-value {
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--text-primary);
+	}
+
+	.maintenance-stat-total {
+		border-top: 1px solid var(--border-light);
+	}
+
+	.maintenance-stat-total .maintenance-stat-value {
+		color: var(--accent);
 	}
 
 	.vault-maintenance {
