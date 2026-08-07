@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { listen } from '@tauri-apps/api/event';
+	import { getCurrentWebview } from '@tauri-apps/api/webview';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import Editor from './Editor.svelte';
 	import {
+		appConfig,
 		activeNote,
 		activeNotePath,
 		editorDirty,
@@ -17,9 +19,11 @@
 	let { notePath }: { notePath: string } = $props();
 
 	const appWindow = getCurrentWindow();
+	const appWebview = getCurrentWebview();
 	const isMac = navigator.platform.startsWith('Mac');
 	let editor = $state<Editor>(null!);
 	let unlistenFileChange: (() => void) | null = null;
+	let unlistenUiScale: (() => void) | null = null;
 	let maximized = $state(false);
 	let loadError = $state<string | null>(null);
 
@@ -67,7 +71,20 @@
 		}
 	}
 
+	async function applyUiScale(scale: number) {
+		try {
+			await appWebview.setZoom(scale);
+		} catch (e) {
+			console.error('Failed to apply interface scale to note window:', e);
+		}
+	}
+
 	onMount(async () => {
+		unlistenUiScale = await listen<number>('ui-scale-changed', (event) => {
+			void applyUiScale(event.payload);
+		});
+		await applyUiScale($appConfig?.ui_scale ?? 1);
+
 		try {
 			const content = await readNote(notePath);
 			$activeNote = content;
@@ -99,6 +116,7 @@
 
 	onDestroy(() => {
 		unlistenFileChange?.();
+		unlistenUiScale?.();
 	});
 </script>
 

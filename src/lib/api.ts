@@ -179,6 +179,12 @@ export async function getAllNoteTitles(): Promise<NoteTitleEntry[]> {
   return invoke("get_all_note_titles");
 }
 
+export async function getNoteSwitcherTitles(
+  recentPaths: string[],
+): Promise<NoteTitleEntry[]> {
+  return invoke("get_note_switcher_titles", { recentPaths });
+}
+
 export async function getGraphData(): Promise<{ nodes: { title: string; path: string }[]; edges: { source: number; target: number }[] }> {
   return invoke("get_graph_data");
 }

@@ -1,10 +1,14 @@
-use crate::types::{NoteContent, NoteEntry, NoteMeta, NotebookEntry, TrashContents, TrashNotebookEntry, VaultState};
+use crate::types::{
+    NoteContent, NoteEntry, NoteMeta, NoteTitleEntry, NotebookEntry, TrashContents,
+    TrashNotebookEntry, VaultState,
+};
 use crate::vault::frontmatter;
 use chrono::{DateTime, Local, Locale, Utc};
 use rayon::prelude::*;
+use std::collections::HashSet;
 use std::fs;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use uuid::Uuid;
 use walkdir::WalkDir;
 
@@ -1279,6 +1283,59 @@ pub fn remove_quick_access(vault_path: &str, note_relative: &str) -> Result<(), 
     Ok(())
 }
 
+const NOTE_SWITCHER_RECENT_LIMIT: usize = 6;
+
+pub fn get_note_switcher_titles(
+    vault_path: &str,
+    recent_paths: &[String],
+) -> Result<Vec<NoteTitleEntry>, String> {
+    let vault_root = Path::new(vault_path);
+    if !vault_root.is_dir() {
+        return Err("Vault path does not exist".to_string());
+    }
+
+    let mut seen = HashSet::new();
+    let mut titles = Vec::with_capacity(NOTE_SWITCHER_RECENT_LIMIT);
+
+    for requested_path in recent_paths {
+        if titles.len() >= NOTE_SWITCHER_RECENT_LIMIT {
+            break;
+        }
+
+        let path = Path::new(requested_path);
+        let Ok(relative) = path.strip_prefix(vault_root) else {
+            continue;
+        };
+        let safe_relative = !relative.as_os_str().is_empty()
+            && relative.components().all(|component| match component {
+                Component::Normal(name) => !is_hidden(Path::new(name)),
+                Component::CurDir => true,
+                _ => false,
+            });
+        if !safe_relative
+            || path.extension().and_then(|extension| extension.to_str()) != Some("md")
+            || !path.is_file()
+        {
+            continue;
+        }
+
+        let relative_path = relative.to_path_buf();
+        if !seen.insert(relative_path.clone()) {
+            continue;
+        }
+        let Ok(entry) = read_note_entry_fast(path, vault_root) else {
+            continue;
+        };
+
+        titles.push(NoteTitleEntry {
+            title: entry.meta.title,
+            path: relative_path.to_string_lossy().replace('\\', "/"),
+        });
+    }
+
+    Ok(titles)
+}
+
 pub fn get_quick_access_notes(vault_path: &str) -> Result<Vec<NoteEntry>, String> {
     let list = load_quick_access(vault_path)?;
     let vault_root = Path::new(vault_path);
@@ -1287,7 +1344,7 @@ pub fn get_quick_access_notes(vault_path: &str) -> Result<Vec<NoteEntry>, String
     for relative in &list {
         let full_path = vault_root.join(relative);
         if full_path.exists() {
-            if let Ok(entry) = read_note_entry(&full_path, vault_root) {
+            if let Ok(entry) = read_note_entry_fast(&full_path, vault_root) {
                 notes.push(entry);
             }
         }
@@ -1309,7 +1366,10 @@ pub fn sanitize_filename(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{duplicate_note, helixnotes_dir, load_notebook_icons, set_notebook_icon};
+    use super::{
+        duplicate_note, get_note_switcher_titles, helixnotes_dir, load_notebook_icons,
+        set_notebook_icon,
+    };
     use std::fs;
     use uuid::Uuid;
 
@@ -1331,6 +1391,70 @@ mod tests {
         assert!(load_notebook_icons(&vault_path).unwrap().is_empty());
 
         fs::remove_dir_all(vault).unwrap();
+    }
+
+    #[test]
+    fn loads_only_requested_note_switcher_titles() {
+        let vault =
+            std::env::temp_dir().join(format!("helixnotes-note-switcher-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&vault).unwrap();
+
+        let mut note_paths = Vec::new();
+        for index in 0..8 {
+            let path = vault.join(format!("Note {index}.md"));
+            fs::write(
+                &path,
+                format!("---\ntitle: Note {index}\n---\n\nNote {index} body.\n"),
+            )
+            .unwrap();
+            note_paths.push(path);
+        }
+        fs::write(
+            vault.join("Unrelated.md"),
+            "---\ntitle: Unrelated\n---\n\nMust not be loaded.\n",
+        )
+        .unwrap();
+
+        let outside =
+            std::env::temp_dir().join(format!("helixnotes-outside-note-{}.md", Uuid::new_v4()));
+        fs::write(&outside, "---\ntitle: Outside\n---\n").unwrap();
+
+        let requested = vec![
+            note_paths[0].to_string_lossy().into_owned(),
+            note_paths[0].to_string_lossy().into_owned(),
+            vault.join("Missing.md").to_string_lossy().into_owned(),
+            outside.to_string_lossy().into_owned(),
+            note_paths[1].to_string_lossy().into_owned(),
+            note_paths[2].to_string_lossy().into_owned(),
+            note_paths[3].to_string_lossy().into_owned(),
+            note_paths[4].to_string_lossy().into_owned(),
+            note_paths[5].to_string_lossy().into_owned(),
+            note_paths[6].to_string_lossy().into_owned(),
+            note_paths[7].to_string_lossy().into_owned(),
+        ];
+
+        let vault_path = vault.to_string_lossy();
+        let titles = get_note_switcher_titles(&vault_path, &requested).unwrap();
+        assert_eq!(titles.len(), 6);
+        assert_eq!(
+            titles
+                .iter()
+                .map(|entry| entry.path.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "Note 0.md",
+                "Note 1.md",
+                "Note 2.md",
+                "Note 3.md",
+                "Note 4.md",
+                "Note 5.md",
+            ]
+        );
+        assert!(titles.iter().all(|entry| entry.title != "Unrelated"));
+        assert!(titles.iter().all(|entry| entry.title != "Outside"));
+
+        fs::remove_dir_all(vault).unwrap();
+        fs::remove_file(outside).unwrap();
     }
 
     #[test]

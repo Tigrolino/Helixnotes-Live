@@ -28,6 +28,27 @@ function pathKey(path: string): string {
 	return path.replace(/\\/g, '/');
 }
 
+export function buildNoteSwitcherRequestPaths(
+	currentPath: string | null,
+	historyPaths: readonly string[]
+): string[] {
+	const paths: string[] = [];
+	const seen = new Set<string>();
+	const addPath = (path: string | null) => {
+		if (!path) return;
+		const key = pathKey(path);
+		if (seen.has(key)) return;
+		seen.add(key);
+		paths.push(path);
+	};
+
+	addPath(currentPath);
+	for (let index = historyPaths.length - 1; index >= 0; index -= 1) {
+		addPath(historyPaths[index]);
+	}
+	return paths;
+}
+
 function folderLabel(relativePath: string): string {
 	const parts = relativePath.replace(/\\/g, '/').split('/').filter(Boolean);
 	parts.pop();
@@ -66,9 +87,9 @@ export function buildNoteSwitcherSections({
 		recent.push(toRow(note, currentPathKey));
 	};
 
-	addRecent(currentPath);
-	for (let index = historyPaths.length - 1; index >= 0 && recent.length < limit; index -= 1) {
-		addRecent(historyPaths[index]);
+	for (const path of buildNoteSwitcherRequestPaths(currentPath, historyPaths)) {
+		if (recent.length >= limit) break;
+		addRecent(path);
 	}
 
 	const quickAccess: NoteSwitcherRow[] = [];

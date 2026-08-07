@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { activeNote, activeNotePath, appConfig, navHistory } from '$lib/stores/app';
-	import { getAllNoteTitles, getQuickAccess } from '$lib/api';
+	import { getNoteSwitcherTitles, getQuickAccess } from '$lib/api';
 	import { openNoteWindow } from '$lib/utils/window';
 	import {
+		buildNoteSwitcherRequestPaths,
 		buildNoteSwitcherSections,
 		type NoteSwitcherNote,
 		type NoteSwitcherRow,
@@ -23,6 +24,7 @@
 	let selectingPath = $state<string | null>(null);
 	let sections = $state<NoteSwitcherSections>({ recent: [], quickAccess: [] });
 	let loadGeneration = 0;
+	let loadedVaultPath = $state<string | null | undefined>(undefined);
 
 	function normalizedPath(path: string): string {
 		return path.replace(/\\/g, '/').replace(/\/$/, '');
@@ -71,13 +73,15 @@
 		const vaultPath = $appConfig?.active_vault;
 		if (!vaultPath) {
 			sections = { recent: [], quickAccess: [] };
+			loadedVaultPath = null;
 			loading = false;
 			await focusInitialRow();
 			return;
 		}
 
+		const requestPaths = buildNoteSwitcherRequestPaths($activeNotePath, $navHistory.stack);
 		const [titlesResult, quickAccessResult] = await Promise.allSettled([
-			getAllNoteTitles(),
+			getNoteSwitcherTitles(requestPaths),
 			getQuickAccess()
 		]);
 		if (!open || generation !== loadGeneration) return;
@@ -111,6 +115,11 @@
 				.map((entry) => quickAccessEntryToNote(entry, vaultPath))
 				.filter((entry): entry is NoteSwitcherNote => entry !== null)
 			: [];
+		for (const note of quickAccessNotes) {
+			if (!knownNotes.some((knownNote) => normalizedPath(knownNote.path) === normalizedPath(note.path))) {
+				knownNotes.push(note);
+			}
+		}
 
 		sections = buildNoteSwitcherSections({
 			currentPath,
@@ -118,8 +127,18 @@
 			knownNotes,
 			quickAccessNotes
 		});
+		loadedVaultPath = vaultPath;
 		loading = false;
 		await focusInitialRow();
+	}
+
+	function refreshAfterPopoverPaint(generation: number) {
+		requestAnimationFrame(() => {
+			window.setTimeout(() => {
+				if (!open || generation !== loadGeneration) return;
+				void refreshSections(generation);
+			}, 0);
+		});
 	}
 
 	function toggleSwitcher() {
@@ -128,12 +147,17 @@
 			loadGeneration += 1;
 			return;
 		}
+
+		const vaultPath = $appConfig?.active_vault ?? null;
+		const hasCachedSections = loadedVaultPath === vaultPath;
 		open = true;
-		loading = true;
+		loading = !hasCachedSections;
 		selectingPath = null;
-		sections = { recent: [], quickAccess: [] };
+		if (!hasCachedSections) sections = { recent: [], quickAccess: [] };
 		loadGeneration += 1;
-		void refreshSections(loadGeneration);
+		const generation = loadGeneration;
+		if (hasCachedSections) void focusInitialRow();
+		refreshAfterPopoverPaint(generation);
 	}
 
 	async function closeSwitcher(restoreTriggerFocus: boolean) {

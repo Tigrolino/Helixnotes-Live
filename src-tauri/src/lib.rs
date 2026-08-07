@@ -158,6 +158,7 @@ pub fn run() {
             commands::move_note,
             commands::get_all_tags,
             commands::get_all_note_titles,
+            commands::get_note_switcher_titles,
             commands::get_graph_data,
             commands::get_tasks,
             commands::set_task_done,

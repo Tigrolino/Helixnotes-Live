@@ -462,11 +462,19 @@ pub fn set_line_height(state: State<'_, AppState>, height: f64) -> Result<(), St
 }
 
 #[tauri::command]
-pub fn set_ui_scale(state: State<'_, AppState>, scale: f64) -> Result<(), String> {
+pub fn set_ui_scale(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    scale: f64,
+) -> Result<(), String> {
     let mut config = state.config.lock().map_err(|e| e.to_string())?;
     config.ui_scale = Some(scale);
     save_app_config(&config)?;
-    Ok(())
+    drop(config);
+
+    use tauri::Emitter;
+    app.emit("ui-scale-changed", scale)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -797,6 +805,26 @@ pub fn get_all_note_titles(state: State<'_, AppState>) -> Result<Vec<NoteTitleEn
     }
 
     Ok(entries)
+}
+
+#[tauri::command]
+pub async fn get_note_switcher_titles(
+    state: State<'_, AppState>,
+    recent_paths: Vec<String>,
+) -> Result<Vec<NoteTitleEntry>, String> {
+    let vault_path = state
+        .config
+        .lock()
+        .map_err(|error| error.to_string())?
+        .active_vault
+        .clone()
+        .ok_or_else(|| "No active vault".to_string())?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        operations::get_note_switcher_titles(&vault_path, &recent_paths)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 // ── Graph ──
@@ -1502,10 +1530,18 @@ pub fn set_general_settings(
 // ── Quick Access ──
 
 #[tauri::command]
-pub fn get_quick_access(state: State<'_, AppState>) -> Result<Vec<NoteEntry>, String> {
-    let config = state.config.lock().map_err(|e| e.to_string())?;
-    let vault_path = config.active_vault.as_ref().ok_or("No active vault")?;
-    operations::get_quick_access_notes(vault_path)
+pub async fn get_quick_access(state: State<'_, AppState>) -> Result<Vec<NoteEntry>, String> {
+    let vault_path = state
+        .config
+        .lock()
+        .map_err(|error| error.to_string())?
+        .active_vault
+        .clone()
+        .ok_or_else(|| "No active vault".to_string())?;
+
+    tauri::async_runtime::spawn_blocking(move || operations::get_quick_access_notes(&vault_path))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
