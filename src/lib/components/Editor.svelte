@@ -52,6 +52,7 @@
 	import { calloutGroup, calloutIcon, calloutLabel, CALLOUT_MENU, transformCalloutBlockquotes, serializeCallout } from '$lib/editor/callouts';
 	import { wrapTextareaSelection } from '$lib/editor/source/selectionPairs';
 	import { convertListNode, type MixedListName } from '$lib/editor/mixedLists';
+	import { clearFormatting } from '$lib/editor/clearFormatting';
 	import { serializeInlineMarkdown } from '$lib/editor/markdown';
 	import { relativePath } from '$lib/utils/paths';
 	import GraphView from './GraphView.svelte';
@@ -5079,6 +5080,11 @@
 		closeTextContextMenu();
 	}
 
+	function ctxClearFormatting() {
+		if (editor) clearFormatting(editor);
+		closeTextContextMenu();
+	}
+
 	function ctxCode() {
 		editor?.chain().focus().toggleCode().run();
 		closeTextContextMenu();
@@ -7200,6 +7206,10 @@
 			<button onclick={ctxHighlight}>
 				<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
 				Highlight
+			</button>
+			<button onclick={ctxClearFormatting}>
+				<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg>
+				Clear Formatting
 			</button>
 			<div class="text-ctx-sep"></div>
 			<button onclick={ctxLink}>
