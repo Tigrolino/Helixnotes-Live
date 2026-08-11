@@ -54,7 +54,7 @@
 	import { convertListNode, type MixedListName } from '$lib/editor/mixedLists';
 	import { clearFormatting } from '$lib/editor/clearFormatting';
 	import { serializeInlineMarkdown } from '$lib/editor/markdown';
-	import { relativePath } from '$lib/utils/paths';
+	import { relativePath, resolvePathFromFile } from '$lib/utils/paths';
 	import GraphView from './GraphView.svelte';
 	import TagSuggestInput from './TagSuggestInput.svelte';
 	import ImageViewer from './ImageViewer.svelte';
@@ -2891,6 +2891,12 @@
 			$activeNote = { ...content, content: content.content };
 			$activeNotePath = absPath;
 		} catch (e) {
+			// Explicit Markdown links do not have a wiki-link title to recreate from.
+			// Do not turn a failed read into an untitled note.
+			if (!noteTitle) {
+				console.error('Failed to navigate to note link:', e);
+				return;
+			}
 			// Note at path no longer exists (deleted/moved). Refresh cache and
 			// retry as unresolved so the user can recreate it from the link.
 			await refreshWikiLinkTitles();
@@ -5533,8 +5539,7 @@
 		if (!decoded.startsWith('/')) {
 			const notePath = $activeNotePath;
 			if (notePath) {
-				const noteDir = notePath.substring(0, notePath.lastIndexOf('/'));
-				absPath = normalizePath(`${noteDir}/${decoded}`);
+				absPath = resolvePathFromFile(notePath, decoded);
 			} else {
 				const vaultRoot = $appConfig?.active_vault;
 				if (vaultRoot) absPath = normalizePath(`${vaultRoot}/${decoded}`);
