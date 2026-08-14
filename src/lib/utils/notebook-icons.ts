@@ -39,6 +39,10 @@ const BUILTIN_IDS: Record<NotebookIconId, true> = {
   palette: true
 };
 
+export function normalizeNotebookIconKey(path: string): string {
+  return path.replace(/\\/g, '/');
+}
+
 export function encodeBuiltinNotebookIcon(icon: NotebookIconId): string {
   return `${BUILTIN_PREFIX}${icon}`;
 }

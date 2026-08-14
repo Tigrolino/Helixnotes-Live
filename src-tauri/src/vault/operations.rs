@@ -1218,16 +1218,25 @@ pub fn save_attachment(vault_path: &str, name: &str, data: &[u8]) -> Result<Stri
     Ok(relative)
 }
 
+pub(crate) fn normalize_notebook_icon_key(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
 pub fn load_notebook_icons(
     vault_path: &str,
 ) -> Result<std::collections::HashMap<String, String>, String> {
     let icons_path = helixnotes_dir(vault_path).join("notebook_icons.json");
-    if icons_path.exists() {
-        let data = fs::read_to_string(&icons_path).map_err(|e| e.to_string())?;
-        serde_json::from_str(&data).map_err(|e| e.to_string())
-    } else {
-        Ok(std::collections::HashMap::new())
+    if !icons_path.exists() {
+        return Ok(std::collections::HashMap::new());
     }
+
+    let data = fs::read_to_string(&icons_path).map_err(|e| e.to_string())?;
+    let icons: std::collections::HashMap<String, String> =
+        serde_json::from_str(&data).map_err(|e| e.to_string())?;
+    Ok(icons
+        .into_iter()
+        .map(|(path, icon)| (normalize_notebook_icon_key(&path), icon))
+        .collect())
 }
 
 pub fn set_notebook_icon(
@@ -1236,12 +1245,13 @@ pub fn set_notebook_icon(
     icon_relative: Option<&str>,
 ) -> Result<(), String> {
     let mut icons = load_notebook_icons(vault_path)?;
+    let notebook_key = normalize_notebook_icon_key(notebook_relative);
     match icon_relative {
         Some(icon) => {
-            icons.insert(notebook_relative.to_string(), icon.to_string());
+            icons.insert(notebook_key, icon.to_string());
         }
         None => {
-            icons.remove(notebook_relative);
+            icons.remove(&notebook_key);
         }
     }
     let icons_path = helixnotes_dir(vault_path).join("notebook_icons.json");
@@ -1380,15 +1390,40 @@ mod tests {
         let vault_path = vault.to_string_lossy();
         fs::create_dir_all(helixnotes_dir(&vault_path)).unwrap();
 
-        set_notebook_icon(&vault_path, "Projects", Some("builtin:briefcase")).unwrap();
+        set_notebook_icon(&vault_path, r"Projects\Client", Some("builtin:briefcase")).unwrap();
+        let stored: std::collections::HashMap<String, String> = serde_json::from_str(
+            &fs::read_to_string(helixnotes_dir(&vault_path).join("notebook_icons.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(stored.contains_key("Projects/Client"));
+        assert!(!stored.contains_key(r"Projects\Client"));
+
         let icons = load_notebook_icons(&vault_path).unwrap();
         assert_eq!(
-            icons.get("Projects").map(String::as_str),
+            icons.get("Projects/Client").map(String::as_str),
             Some("builtin:briefcase")
         );
 
-        set_notebook_icon(&vault_path, "Projects", None).unwrap();
+        set_notebook_icon(&vault_path, "Projects/Client", None).unwrap();
         assert!(load_notebook_icons(&vault_path).unwrap().is_empty());
+
+        fs::remove_dir_all(vault).unwrap();
+    }
+
+    #[test]
+    fn normalizes_legacy_notebook_icon_keys_when_loading() {
+        let vault =
+            std::env::temp_dir().join(format!("helixnotes-notebook-icon-test-{}", Uuid::new_v4()));
+        let vault_path = vault.to_string_lossy();
+        let icons_path = helixnotes_dir(&vault_path).join("notebook_icons.json");
+        fs::create_dir_all(helixnotes_dir(&vault_path)).unwrap();
+        fs::write(&icons_path, r#"{"Projects\\Client":"builtin:folder"}"#).unwrap();
+
+        let icons = load_notebook_icons(&vault_path).unwrap();
+        assert_eq!(
+            icons.get("Projects/Client").map(String::as_str),
+            Some("builtin:folder")
+        );
 
         fs::remove_dir_all(vault).unwrap();
     }

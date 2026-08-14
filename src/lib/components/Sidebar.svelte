@@ -33,6 +33,7 @@
 		NOTEBOOK_ICON_OPTIONS,
 		decodeBuiltinNotebookIcon,
 		encodeBuiltinNotebookIcon,
+		normalizeNotebookIconKey,
 		type NotebookIconId
 	} from '$lib/utils/notebook-icons';
 
@@ -587,9 +588,10 @@
 
 	async function handleBuiltinIcon(nb: NotebookEntry, icon: NotebookIconId) {
 		try {
+			const key = normalizeNotebookIconKey(nb.relative_path);
 			const value = encodeBuiltinNotebookIcon(icon);
-			await setNotebookIcon(nb.relative_path, value);
-			$notebookIcons = { ...$notebookIcons, [nb.relative_path]: value };
+			await setNotebookIcon(key, value);
+			$notebookIcons = { ...$notebookIcons, [key]: value };
 			iconPickerNotebook = null;
 		} catch (e) {
 			console.error('Failed to set notebook icon:', e);
@@ -608,8 +610,9 @@
 			const data = await readFile(filePath);
 			const fileName = baseOf(filePath) || 'icon.png';
 			const iconRelative = await saveAttachment(`notebook-icon-${fileName}`, Array.from(data));
-			await setNotebookIcon(nb.relative_path, iconRelative);
-			$notebookIcons = { ...$notebookIcons, [nb.relative_path]: iconRelative };
+			const key = normalizeNotebookIconKey(nb.relative_path);
+			await setNotebookIcon(key, iconRelative);
+			$notebookIcons = { ...$notebookIcons, [key]: iconRelative };
 		} catch (e) {
 			console.error('Failed to set notebook icon:', e);
 		}
@@ -619,9 +622,10 @@
 		contextMenu = null;
 		iconPickerNotebook = null;
 		try {
-			await setNotebookIcon(nb.relative_path, null);
+			const key = normalizeNotebookIconKey(nb.relative_path);
+			await setNotebookIcon(key, null);
 			const icons = { ...$notebookIcons };
-			delete icons[nb.relative_path];
+			delete icons[key];
 			$notebookIcons = icons;
 		} catch (e) {
 			console.error('Failed to remove notebook icon:', e);
@@ -629,7 +633,7 @@
 	}
 
 	function getNotebookIconSrc(nb: NotebookEntry): string | null {
-		const iconPath = $notebookIcons[nb.relative_path];
+		const iconPath = $notebookIcons[normalizeNotebookIconKey(nb.relative_path)];
 		if (!iconPath || iconPath.startsWith('builtin:')) return null;
 		const vaultRoot = $appConfig?.active_vault;
 		if (!vaultRoot) return null;
@@ -955,7 +959,7 @@
 		</button>
 		<button onclick={() => openIconPicker(contextMenu!.notebook)}>
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><line x1="9" y1="9" x2="9.01" y2="9" /><line x1="15" y1="9" x2="15.01" y2="9" /></svg>
-			{$notebookIcons[contextMenu.notebook.relative_path] ? 'Change Icon...' : 'Set Icon...'}
+			{$notebookIcons[normalizeNotebookIconKey(contextMenu.notebook.relative_path)] ? 'Change Icon...' : 'Set Icon...'}
 		</button>
 		<button class="danger" onclick={() => handleDelete(contextMenu!.notebook)}>
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" /></svg>
@@ -981,7 +985,7 @@
 				{#each NOTEBOOK_ICON_OPTIONS as option}
 					<button
 						class="icon-picker-option"
-						class:active={$notebookIcons[iconPickerNotebook.relative_path] === encodeBuiltinNotebookIcon(option.id)}
+						class:active={$notebookIcons[normalizeNotebookIconKey(iconPickerNotebook.relative_path)] === encodeBuiltinNotebookIcon(option.id)}
 						aria-label={option.label}
 						title={option.label}
 						onclick={() => handleBuiltinIcon(iconPickerNotebook!, option.id)}
@@ -996,7 +1000,7 @@
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="m21 15-5-5L5 21" /></svg>
 					Custom image...
 				</button>
-				{#if $notebookIcons[iconPickerNotebook.relative_path]}
+				{#if $notebookIcons[normalizeNotebookIconKey(iconPickerNotebook.relative_path)]}
 					<button class="remove" onclick={() => handleRemoveIcon(iconPickerNotebook!)}>
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13" /></svg>
 						Use default
@@ -1042,7 +1046,7 @@
 	{@const hasChildren = nb.children.length > 0}
 	{@const isCollapsed = $collapsedNotebooks.includes(nb.path)}
 	{@const iconSrc = getNotebookIconSrc(nb)}
-	{@const builtinIcon = decodeBuiltinNotebookIcon($notebookIcons[nb.relative_path])}
+	{@const builtinIcon = decodeBuiltinNotebookIcon($notebookIcons[normalizeNotebookIconKey(nb.relative_path)])}
 	{#if editingNotebook === nb.path}
 		<div class="notebook-item" style="padding-left: {4 + depth * 16}px">
 			<input

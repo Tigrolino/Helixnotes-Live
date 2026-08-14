@@ -555,15 +555,17 @@ pub fn move_notebook(
 
     // Update notebook icon mappings
     if let Ok(icons) = operations::load_notebook_icons(vault_path) {
-        let old_prefix = format!("{}/", old_relative);
+        let old_icon_key = operations::normalize_notebook_icon_key(&old_relative);
+        let new_icon_key = operations::normalize_notebook_icon_key(&new_relative);
+        let old_prefix = format!("{}/", old_icon_key);
         let mut new_icons = std::collections::HashMap::new();
         let mut changed = false;
         for (key, value) in &icons {
-            if *key == old_relative {
-                new_icons.insert(new_relative.clone(), value.clone());
+            if *key == old_icon_key {
+                new_icons.insert(new_icon_key.clone(), value.clone());
                 changed = true;
             } else if key.starts_with(&old_prefix) {
-                let new_key = format!("{}/{}", new_relative, &key[old_prefix.len()..]);
+                let new_key = format!("{}/{}", new_icon_key, &key[old_prefix.len()..]);
                 new_icons.insert(new_key, value.clone());
                 changed = true;
             } else {
