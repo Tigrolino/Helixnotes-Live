@@ -1,5 +1,6 @@
 import { writable, derived, get } from "svelte/store";
 import { isMobile } from "$lib/platform";
+import { compareNaturalNames } from "$lib/utils/natural-sort";
 import type {
   AppConfig,
   CustomTheme,
@@ -239,7 +240,7 @@ export const sortedNotes = derived(
           return a.meta.title.localeCompare(b.meta.title);
         }
         case "title":
-          return a.meta.title.localeCompare(b.meta.title);
+          return compareNaturalNames(a.meta.title, b.meta.title);
         case "created":
           return (
             new Date(b.meta.created).getTime() -

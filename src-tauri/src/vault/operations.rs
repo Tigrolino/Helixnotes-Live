@@ -5,6 +5,7 @@ use crate::types::{
 use crate::vault::frontmatter;
 use chrono::{DateTime, Local, Locale, Utc};
 use rayon::prelude::*;
+use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::fs;
 use std::io::Read;
@@ -47,6 +48,59 @@ pub fn ensure_vault_structure(vault_path: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn digit_run(value: &[u8], start: usize) -> (usize, &[u8]) {
+    let mut end = start;
+    while end < value.len() && value[end].is_ascii_digit() {
+        end += 1;
+    }
+    let mut significant = start;
+    while significant + 1 < end && value[significant] == b'0' {
+        significant += 1;
+    }
+    (end, &value[significant..end])
+}
+
+fn compare_natural_names(left: &str, right: &str) -> Ordering {
+    let left_lower = left.to_lowercase();
+    let right_lower = right.to_lowercase();
+    let left = left_lower.as_bytes();
+    let right = right_lower.as_bytes();
+    let (mut left_index, mut right_index) = (0, 0);
+    let mut leading_zero_order = Ordering::Equal;
+
+    while left_index < left.len() && right_index < right.len() {
+        if left[left_index].is_ascii_digit() && right[right_index].is_ascii_digit() {
+            let (left_end, left_number) = digit_run(left, left_index);
+            let (right_end, right_number) = digit_run(right, right_index);
+            let number_order = left_number
+                .len()
+                .cmp(&right_number.len())
+                .then_with(|| left_number.cmp(right_number));
+            if number_order != Ordering::Equal {
+                return number_order;
+            }
+            if leading_zero_order == Ordering::Equal {
+                leading_zero_order = (left_end - left_index).cmp(&(right_end - right_index));
+            }
+            left_index = left_end;
+            right_index = right_end;
+        } else {
+            let character_order = left[left_index].cmp(&right[right_index]);
+            if character_order != Ordering::Equal {
+                return character_order;
+            }
+            left_index += 1;
+            right_index += 1;
+        }
+    }
+
+    match (left_index == left.len(), right_index == right.len()) {
+        (true, false) => Ordering::Less,
+        (false, true) => Ordering::Greater,
+        _ => leading_zero_order,
+    }
+}
+
 pub fn scan_notebooks(vault_path: &str) -> Result<Vec<NotebookEntry>, String> {
     let root = Path::new(vault_path);
     if !root.exists() {
@@ -73,10 +127,10 @@ fn scan_dir_recursive(dir: &Path, vault_root: &str) -> Vec<NotebookEntry> {
         .collect();
 
     dirs.sort_by(|a, b| {
-        a.file_name()
-            .to_string_lossy()
-            .to_lowercase()
-            .cmp(&b.file_name().to_string_lossy().to_lowercase())
+        compare_natural_names(
+            &a.file_name().to_string_lossy(),
+            &b.file_name().to_string_lossy(),
+        )
     });
 
     // Scan sibling notebooks in parallel: each subtree is independent, so
@@ -127,10 +181,10 @@ fn scan_dir_with_count(dir: &Path, vault_root: &str) -> (Vec<NotebookEntry>, usi
     }
 
     subdirs.sort_by(|a, b| {
-        a.file_name()
-            .to_string_lossy()
-            .to_lowercase()
-            .cmp(&b.file_name().to_string_lossy().to_lowercase())
+        compare_natural_names(
+            &a.file_name().to_string_lossy(),
+            &b.file_name().to_string_lossy(),
+        )
     });
 
     let paths: Vec<PathBuf> = subdirs.iter().map(|e| e.path()).collect();
@@ -1377,11 +1431,57 @@ pub fn sanitize_filename(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        duplicate_note, get_note_switcher_titles, helixnotes_dir, load_notebook_icons,
-        set_notebook_icon,
+        compare_natural_names, duplicate_note, get_note_switcher_titles, helixnotes_dir,
+        load_notebook_icons, scan_notebooks, set_notebook_icon,
     };
     use std::fs;
     use uuid::Uuid;
+
+    #[test]
+    fn compares_numeric_segments_anywhere_in_names() {
+        let mut names = ["Class 10b", "Class 2b", "Class 10a", "Class 2a"];
+        names.sort_by(|left, right| compare_natural_names(left, right));
+        assert_eq!(
+            names,
+            ["Class 2a", "Class 2b", "Class 10a", "Class 10b"]
+        );
+        assert_eq!(
+            compare_natural_names("Class 02", "Class 2b"),
+            std::cmp::Ordering::Less
+        );
+    }
+
+    #[test]
+    fn sorts_notebooks_with_numeric_names_naturally() {
+        let vault =
+            std::env::temp_dir().join(format!("helixnotes-natural-sort-test-{}", Uuid::new_v4()));
+        let nested = vault.join("Classes");
+        fs::create_dir_all(&nested).unwrap();
+        let expected = ["5g", "6g", "7g", "8g", "9g", "10g", "11g", "12g"];
+        for name in ["10g", "11g", "12g", "5g", "6g", "7g", "8g", "9g"] {
+            fs::create_dir(vault.join(name)).unwrap();
+            fs::create_dir(nested.join(name)).unwrap();
+        }
+
+        let notebooks = scan_notebooks(&vault.to_string_lossy()).unwrap();
+        let root_names: Vec<_> = notebooks
+            .iter()
+            .filter(|notebook| notebook.name != "Classes")
+            .map(|notebook| notebook.name.as_str())
+            .collect();
+        assert_eq!(root_names, expected);
+        let nested_names: Vec<_> = notebooks
+            .iter()
+            .find(|notebook| notebook.name == "Classes")
+            .unwrap()
+            .children
+            .iter()
+            .map(|notebook| notebook.name.as_str())
+            .collect();
+        assert_eq!(nested_names, expected);
+
+        fs::remove_dir_all(vault).unwrap();
+    }
 
     #[test]
     fn persists_and_removes_builtin_notebook_icons() {
