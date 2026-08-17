@@ -81,9 +81,9 @@
 		return null;
 	}
 
-	let sidebar: Sidebar;
-	let noteList: NoteList;
-	let editor: Editor;
+	let sidebar = $state<Sidebar>();
+	let noteList = $state<NoteList>();
+	let editor = $state<Editor>();
 	let unlistenFileChange: (() => void) | null = null;
 	async function applyStartupTarget(target: StartupTarget): Promise<boolean> {
 		if (target.mode === 'notebook') {
@@ -829,7 +829,7 @@
 		<!-- Mobile Header -->
 		<div class="mobile-header">
 			{#if $mobileView !== 'sidebar'}
-				<button class="mobile-header-btn" onclick={mobileBack}>
+				<button class="mobile-header-btn" onclick={mobileBack} aria-label="Go back">
 					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 						<path d="M15 18l-6-6 6-6"/>
 					</svg>
