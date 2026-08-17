@@ -1945,15 +1945,18 @@ pub fn list_backups(state: State<'_, AppState>) -> Result<Vec<BackupEntry>, Stri
 
 #[tauri::command]
 pub fn restore_backup(app: AppHandle, backup_path: String) -> Result<(), String> {
-    let vault_path = {
+    let (vault_path, backup_dir) = {
         let state = app.state::<AppState>();
         let config = state.config.lock().map_err(|e| e.to_string())?;
-        config.active_vault.clone().ok_or("No active vault")?
+        (
+            config.active_vault.clone().ok_or("No active vault")?,
+            crate::backup::get_backup_dir(&config.backup_location)?,
+        )
     };
 
     std::thread::spawn(move || {
         use tauri::Emitter;
-        match crate::backup::restore_backup(&vault_path, &backup_path) {
+        match crate::backup::restore_backup(&vault_path, &backup_dir, &backup_path) {
             Ok(()) => {
                 let _ = app.emit(
                     "restore-done",
@@ -1977,8 +1980,10 @@ pub fn restore_backup(app: AppHandle, backup_path: String) -> Result<(), String>
 }
 
 #[tauri::command]
-pub fn delete_backup(backup_path: String) -> Result<(), String> {
-    crate::backup::delete_backup(&backup_path)
+pub fn delete_backup(state: State<'_, AppState>, backup_path: String) -> Result<(), String> {
+    let config = state.config.lock().map_err(|error| error.to_string())?;
+    let backup_dir = crate::backup::get_backup_dir(&config.backup_location)?;
+    crate::backup::delete_backup(&backup_dir, &backup_path)
 }
 
 #[tauri::command]
