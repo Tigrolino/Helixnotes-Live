@@ -391,10 +391,12 @@ mod custom_theme_reference_tests {
 
     #[test]
     fn deleting_custom_theme_resets_system_pair_references() {
-        let mut config = AppConfig::default();
-        config.theme = "custom-work".to_string();
-        config.system_light_theme = "custom-work".to_string();
-        config.system_dark_theme = "custom-work".to_string();
+        let mut config = AppConfig {
+            theme: "custom-work".to_string(),
+            system_light_theme: "custom-work".to_string(),
+            system_dark_theme: "custom-work".to_string(),
+            ..Default::default()
+        };
 
         clear_custom_theme_references(&mut config, "custom-work");
 
@@ -982,8 +984,8 @@ fn extract_title_fast(raw: &str) -> Option<String> {
     let frontmatter = &after_open[..end];
     for line in frontmatter.lines() {
         let line = line.trim();
-        if line.starts_with("title:") {
-            let val = line[6..].trim();
+        if let Some(title) = line.strip_prefix("title:") {
+            let val = title.trim();
             // Strip surrounding quotes
             if (val.starts_with('"') && val.ends_with('"')) || (val.starts_with('\'') && val.ends_with('\'')) {
                 return Some(val[1..val.len()-1].to_string());
@@ -1479,6 +1481,7 @@ pub fn set_notebook_icon(
 // ── General Settings ──
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn set_general_settings(
     state: State<'_, AppState>,
     compact_notes: bool,
@@ -2044,6 +2047,7 @@ pub fn get_note_version_content(
 // ── AI ──
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn set_ai_settings(
     state: State<'_, AppState>,
     provider: Option<String>,
@@ -2162,23 +2166,24 @@ mod vault_identity_tests {
 
     #[test]
     fn bookmark_identity_disambiguates_vaults_with_the_same_path() {
-        let mut config = AppConfig::default();
-        config.active_vault = Some("/same/path".to_string());
-        config.vaults = vec![
-            VaultConfig {
-                path: "/same/path".to_string(),
-                name: "Local".to_string(),
-                ..Default::default()
-            },
-            VaultConfig {
-                path: "/same/path".to_string(),
-                name: "Files".to_string(),
-                bookmark_id: Some("bookmark".to_string()),
-                ..Default::default()
-            },
-        ];
-
-        config.active_bookmark_id = Some("bookmark".to_string());
+        let mut config = AppConfig {
+            active_vault: Some("/same/path".to_string()),
+            vaults: vec![
+                VaultConfig {
+                    path: "/same/path".to_string(),
+                    name: "Local".to_string(),
+                    ..Default::default()
+                },
+                VaultConfig {
+                    path: "/same/path".to_string(),
+                    name: "Files".to_string(),
+                    bookmark_id: Some("bookmark".to_string()),
+                    ..Default::default()
+                },
+            ],
+            active_bookmark_id: Some("bookmark".to_string()),
+            ..Default::default()
+        };
         assert_eq!(active_vault_config(&config).unwrap().name, "Files");
 
         config.active_bookmark_id = None;
@@ -2204,6 +2209,7 @@ fn sync_config_from(config: &AppConfig) -> Result<crate::sync::WebdavConfig, Str
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn set_sync_settings(
     state: State<'_, AppState>,
     provider: Option<String>,

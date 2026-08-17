@@ -134,7 +134,7 @@ pub fn list_backups(backup_dir: &Path) -> Result<Vec<BackupEntry>, String> {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
 
-        if path.extension().map_or(false, |ext| ext == "zip") {
+        if path.extension().is_some_and(|ext| ext == "zip") {
             let filename = path
                 .file_name()
                 .unwrap_or_default()

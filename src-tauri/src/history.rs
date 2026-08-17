@@ -115,7 +115,7 @@ pub fn list_versions(vault_path: &str, note_id: &str) -> Result<Vec<VersionEntry
     for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
-        if path.extension().map_or(false, |ext| ext == "md") {
+        if path.extension().is_some_and(|ext| ext == "md") {
             let filename = path
                 .file_stem()
                 .unwrap_or_default()
@@ -153,7 +153,7 @@ pub fn get_version(vault_path: &str, note_id: &str, timestamp: &str) -> Result<S
         let date_part = &timestamp[..t_pos];
         let time_part = timestamp[t_pos + 1..].trim_end_matches('Z');
         let time_dashes = time_part.replace(':', "-");
-        format!("{}.md", format!("{}T{}", date_part, time_dashes))
+        format!("{date_part}T{time_dashes}.md")
     } else {
         format!("{}.md", timestamp)
     };
@@ -168,7 +168,7 @@ fn prune_versions(dir: &Path, max: u32) -> Result<(), String> {
         .map_err(|e| e.to_string())?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .filter(|p| p.extension().map_or(false, |ext| ext == "md"))
+        .filter(|p| p.extension().is_some_and(|ext| ext == "md"))
         .collect();
 
     // Sort by name (timestamps sort lexicographically) - newest last

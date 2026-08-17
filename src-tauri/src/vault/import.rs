@@ -116,9 +116,7 @@ pub fn import(vault_path: &str) -> Result<ImportResult, String> {
                     result.links_converted += 1;
                     format!("![{}]({})", alt, link_target)
                 } else {
-                    let display = if alt_param.is_empty() {
-                        file_part.rsplit('/').next().unwrap_or(file_part)
-                    } else if is_dimension_spec(alt_param) {
+                    let display = if alt_param.is_empty() || is_dimension_spec(alt_param) {
                         file_part.rsplit('/').next().unwrap_or(file_part)
                     } else {
                         alt_param
@@ -267,7 +265,7 @@ fn normalize_frontmatter(raw: &str, path: &Path) -> (NoteMeta, String) {
     let tags = normalize_tags(&mapping);
 
     let title = mapping
-        .get(&serde_yaml::Value::String("title".into()))
+        .get(serde_yaml::Value::String("title".into()))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .unwrap_or_else(|| {
@@ -283,7 +281,7 @@ fn normalize_frontmatter(raw: &str, path: &Path) -> (NoteMeta, String) {
         });
 
     let id = mapping
-        .get(&serde_yaml::Value::String("id".into()))
+        .get(serde_yaml::Value::String("id".into()))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .filter(|s| !s.is_empty())
@@ -293,9 +291,9 @@ fn normalize_frontmatter(raw: &str, path: &Path) -> (NoteMeta, String) {
         .iter()
         .find_map(|key| {
             mapping
-                .get(&serde_yaml::Value::String((*key).into()))
+                .get(serde_yaml::Value::String((*key).into()))
                 .and_then(|v| v.as_str())
-                .and_then(|s| frontmatter::parse_date_flexible(s))
+                .and_then(frontmatter::parse_date_flexible)
         })
         .or_else(|| file_created(path))
         .unwrap_or_else(Utc::now);
@@ -304,15 +302,15 @@ fn normalize_frontmatter(raw: &str, path: &Path) -> (NoteMeta, String) {
         .iter()
         .find_map(|key| {
             mapping
-                .get(&serde_yaml::Value::String((*key).into()))
+                .get(serde_yaml::Value::String((*key).into()))
                 .and_then(|v| v.as_str())
-                .and_then(|s| frontmatter::parse_date_flexible(s))
+                .and_then(frontmatter::parse_date_flexible)
         })
         .or_else(|| file_modified(path))
         .unwrap_or_else(Utc::now);
 
     let pinned = mapping
-        .get(&serde_yaml::Value::String("pinned".into()))
+        .get(serde_yaml::Value::String("pinned".into()))
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
@@ -332,7 +330,7 @@ fn normalize_tags(mapping: &serde_yaml::Mapping) -> Vec<String> {
     let mut seen = HashSet::new();
 
     for key in &["tags", "tag"] {
-        if let Some(val) = mapping.get(&serde_yaml::Value::String((*key).into())) {
+        if let Some(val) = mapping.get(serde_yaml::Value::String((*key).into())) {
             for raw in yaml_value_to_strings(val) {
                 let cleaned = raw.trim().trim_start_matches('#').trim().to_string();
                 if !cleaned.is_empty() && seen.insert(cleaned.to_lowercase()) {
@@ -686,7 +684,7 @@ fn cleanup_empty_dirs(root: &Path) {
         .map(|e| e.path().to_path_buf())
         .collect();
 
-    dirs.sort_by(|a, b| b.components().count().cmp(&a.components().count()));
+    dirs.sort_by_key(|path| std::cmp::Reverse(path.components().count()));
 
     for dir in dirs {
         let dir_str = dir.to_string_lossy();

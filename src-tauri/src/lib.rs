@@ -219,7 +219,7 @@ pub fn run() {
                 let external_url = percent_decode(encoded);
 
                 if !external_url.starts_with("http://") && !external_url.starts_with("https://") {
-                    let _ = responder.respond(
+                    responder.respond(
                         tauri::http::Response::builder()
                             .status(400)
                             .body(Vec::new())
@@ -234,7 +234,7 @@ pub fn run() {
                 {
                     Ok(c) => c,
                     Err(_) => {
-                        let _ = responder.respond(
+                        responder.respond(
                             tauri::http::Response::builder()
                                 .status(502)
                                 .body(Vec::new())
@@ -255,7 +255,7 @@ pub fn run() {
                         let status = resp.status().as_u16();
                         match resp.bytes() {
                             Ok(bytes) => {
-                                let _ = responder.respond(
+                                responder.respond(
                                     tauri::http::Response::builder()
                                         .status(status)
                                         .header("Content-Type", &content_type)
@@ -265,7 +265,7 @@ pub fn run() {
                                 );
                             }
                             Err(_) => {
-                                let _ = responder.respond(
+                                responder.respond(
                                     tauri::http::Response::builder()
                                         .status(502)
                                         .body(Vec::new())
@@ -275,7 +275,7 @@ pub fn run() {
                         }
                     }
                     Err(_) => {
-                        let _ = responder.respond(
+                        responder.respond(
                             tauri::http::Response::builder()
                                 .status(502)
                                 .body(Vec::new())
@@ -350,9 +350,9 @@ pub fn run() {
                         let _ = window.hide();
                     }
                 }
-                tauri::WindowEvent::Destroyed => {
+                tauri::WindowEvent::Destroyed
                     // When main window is destroyed, close all note windows
-                    if window.label() == "main" {
+                    if window.label() == "main" => {
                         let app = window.app_handle();
                         for (label, win) in app.webview_windows() {
                             if label.starts_with("note-") {
@@ -360,7 +360,6 @@ pub fn run() {
                             }
                         }
                     }
-                }
                 _ => {}
             }
         });

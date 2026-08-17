@@ -381,7 +381,7 @@ pub fn scan_notes(vault_path: &str, notebook_path: Option<&str>) -> Result<Vec<N
             .collect();
 
         log::info!("scan_notes: mobile scan found {} notes", notes.len());
-        notes.sort_by(|a, b| b.meta.modified.cmp(&a.meta.modified));
+        notes.sort_by_key(|note| std::cmp::Reverse(note.meta.modified));
         return Ok(notes);
     }
 
@@ -397,7 +397,7 @@ pub fn scan_notes(vault_path: &str, notebook_path: Option<&str>) -> Result<Vec<N
         } else {
             WalkDir::new(root)
                 .into_iter()
-                .filter_entry(|e| !is_hidden(e.path()) && !e.path().starts_with(&helixnotes_dir(vault_path)))
+                .filter_entry(|e| !is_hidden(e.path()) && !e.path().starts_with(helixnotes_dir(vault_path)))
                 .filter_map(|e| e.ok())
                 .map(|e| e.path().to_path_buf())
                 .filter(|p| p.is_file() && p.extension().and_then(|x| x.to_str()) == Some("md"))
@@ -409,7 +409,7 @@ pub fn scan_notes(vault_path: &str, notebook_path: Option<&str>) -> Result<Vec<N
             .filter_map(|path| read_note_entry_fast(path, vault_root).ok())
             .collect();
 
-        notes.sort_by(|a, b| b.meta.modified.cmp(&a.meta.modified));
+        notes.sort_by_key(|note| std::cmp::Reverse(note.meta.modified));
         Ok(notes)
     }
 }
@@ -1176,7 +1176,7 @@ pub fn get_trash_contents(vault_path: &str) -> Result<TrashContents, String> {
             };
             let modified = fs::metadata(&path)
                 .and_then(|m| m.modified())
-                .map(|t| DateTime::<Utc>::from(t))
+                .map(DateTime::<Utc>::from)
                 .unwrap_or_else(|_| Utc::now());
             notebooks.push(TrashNotebookEntry {
                 name,
@@ -1187,8 +1187,8 @@ pub fn get_trash_contents(vault_path: &str) -> Result<TrashContents, String> {
         }
     }
 
-    notes.sort_by(|a, b| b.meta.modified.cmp(&a.meta.modified));
-    notebooks.sort_by(|a, b| b.modified.cmp(&a.modified));
+    notes.sort_by_key(|note| std::cmp::Reverse(note.meta.modified));
+    notebooks.sort_by_key(|notebook| std::cmp::Reverse(notebook.modified));
     Ok(TrashContents { notes, notebooks })
 }
 

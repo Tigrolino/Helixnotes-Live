@@ -8,6 +8,7 @@ const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 const OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
 const OLLAMA_DEFAULT_URL: &str = "http://localhost:11434";
 
+#[allow(clippy::too_many_arguments)]
 pub fn ai_request(
     app: AppHandle,
     provider: String,
