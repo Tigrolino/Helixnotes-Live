@@ -453,8 +453,10 @@ fn parse_multistatus(xml: &str, base_path: &str) -> Result<Vec<RemoteEntry>, Str
             }
             Ok(Event::Text(e)) => {
                 if cap != Cap::None {
-                    if let Ok(t) = e.unescape() {
-                        buf.push_str(&t);
+                    if let Ok(decoded) = e.decode() {
+                        if let Ok(text) = quick_xml::escape::unescape(&decoded) {
+                            buf.push_str(&text);
+                        }
                     }
                 }
             }
