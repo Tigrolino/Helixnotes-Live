@@ -364,6 +364,10 @@ export async function openFile(path: string): Promise<void> {
   return invoke("open_file", { path });
 }
 
+export async function revealFile(path: string): Promise<void> {
+  return invoke("reveal_file", { path });
+}
+
 export async function openUrl(url: string): Promise<void> {
   return invoke("open_url", { url });
 }

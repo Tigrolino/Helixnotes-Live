@@ -37,12 +37,12 @@
 		reorderQuickAccess,
 		moveNote,
 		getAllTags,
-		createDailyNote
+		createDailyNote,
+		revealFile
 	} from '$lib/api';
 	import { formatRelativeTime, formatDate, dateBucketLabel } from '$lib/utils/time';
 	import { openNoteWindow } from '$lib/utils/window';
 	import { encodeNoteDragPaths } from '$lib/utils/note-drag';
-	import { revealItemInDir } from '@tauri-apps/plugin-opener';
 	import type { NoteEntry, TrashNotebookEntry, SortMode, TaskItem } from '$lib/types';
 	import TasksView from './TasksView.svelte';
 	import TagSuggestInput from './TagSuggestInput.svelte';
@@ -1567,7 +1567,7 @@
 				Open in New Window
 			</button>
 			{#if !isMobile}
-			<button onclick={async () => { const n = contextMenu!.note; contextMenu = null; try { await revealItemInDir(n.path); } catch (e) { console.error('Failed to reveal in file manager:', e); } }}>
+			<button onclick={async () => { const n = contextMenu!.note; contextMenu = null; try { await revealFile(n.path); } catch (e) { console.error('Failed to reveal in file manager:', e); } }}>
 				<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 					<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
 				</svg>

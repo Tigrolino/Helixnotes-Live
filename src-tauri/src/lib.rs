@@ -12,6 +12,7 @@ mod vault;
 use state::AppState;
 #[allow(unused_imports)]
 use tauri::{Emitter, Manager};
+use tauri_plugin_fs::FsExt;
 
 #[cfg(desktop)]
 use tauri::{
@@ -57,6 +58,16 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
+        .on_webview_event(|webview, event| {
+            if let tauri::WebviewEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
+                let scope = webview.fs_scope();
+                for path in paths {
+                    if path.is_file() {
+                        let _ = scope.allow_file(path);
+                    }
+                }
+            }
+        })
         .on_page_load(|webview, payload| {
             #[cfg(target_os = "macos")]
             if webview.label() == "main"
@@ -127,6 +138,14 @@ pub fn run() {
                         std::env::current_dir().unwrap_or_default().join(&path)
                     };
                     if let Some(resolved_str) = resolved.to_str() {
+                        if resolved.is_file() {
+                            let _ = app.fs_scope().allow_file(&resolved);
+                            if let Some(parent) = resolved.parent() {
+                                let _ = app.fs_scope().allow_directory(parent, true);
+                            }
+                            let _ =
+                                asset_scope::allow_external_note_assets(app.handle(), &resolved);
+                        }
                         let app_state = app.state::<AppState>();
                         let _ = app_state.pending_open_file.lock().map(|mut p| {
                             *p = Some(resolved_str.to_string());
@@ -205,6 +224,7 @@ pub fn run() {
             commands::trash_orphaned_attachments,
             commands::import_obsidian,
             commands::open_file,
+            commands::reveal_file,
             commands::open_url,
             commands::copy_file_to,
             commands::write_bytes_to,
@@ -324,6 +344,13 @@ pub fn run() {
                     std::path::Path::new(&cwd).join(path)
                 };
                 if let Some(resolved_str) = resolved.to_str() {
+                    if resolved.is_file() {
+                        let _ = app.fs_scope().allow_file(&resolved);
+                        if let Some(parent) = resolved.parent() {
+                            let _ = app.fs_scope().allow_directory(parent, true);
+                        }
+                        let _ = asset_scope::allow_external_note_assets(app, &resolved);
+                    }
                     let _ = app.emit("open-file", resolved_str.to_string());
                 }
             }

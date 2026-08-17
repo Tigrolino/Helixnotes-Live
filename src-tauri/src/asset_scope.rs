@@ -21,6 +21,25 @@ pub fn allow_vault_assets<R: Runtime>(app: &AppHandle<R>, vault_path: &Path) -> 
         .map_err(|error| error.to_string())
 }
 
+/// Grants access to relative assets next to a Markdown file explicitly opened by the user.
+pub fn allow_external_note_assets<R: Runtime>(
+    app: &AppHandle<R>,
+    note_path: &Path,
+) -> Result<(), String> {
+    let note = std::fs::canonicalize(note_path).map_err(|error| {
+        format!(
+            "Failed to resolve external note path '{}': {error}",
+            note_path.display()
+        )
+    })?;
+    let parent = note
+        .parent()
+        .ok_or_else(|| "External note has no parent directory".to_string())?;
+    app.asset_protocol_scope()
+        .allow_directory(parent, true)
+        .map_err(|error| error.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -61,6 +80,30 @@ mod tests {
 
         assert!(scope.is_allowed(&note_image));
         assert!(scope.is_allowed(&attachment));
+        assert!(!scope.is_allowed(&outside));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn external_note_scope_allows_relative_assets_only_below_its_directory() {
+        let root = test_directory("external-note-assets");
+        let note_dir = root.join("shared note");
+        let assets = note_dir.join("images");
+        fs::create_dir_all(&assets).unwrap();
+        let note = note_dir.join("note.md");
+        let image = assets.join("image.png");
+        let outside = root.join("outside.png");
+        fs::write(&note, b"note").unwrap();
+        fs::write(&image, b"image").unwrap();
+        fs::write(&outside, b"outside").unwrap();
+
+        let app = tauri::test::mock_app();
+        allow_external_note_assets(app.handle(), &note).unwrap();
+        let scope = app.asset_protocol_scope();
+
+        assert!(scope.is_allowed(&note));
+        assert!(scope.is_allowed(&image));
         assert!(!scope.is_allowed(&outside));
 
         fs::remove_dir_all(root).unwrap();

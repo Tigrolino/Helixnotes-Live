@@ -24,9 +24,6 @@
     "dialog:allow-message",
     "dialog:allow-ask",
     "dialog:allow-confirm",
-    "fs:default",
-    "fs:allow-read",
-    "fs:allow-read-file",
-    "opener:allow-reveal-item-in-dir"
+    "fs:allow-read-file"
   ]
 }

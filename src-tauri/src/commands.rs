@@ -3,8 +3,9 @@ use crate::search::SearchIndex;
 use crate::state::AppState;
 use crate::types::*;
 use crate::vault::{operations, watcher};
-use std::path::Path;
-use tauri::{AppHandle, Manager, State};
+use std::path::{Path, PathBuf};
+use tauri::{AppHandle, Manager, Runtime, State};
+use tauri_plugin_fs::FsExt;
 
 fn index_note_bg(state: &State<'_, AppState>, path: &str) {
     let search = state.search_index.lock().ok().and_then(|g| g.clone());
@@ -415,6 +416,7 @@ mod custom_theme_reference_tests {
 
 #[tauri::command]
 pub fn export_custom_theme(
+    app: AppHandle,
     state: State<'_, AppState>,
     id: String,
     path: String,
@@ -427,15 +429,18 @@ pub fn export_custom_theme(
         .ok_or_else(|| "Theme not found".to_string())?;
     let export = serde_json::json!({ "version": 1, "themes": [theme] });
     let data = serde_json::to_string_pretty(&export).map_err(|e| e.to_string())?;
+    ensure_scoped_path(&app, Path::new(&path))?;
     std::fs::write(&path, data).map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn import_custom_themes(
+    app: AppHandle,
     state: State<'_, AppState>,
     path: String,
 ) -> Result<Vec<crate::types::CustomTheme>, String> {
+    ensure_scoped_path(&app, Path::new(&path))?;
     let data = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let parsed: serde_json::Value = serde_json::from_str(&data).map_err(|e| e.to_string())?;
     let themes: Vec<crate::types::CustomTheme> =
@@ -1468,7 +1473,8 @@ pub fn read_clipboard_image() -> Result<Vec<u8>, String> {
 /// Copy an image file to the system clipboard.
 #[cfg(desktop)]
 #[tauri::command]
-pub fn copy_image_to_clipboard(path: String) -> Result<(), String> {
+pub fn copy_image_to_clipboard(app: AppHandle, path: String) -> Result<(), String> {
+    ensure_readable_path(&app, Path::new(&path))?;
     let data = std::fs::read(&path).map_err(|e| format!("Failed to read image: {}", e))?;
     let img =
         image::load_from_memory(&data).map_err(|e| format!("Failed to decode image: {}", e))?;
@@ -1489,7 +1495,7 @@ pub fn copy_image_to_clipboard(path: String) -> Result<(), String> {
 
 #[cfg(mobile)]
 #[tauri::command]
-pub fn copy_image_to_clipboard(_path: String) -> Result<(), String> {
+pub fn copy_image_to_clipboard(_app: AppHandle, _path: String) -> Result<(), String> {
     Err("Clipboard image copy not supported on Android".to_string())
 }
 
@@ -1914,70 +1920,203 @@ fn percent_decode(s: &str) -> String {
     result
 }
 
-// ── Open file/URL with system default handler ──
+// ── Open files and URLs with the system default handler ──
 
-fn xdg_open(arg: &str) -> Result<(), String> {
-    #[cfg(target_os = "linux")]
-    {
-        let mut cmd = std::process::Command::new("xdg-open");
-        cmd.arg(arg);
-        // Clear AppImage environment so child processes find host binaries
-        // (e.g. gio-launch-desktop on GNOME)
-        if std::env::var("APPIMAGE").is_ok() {
-            cmd.env_remove("LD_LIBRARY_PATH")
-                .env_remove("LD_PRELOAD")
-                .env_remove("GIO_LAUNCHED_DESKTOP_FILE")
-                .env_remove("GIO_LAUNCHED_DESKTOP_FILE_PID");
-            if let Ok(original_path) = std::env::var("PATH_ORIG") {
-                cmd.env("PATH", original_path);
-            }
+fn active_vault_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
+    let state = app.state::<AppState>();
+    let config = state.config.lock().map_err(|error| error.to_string())?;
+    config
+        .active_vault
+        .as_deref()
+        .map(PathBuf::from)
+        .ok_or_else(|| "No active vault".to_string())
+}
+
+fn path_is_in_active_vault<R: Runtime>(app: &AppHandle<R>, path: &Path) -> bool {
+    let Ok(vault) = active_vault_path(app)
+        .and_then(|path| std::fs::canonicalize(path).map_err(|error| error.to_string()))
+    else {
+        return false;
+    };
+    let canonical = if path.exists() {
+        std::fs::canonicalize(path).ok()
+    } else {
+        path.parent()
+            .and_then(|parent| std::fs::canonicalize(parent).ok())
+    };
+    canonical.is_some_and(|path| path.starts_with(vault))
+}
+
+fn ensure_scoped_path<R: Runtime>(app: &AppHandle<R>, path: &Path) -> Result<(), String> {
+    if app.fs_scope().is_allowed(path) {
+        Ok(())
+    } else {
+        Err("Path was not selected by the user".to_string())
+    }
+}
+
+fn ensure_readable_path<R: Runtime>(app: &AppHandle<R>, path: &Path) -> Result<(), String> {
+    if path.is_file() && (path_is_in_active_vault(app, path) || app.fs_scope().is_allowed(path)) {
+        Ok(())
+    } else {
+        Err("File must be inside the active vault or selected by the user".to_string())
+    }
+}
+
+fn ensure_writable_path<R: Runtime>(app: &AppHandle<R>, path: &Path) -> Result<(), String> {
+    if path_is_in_active_vault(app, path) || app.fs_scope().is_allowed(path) {
+        Ok(())
+    } else {
+        Err("Destination must be inside the active vault or selected by the user".to_string())
+    }
+}
+
+fn validate_external_url(url: &str) -> Result<(), String> {
+    if url.chars().any(char::is_whitespace) {
+        return Err("URL must not contain whitespace".to_string());
+    }
+    let parsed = reqwest::Url::parse(url).map_err(|_| "Invalid URL".to_string())?;
+    match parsed.scheme() {
+        "http" | "https" | "mailto" | "tel" | "sms" => Ok(()),
+        _ => Err("Unsupported URL scheme".to_string()),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn open_linux(argument: &std::ffi::OsStr) -> Result<(), String> {
+    let mut command = std::process::Command::new("xdg-open");
+    command.arg(argument);
+    if std::env::var("APPIMAGE").is_ok() {
+        command
+            .env_remove("LD_LIBRARY_PATH")
+            .env_remove("LD_PRELOAD")
+            .env_remove("GIO_LAUNCHED_DESKTOP_FILE")
+            .env_remove("GIO_LAUNCHED_DESKTOP_FILE_PID");
+        if let Ok(original_path) = std::env::var("PATH_ORIG") {
+            command.env("PATH", original_path);
         }
-        cmd.spawn()
-            .map_err(|e| format!("Failed to open {}: {}", arg, e))?;
     }
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(arg)
-            .spawn()
-            .map_err(|e| format!("Failed to open {}: {}", arg, e))?;
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("Failed to open item: {error}"))
+}
+
+fn open_path_with_system(path: &Path) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    return open_linux(path.as_os_str());
+
+    #[cfg(not(target_os = "linux"))]
+    tauri_plugin_opener::open_path(path, None::<&str>).map_err(|error| error.to_string())
+}
+
+fn open_url_with_system(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    return open_linux(std::ffi::OsStr::new(url));
+
+    #[cfg(not(target_os = "linux"))]
+    tauri_plugin_opener::open_url(url, None::<&str>).map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod external_access_tests {
+    use super::{ensure_readable_path, ensure_writable_path, validate_external_url};
+    use crate::state::AppState;
+    use crate::types::AppConfig;
+    use std::fs;
+    use tauri_plugin_fs::FsExt;
+
+    #[test]
+    fn external_urls_allow_supported_schemes() {
+        for url in [
+            "https://helixnotes.com",
+            "http://example.com",
+            "mailto:hello@example.com",
+            "tel:+123456789",
+            "sms:+123456789",
+        ] {
+            assert!(validate_external_url(url).is_ok(), "{url}");
+        }
     }
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW: open the URL/path without flashing a console window.
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", arg])
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn()
-            .map_err(|e| format!("Failed to open {}: {}", arg, e))?;
+
+    #[test]
+    fn external_urls_reject_commands_and_unsupported_schemes() {
+        for url in [
+            "https://example.com & calc.exe",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "not a URL",
+        ] {
+            assert!(validate_external_url(url).is_err(), "{url}");
+        }
     }
-    #[cfg(mobile)]
-    {
-        let _ = arg;
+
+    #[test]
+    fn file_access_requires_the_active_vault_or_an_explicit_user_scope() {
+        let root = std::env::temp_dir().join(format!(
+            "helixnotes-external-access-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let vault = root.join("vault");
+        let vault_file = vault.join("note.md");
+        let outside_file = root.join("outside.txt");
+        let outside_destination = root.join("export.txt");
+        fs::create_dir_all(&vault).unwrap();
+        fs::write(&vault_file, b"note").unwrap();
+        fs::write(&outside_file, b"outside").unwrap();
+
+        let config = AppConfig {
+            active_vault: Some(vault.to_string_lossy().into_owned()),
+            ..Default::default()
+        };
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_fs::init())
+            .manage(AppState::new(config))
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+
+        assert!(ensure_readable_path(app.handle(), &vault_file).is_ok());
+        assert!(ensure_readable_path(app.handle(), &outside_file).is_err());
+        assert!(ensure_writable_path(app.handle(), &outside_destination).is_err());
+
+        app.fs_scope().allow_file(&outside_file).unwrap();
+        app.fs_scope().allow_file(&outside_destination).unwrap();
+        assert!(ensure_readable_path(app.handle(), &outside_file).is_ok());
+        assert!(ensure_writable_path(app.handle(), &outside_destination).is_ok());
+
+        fs::remove_dir_all(root).unwrap();
     }
-    Ok(())
 }
 
 #[tauri::command]
-pub fn open_file(path: String) -> Result<(), String> {
-    xdg_open(&path)
+pub fn open_file(app: AppHandle, path: String) -> Result<(), String> {
+    ensure_readable_path(&app, Path::new(&path))?;
+    open_path_with_system(Path::new(&path))
+}
+
+#[tauri::command]
+pub fn reveal_file(app: AppHandle, path: String) -> Result<(), String> {
+    ensure_readable_path(&app, Path::new(&path))?;
+    tauri_plugin_opener::reveal_item_in_dir(path).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 pub fn open_url(url: String) -> Result<(), String> {
-    xdg_open(&url)
+    validate_external_url(&url)?;
+    open_url_with_system(&url)
 }
 
 #[tauri::command]
-pub fn copy_file_to(source: String, destination: String) -> Result<(), String> {
+pub fn copy_file_to(app: AppHandle, source: String, destination: String) -> Result<(), String> {
+    ensure_readable_path(&app, Path::new(&source))?;
+    ensure_writable_path(&app, Path::new(&destination))?;
     std::fs::copy(&source, &destination).map_err(|e| format!("Failed to copy file: {}", e))?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn write_bytes_to(destination: String, data: Vec<u8>) -> Result<(), String> {
+pub fn write_bytes_to(app: AppHandle, destination: String, data: Vec<u8>) -> Result<(), String> {
+    ensure_writable_path(&app, Path::new(&destination))?;
     std::fs::write(&destination, &data).map_err(|e| format!("Failed to write file: {}", e))?;
     Ok(())
 }
