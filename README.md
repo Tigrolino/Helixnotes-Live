@@ -178,6 +178,14 @@ pnpm install
 pnpm tauri dev
 ```
 
+### Verification
+
+Run the frontend checks and tests, Rust tests and lints, and production frontend build with one command:
+
+```bash
+pnpm verify
+```
+
 ### Production Build
 
 ```bash
