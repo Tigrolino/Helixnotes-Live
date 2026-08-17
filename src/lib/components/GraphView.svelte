@@ -20,12 +20,12 @@
 	interface GraphEdge { sourceIdx: number; targetIdx: number; bidirectional: boolean; }
 	interface LabelRect { x: number; y: number; w: number; h: number; }
 
-	let nodes: GraphNode[] = [];
-	let edges: GraphEdge[] = [];
+	let nodes = $state.raw<GraphNode[]>([]);
+	let edges = $state.raw<GraphEdge[]>([]);
 	let nodeIndexMap: Map<string, number> = new Map();
 	let connectedSet: Set<number> = new Set();
 	let nodeDegree: number[] = [];
-	let searchMatchSet: Set<number> | null = null;
+	let searchMatchSet = $state.raw<Set<number> | null>(null);
 	let folderColorMap = new Map<string, string>();
 
 	let pan = { x: 0, y: 0 };
@@ -40,7 +40,7 @@
 	let hoveredNeighborSet: Set<number> = new Set();
 	let hoveredEdgeSet: Set<number> = new Set();
 	let glowPhase = 0;
-	let activeNodeIdx = -1;
+	let activeNodeIdx = $state(-1);
 	let navigatedFromGraph = false;
 
 	// Combined animation loop
