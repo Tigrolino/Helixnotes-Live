@@ -214,19 +214,21 @@
 			{/if}
 
 			{#if isAndroid}
-			<div class="location-selector">
-				<label class="location-label">Location</label>
+			<div class="location-selector" role="group" aria-labelledby="storage-location-label">
+				<span id="storage-location-label" class="location-label">Location</span>
 				<div class="location-options">
 					{#each storageLocations as loc}
 						<button
 							class="location-option"
 							class:active={selectedLocation === loc.label}
+							aria-pressed={selectedLocation === loc.label}
 							onclick={() => selectedLocation = loc.label}
 						>{loc.label}</button>
 					{/each}
 					<button
 						class="location-option"
 						class:active={selectedLocation === 'Custom'}
+						aria-pressed={selectedLocation === 'Custom'}
 						onclick={() => selectedLocation = 'Custom'}
 					>Custom</button>
 				</div>
