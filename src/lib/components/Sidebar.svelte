@@ -335,6 +335,10 @@
 		}
 	}
 
+	function dismissDeleteConfirm(event: MouseEvent) {
+		if (event.target === event.currentTarget) deleteConfirm = null;
+	}
+
 	async function confirmDelete(nb: NotebookEntry) {
 		deleteConfirm = null;
 		try {
@@ -1029,10 +1033,9 @@
 
 {#if deleteConfirm}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="delete-confirm-overlay" onclick={() => deleteConfirm = null}>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="delete-confirm" class:mobile={isMobile} onclick={(e) => e.stopPropagation()}>
-			<h4>Delete "{deleteConfirm.name}"?</h4>
+	<div class="delete-confirm-overlay" onclick={dismissDeleteConfirm} onkeydown={(e) => { if (e.key === 'Escape') deleteConfirm = null; }}>
+		<div class="delete-confirm" class:mobile={isMobile} role="alertdialog" aria-modal="true" aria-labelledby="delete-confirm-title" tabindex="-1">
+			<h4 id="delete-confirm-title">Delete "{deleteConfirm.name}"?</h4>
 			<p>This notebook contains {countNotesRecursive(deleteConfirm)} note{countNotesRecursive(deleteConfirm) === 1 ? '' : 's'} that will be permanently deleted.</p>
 			<div class="delete-confirm-actions">
 				<button class="delete-confirm-cancel" onclick={() => deleteConfirm = null}>Cancel</button>
@@ -1071,7 +1074,9 @@
 			class:drop-below={dropTargetPath === nb.path && dropPosition === 'below'}
 			style="padding-left: {4 + depth * 16}px"
 			data-nb-path={nb.path}
-			onclick={() => selectNotebook(nb)}
+			onclick={(e) => {
+				if (!(e.target as Element).closest('.nb-drag-handle')) selectNotebook(nb);
+			}}
 			onkeydown={(e) => {
 				if (e.key === 'F2') {
 					e.preventDefault();
@@ -1153,12 +1158,11 @@
 		{/if}
 			<span class="notebook-name">{nb.name} <span class="notebook-count">{nb.note_count}</span></span>
 			{#if $notebookSortMode === 'manual'}
-				<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<span
 					class="nb-drag-handle"
 					title="Drag to reorder"
 					onpointerdown={(e) => nbHandleDown(e, nb)}
-					onclick={(e) => e.stopPropagation()}
 				>
 					<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="5" r="1.6"/><circle cx="15" cy="5" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="19" r="1.6"/><circle cx="15" cy="19" r="1.6"/></svg>
 				</span>
