@@ -528,8 +528,14 @@ fn apply_changes(
 
         match (l, r) {
             (Some(lf), Some(re)) => {
-                let local_changed = m.map_or(true, |me| me.local_hash != lf.hash);
-                let remote_changed = m.map_or(true, |me| &me.remote_etag != re);
+                let local_changed = match m {
+                    Some(entry) => entry.local_hash != lf.hash,
+                    None => true,
+                };
+                let remote_changed = match m {
+                    Some(entry) => &entry.remote_etag != re,
+                    None => true,
+                };
                 if !local_changed && !remote_changed {
                     new_m.files.insert(
                         key.clone(),

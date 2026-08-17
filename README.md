@@ -166,7 +166,7 @@ Full documentation: [helixnotes.com/docs](https://helixnotes.com/docs.html)
 
 ### Prerequisites
 
-- [Rust](https://rustup.rs/) (1.77+)
+- [Rust](https://rustup.rs/) (1.88+)
 - [Node.js](https://nodejs.org/) (18+)
 - [pnpm](https://pnpm.io/)
 - System dependencies for Tauri: see [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)

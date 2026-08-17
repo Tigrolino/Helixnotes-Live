@@ -251,10 +251,8 @@ fn rename_deprecated_properties(raw: &str) -> String {
                 mapping.insert(new_key, val);
                 renamed = true;
             }
-        } else {
-            if mapping.remove(&old_key).is_some() {
-                renamed = true;
-            }
+        } else if mapping.remove(&old_key).is_some() {
+            renamed = true;
         }
     }
 

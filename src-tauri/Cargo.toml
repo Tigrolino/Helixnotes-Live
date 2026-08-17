@@ -5,7 +5,11 @@ description = "Local markdown note-taking app"
 authors = ["HelixNotes"]
 license = "AGPL-3.0-or-later"
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.88"
+
+[lints.clippy]
+# This style lint is version-dependent and produces over 100 legacy-only diagnostics on Rust 1.88.
+uninlined_format_args = "allow"
 
 [lib]
 name = "app_lib"

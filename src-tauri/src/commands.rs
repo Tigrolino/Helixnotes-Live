@@ -1691,7 +1691,7 @@ pub fn get_vault_stats(state: State<'_, AppState>) -> Result<VaultStats, String>
         .filter(|p| {
             // attachments under .helixnotes count; nothing else in .helixnotes or .trash does
             let s = p.to_string_lossy();
-            !(s.contains("/.helixnotes/") && !s.contains("/.helixnotes/attachments/"))
+            (!s.contains("/.helixnotes/") || s.contains("/.helixnotes/attachments/"))
                 && !s.contains("/.trash/")
         })
         .collect();

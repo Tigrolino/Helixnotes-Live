@@ -141,11 +141,12 @@ fn image_client(host: &str, addresses: &[SocketAddr]) -> Result<Client, ProxyErr
     Client::builder()
         .timeout(Duration::from_secs(30))
         .redirect(Policy::custom(move |attempt| {
+            let redirected_elsewhere = match attempt.url().host_str() {
+                Some(host) => normalized_host(host) != redirect_host,
+                None => true,
+            };
             if attempt.previous().len() >= 5
-                || attempt
-                    .url()
-                    .host_str()
-                    .map_or(true, |host| normalized_host(host) != redirect_host)
+                || redirected_elsewhere
                 || validate_url(attempt.url().as_str()).is_err()
             {
                 attempt.stop()
