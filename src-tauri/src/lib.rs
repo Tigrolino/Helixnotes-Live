@@ -1,4 +1,5 @@
 mod ai;
+mod asset_scope;
 mod backup;
 mod commands;
 mod history;
@@ -91,6 +92,20 @@ pub fn run() {
                 let _ = app.state::<AppState>().config.lock().map(|mut cfg| {
                     *cfg = reloaded;
                 });
+            }
+
+            let active_vault = app
+                .state::<AppState>()
+                .config
+                .lock()
+                .ok()
+                .and_then(|config| config.active_vault.clone());
+            if let Some(vault_path) = active_vault {
+                if let Err(error) =
+                    asset_scope::allow_vault_assets(app.handle(), std::path::Path::new(&vault_path))
+                {
+                    log::warn!("Failed to restore the vault asset scope: {error}");
+                }
             }
 
             #[cfg(desktop)]

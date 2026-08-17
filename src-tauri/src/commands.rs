@@ -1,3 +1,4 @@
+use crate::asset_scope;
 use crate::search::SearchIndex;
 use crate::state::AppState;
 use crate::types::*;
@@ -94,6 +95,7 @@ fn open_vault_path(
     search.rebuild(&path)?;
 
     let new_watcher = watcher::start_watcher(app.clone(), path.clone())?;
+    asset_scope::allow_vault_assets(&app, Path::new(&path))?;
 
     // Update config. External vaults use the bookmark as their stable identity;
     // the resolved path is refreshed whenever the vault opens.
