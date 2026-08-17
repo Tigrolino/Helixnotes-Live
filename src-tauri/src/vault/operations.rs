@@ -17,6 +17,101 @@ pub fn helixnotes_dir(vault_path: &str) -> PathBuf {
     Path::new(vault_path).join(".helixnotes")
 }
 
+fn canonicalize_path(path: &Path, label: &str) -> Result<PathBuf, String> {
+    fs::canonicalize(path).map_err(|error| format!("Invalid {label}: {error}"))
+}
+
+fn ensure_vault_content_path(
+    vault_path: &str,
+    requested_path: &Path,
+    allow_root: bool,
+) -> Result<PathBuf, String> {
+    let vault = canonicalize_path(Path::new(vault_path), "vault path")?;
+    let requested = canonicalize_path(requested_path, "vault item path")?;
+    let metadata = vault.join(".helixnotes");
+
+    if !requested.starts_with(&vault)
+        || requested.starts_with(&metadata)
+        || (!allow_root && requested == vault)
+    {
+        return Err("Path must stay inside the active vault".to_string());
+    }
+
+    Ok(requested_path.to_path_buf())
+}
+
+fn ensure_vault_content_dir(vault_path: &str, requested_path: &Path) -> Result<PathBuf, String> {
+    let requested = ensure_vault_content_path(vault_path, requested_path, true)?;
+    if !requested.is_dir() {
+        return Err("Vault destination is not a directory".to_string());
+    }
+    Ok(requested)
+}
+
+fn ensure_note_path(vault_path: &str, requested_path: &Path) -> Result<PathBuf, String> {
+    let requested = ensure_vault_content_path(vault_path, requested_path, false)?;
+    if !requested.is_file()
+        || requested.extension().and_then(|extension| extension.to_str()) != Some("md")
+    {
+        return Err("Note path must point to a Markdown file".to_string());
+    }
+    Ok(requested)
+}
+
+fn ensure_readable_note_path(vault_path: &str, requested_path: &Path) -> Result<PathBuf, String> {
+    if let Ok(note) = ensure_note_path(vault_path, requested_path) {
+        return Ok(note);
+    }
+
+    let trashed_note = ensure_trash_entry(vault_path, requested_path)?;
+    if !trashed_note.is_file()
+        || trashed_note.extension().and_then(|extension| extension.to_str()) != Some("md")
+    {
+        return Err("Note path must point to a Markdown file".to_string());
+    }
+    Ok(trashed_note)
+}
+
+fn ensure_notebook_path(vault_path: &str, requested_path: &Path) -> Result<PathBuf, String> {
+    let requested = ensure_vault_content_path(vault_path, requested_path, false)?;
+    if !requested.is_dir() {
+        return Err("Notebook path must point to a directory".to_string());
+    }
+    Ok(requested)
+}
+
+fn ensure_trash_entry(vault_path: &str, requested_path: &Path) -> Result<PathBuf, String> {
+    let trash = canonicalize_path(&helixnotes_dir(vault_path).join("trash"), "trash path")?;
+    let requested = canonicalize_path(requested_path, "trash item path")?;
+    if requested == trash || !requested.starts_with(&trash) {
+        return Err("Path must be an item inside the active vault trash".to_string());
+    }
+    Ok(requested_path.to_path_buf())
+}
+
+fn safe_relative_path(path: &str) -> Result<&Path, String> {
+    let relative = Path::new(path);
+    if relative.as_os_str().is_empty()
+        || !relative
+            .components()
+            .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
+    {
+        return Err("Path must be a safe vault-relative path".to_string());
+    }
+    Ok(relative)
+}
+
+fn safe_child_name(name: &str) -> Result<&str, String> {
+    let mut components = Path::new(name).components();
+    if name.trim().is_empty()
+        || !matches!(components.next(), Some(Component::Normal(_)))
+        || components.next().is_some()
+    {
+        return Err("Name must not contain path separators".to_string());
+    }
+    Ok(name)
+}
+
 pub fn ensure_vault_structure(vault_path: &str) -> Result<(), String> {
     let hn_dir = helixnotes_dir(vault_path);
     fs::create_dir_all(hn_dir.join("trash")).map_err(|e| e.to_string())?;
@@ -243,6 +338,7 @@ pub fn count_root_notes(vault_path: &str) -> Result<usize, String> {
 pub fn scan_notes(vault_path: &str, notebook_path: Option<&str>) -> Result<Vec<NoteEntry>, String> {
     let scan_path = notebook_path.unwrap_or(vault_path);
     let root = Path::new(scan_path);
+    ensure_vault_content_dir(vault_path, root)?;
     let vault_root = Path::new(vault_path);
 
     log::info!("scan_notes: vault={}, scan={}, exists={}", vault_path, scan_path, root.exists());
@@ -423,8 +519,18 @@ fn read_note_entry_from_str(
     })
 }
 
-pub fn read_note(path: &str) -> Result<NoteContent, String> {
-    let p = Path::new(path);
+pub fn read_note(vault_path: &str, path: &str) -> Result<NoteContent, String> {
+    let validated = ensure_readable_note_path(vault_path, Path::new(path))?;
+    read_note_content(&validated, path)
+}
+
+pub fn read_vault_note(vault_path: &str, path: &str) -> Result<NoteContent, String> {
+    let validated = ensure_note_path(vault_path, Path::new(path))?;
+    read_note_content(&validated, path)
+}
+
+fn read_note_content(validated: &Path, reported_path: &str) -> Result<NoteContent, String> {
+    let p = validated;
     let raw = fs::read_to_string(p).map_err(|e| e.to_string())?;
     let filename = p
         .file_name()
@@ -454,14 +560,15 @@ pub fn read_note(path: &str) -> Result<NoteContent, String> {
     }
 
     Ok(NoteContent {
-        path: path.to_string(),
+        path: reported_path.to_string(),
         meta,
         content,
         raw,
     })
 }
 
-pub fn save_note(path: &str, meta: &NoteMeta, body: &str) -> Result<(), String> {
+pub fn save_note(vault_path: &str, path: &str, meta: &NoteMeta, body: &str) -> Result<(), String> {
+    let path = ensure_note_path(vault_path, Path::new(path))?;
     let mut updated_meta = meta.clone();
     updated_meta.modified = Utc::now();
 
@@ -471,7 +578,7 @@ pub fn save_note(path: &str, meta: &NoteMeta, body: &str) -> Result<(), String> 
     }
 
     // Read existing file to preserve unknown frontmatter fields
-    let existing = fs::read_to_string(path).unwrap_or_default();
+    let existing = fs::read_to_string(&path).unwrap_or_default();
     let raw = if existing.is_empty() {
         frontmatter::update_note_raw(&updated_meta, body)
     } else {
@@ -487,14 +594,11 @@ pub fn create_note(
     notebook_relative: Option<&str>,
     title: &str,
 ) -> Result<NoteEntry, String> {
-    let dir = match notebook_relative {
-        Some(rel) => Path::new(vault_path).join(rel),
+    let requested_dir = match notebook_relative {
+        Some(rel) => Path::new(vault_path).join(safe_relative_path(rel)?),
         None => PathBuf::from(vault_path),
     };
-
-    if !dir.exists() {
-        return Err("Notebook directory does not exist".to_string());
-    }
+    let dir = ensure_vault_content_dir(vault_path, &requested_dir)?;
 
     let filename = sanitize_filename(title);
     let mut file_path = dir.join(format!("{}.md", filename));
@@ -535,10 +639,8 @@ pub fn create_note(
 }
 
 pub fn duplicate_note(path: &str, vault_path: &str) -> Result<NoteEntry, String> {
-    let src = Path::new(path);
-    if !src.is_file() {
-        return Err("Note does not exist".to_string());
-    }
+    let validated = ensure_note_path(vault_path, Path::new(path))?;
+    let src = validated.as_path();
 
     let parent = src
         .parent()
@@ -719,12 +821,12 @@ pub fn create_notebook(
     parent_relative: Option<&str>,
     name: &str,
 ) -> Result<NotebookEntry, String> {
-    let parent = match parent_relative {
-        Some(rel) => Path::new(vault_path).join(rel),
+    let requested_parent = match parent_relative {
+        Some(rel) => Path::new(vault_path).join(safe_relative_path(rel)?),
         None => PathBuf::from(vault_path),
     };
-
-    let dir_path = parent.join(name);
+    let parent = ensure_vault_content_dir(vault_path, &requested_parent)?;
+    let dir_path = parent.join(safe_child_name(name)?);
     if dir_path.exists() {
         return Err("Notebook already exists".to_string());
     }
@@ -748,10 +850,8 @@ pub fn create_notebook(
 }
 
 pub fn delete_note(vault_path: &str, note_path: &str) -> Result<(), String> {
-    let src = Path::new(note_path);
-    if !src.exists() {
-        return Err("Note does not exist".to_string());
-    }
+    let validated = ensure_note_path(vault_path, Path::new(note_path))?;
+    let src = validated.as_path();
 
     let trash_dir = helixnotes_dir(vault_path).join("trash");
     fs::create_dir_all(&trash_dir).map_err(|e| e.to_string())?;
@@ -771,10 +871,8 @@ pub fn delete_note(vault_path: &str, note_path: &str) -> Result<(), String> {
 }
 
 pub fn delete_notebook(vault_path: &str, notebook_path: &str) -> Result<(), String> {
-    let src = Path::new(notebook_path);
-    if !src.exists() {
-        return Err("Notebook does not exist".to_string());
-    }
+    let validated = ensure_notebook_path(vault_path, Path::new(notebook_path))?;
+    let src = validated.as_path();
 
     let trash_dir = helixnotes_dir(vault_path).join("trash");
     fs::create_dir_all(&trash_dir).map_err(|e| e.to_string())?;
@@ -803,10 +901,8 @@ pub fn delete_notebook(vault_path: &str, notebook_path: &str) -> Result<(), Stri
 }
 
 pub fn rename_note(path: &str, new_title: &str, vault_path: &str) -> Result<String, String> {
-    let src = Path::new(path);
-    if !src.exists() {
-        return Err("Note does not exist".to_string());
-    }
+    let validated = ensure_note_path(vault_path, Path::new(path))?;
+    let src = validated.as_path();
 
     // Read old title before renaming
     let raw = fs::read_to_string(src).map_err(|e| e.to_string())?;
@@ -966,13 +1062,11 @@ fn update_wikilinks_after_rename(
     }
 }
 
-pub fn rename_notebook(path: &str, new_name: &str) -> Result<String, String> {
-    let src = Path::new(path);
-    if !src.exists() {
-        return Err("Notebook does not exist".to_string());
-    }
+pub fn rename_notebook(vault_path: &str, path: &str, new_name: &str) -> Result<String, String> {
+    let validated = ensure_notebook_path(vault_path, Path::new(path))?;
+    let src = validated.as_path();
 
-    let new_path = src.parent().unwrap().join(new_name);
+    let new_path = src.parent().unwrap().join(safe_child_name(new_name)?);
     if new_path.exists() {
         return Err("A notebook with that name already exists".to_string());
     }
@@ -981,13 +1075,12 @@ pub fn rename_notebook(path: &str, new_name: &str) -> Result<String, String> {
     Ok(new_path.to_string_lossy().to_string())
 }
 
-pub fn move_note(note_path: &str, dest_notebook: &str) -> Result<String, String> {
-    let src = Path::new(note_path);
-    if !src.exists() {
-        return Err("Note does not exist".to_string());
-    }
+pub fn move_note(vault_path: &str, note_path: &str, dest_notebook: &str) -> Result<String, String> {
+    let validated = ensure_note_path(vault_path, Path::new(note_path))?;
+    let src = validated.as_path();
 
-    let dest_dir = Path::new(dest_notebook);
+    let validated_dest = ensure_vault_content_dir(vault_path, Path::new(dest_notebook))?;
+    let dest_dir = validated_dest.as_path();
     if !dest_dir.is_dir() {
         return Err("Destination notebook does not exist".to_string());
     }
@@ -999,13 +1092,16 @@ pub fn move_note(note_path: &str, dest_notebook: &str) -> Result<String, String>
     Ok(dest.to_string_lossy().to_string())
 }
 
-pub fn move_notebook(notebook_path: &str, dest_parent: &str) -> Result<String, String> {
-    let src = Path::new(notebook_path);
-    if !src.exists() || !src.is_dir() {
-        return Err("Notebook does not exist".to_string());
-    }
+pub fn move_notebook(
+    vault_path: &str,
+    notebook_path: &str,
+    dest_parent: &str,
+) -> Result<String, String> {
+    let validated = ensure_notebook_path(vault_path, Path::new(notebook_path))?;
+    let src = validated.as_path();
 
-    let dest_parent_path = Path::new(dest_parent);
+    let validated_dest = ensure_vault_content_dir(vault_path, Path::new(dest_parent))?;
+    let dest_parent_path = validated_dest.as_path();
     if !dest_parent_path.is_dir() {
         return Err("Destination does not exist".to_string());
     }
@@ -1101,15 +1197,17 @@ pub fn restore_note(
     trash_path: &str,
     dest_notebook: Option<&str>,
 ) -> Result<String, String> {
-    let src = Path::new(trash_path);
-    if !src.exists() {
+    let validated = ensure_trash_entry(vault_path, Path::new(trash_path))?;
+    let src = validated.as_path();
+    if !src.is_file() {
         return Err("Trashed note does not exist".to_string());
     }
 
-    let dest_dir = match dest_notebook {
+    let requested_dest = match dest_notebook {
         Some(nb) => PathBuf::from(nb),
         None => PathBuf::from(vault_path),
     };
+    let dest_dir = ensure_vault_content_dir(vault_path, &requested_dest)?;
 
     // Strip timestamp prefix from trash filename (17-char with millis or 14-char legacy)
     let filename = src.file_name().unwrap_or_default().to_string_lossy();
@@ -1132,8 +1230,9 @@ pub fn restore_note(
 }
 
 pub fn restore_notebook(vault_path: &str, trash_path: &str) -> Result<String, String> {
-    let src = Path::new(trash_path);
-    if !src.exists() || !src.is_dir() {
+    let validated = ensure_trash_entry(vault_path, Path::new(trash_path))?;
+    let src = validated.as_path();
+    if !src.is_dir() {
         return Err("Trashed notebook does not exist".to_string());
     }
 
@@ -1156,7 +1255,7 @@ pub fn restore_notebook(vault_path: &str, trash_path: &str) -> Result<String, St
         name.to_string()
     };
 
-    let dest = Path::new(vault_path).join(&relative);
+    let dest = Path::new(vault_path).join(safe_relative_path(&relative)?);
 
     // Recreate parent directories if needed
     if let Some(parent) = dest.parent() {
@@ -1170,7 +1269,8 @@ pub fn restore_notebook(vault_path: &str, trash_path: &str) -> Result<String, St
 }
 
 pub fn permanent_delete(vault_path: &str, path: &str) -> Result<(), String> {
-    let p = Path::new(path);
+    let validated = ensure_trash_entry(vault_path, Path::new(path))?;
+    let p = validated.as_path();
     let parent = p.parent().map(|pp| pp.to_path_buf());
     if p.is_dir() {
         fs::remove_dir_all(p).map_err(|e| e.to_string())?;
@@ -1431,8 +1531,9 @@ pub fn sanitize_filename(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        compare_natural_names, duplicate_note, get_note_switcher_titles, helixnotes_dir,
-        load_notebook_icons, scan_notebooks, set_notebook_icon,
+        compare_natural_names, create_notebook, duplicate_note, get_note_switcher_titles,
+        helixnotes_dir, load_notebook_icons, permanent_delete, read_note, restore_notebook,
+        scan_notebooks, set_notebook_icon,
     };
     use std::fs;
     use uuid::Uuid;
@@ -1590,6 +1691,75 @@ mod tests {
 
         fs::remove_dir_all(vault).unwrap();
         fs::remove_file(outside).unwrap();
+    }
+
+    #[test]
+    fn reads_markdown_notes_from_trash_without_allowing_external_files() {
+        let test_root =
+            std::env::temp_dir().join(format!("helixnotes-path-security-test-{}", Uuid::new_v4()));
+        let vault = test_root.join("vault");
+        let trash = helixnotes_dir(&vault.to_string_lossy()).join("trash");
+        let trashed_note = trash.join("20240101000000000_Note.md");
+        let outside = test_root.join("outside.md");
+        fs::create_dir_all(&trash).unwrap();
+        fs::write(&trashed_note, "---\ntitle: Note\n---\n\ntrashed").unwrap();
+        fs::write(&outside, "outside").unwrap();
+
+        assert!(read_note(&vault.to_string_lossy(), &trashed_note.to_string_lossy()).is_ok());
+        assert!(read_note(&vault.to_string_lossy(), &outside.to_string_lossy()).is_err());
+
+        fs::remove_dir_all(test_root).unwrap();
+    }
+
+    #[test]
+    fn rejects_permanent_deletion_outside_trash() {
+        let test_root =
+            std::env::temp_dir().join(format!("helixnotes-path-security-test-{}", Uuid::new_v4()));
+        let vault = test_root.join("vault");
+        let outside = test_root.join("outside.md");
+        fs::create_dir_all(helixnotes_dir(&vault.to_string_lossy()).join("trash")).unwrap();
+        fs::write(&outside, "must survive").unwrap();
+
+        let result = permanent_delete(&vault.to_string_lossy(), &outside.to_string_lossy());
+
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(&outside).unwrap(), "must survive");
+        fs::remove_dir_all(test_root).unwrap();
+    }
+
+    #[test]
+    fn rejects_notebook_creation_outside_vault() {
+        let test_root =
+            std::env::temp_dir().join(format!("helixnotes-path-security-test-{}", Uuid::new_v4()));
+        let vault = test_root.join("vault");
+        fs::create_dir_all(&vault).unwrap();
+
+        let result = create_notebook(&vault.to_string_lossy(), Some(".."), "escaped");
+
+        assert!(result.is_err());
+        assert!(!test_root.join("escaped").exists());
+        fs::remove_dir_all(test_root).unwrap();
+    }
+
+    #[test]
+    fn rejects_traversal_in_restored_notebook_metadata() {
+        let test_root =
+            std::env::temp_dir().join(format!("helixnotes-path-security-test-{}", Uuid::new_v4()));
+        let vault = test_root.join("vault");
+        let trash = helixnotes_dir(&vault.to_string_lossy()).join("trash");
+        let trashed_notebook = trash.join("20240101000000000_Notebook");
+        fs::create_dir_all(&trashed_notebook).unwrap();
+        fs::write(trash.join("20240101000000000_Notebook.meta"), "../escaped").unwrap();
+
+        let result = restore_notebook(
+            &vault.to_string_lossy(),
+            &trashed_notebook.to_string_lossy(),
+        );
+
+        assert!(result.is_err());
+        assert!(trashed_notebook.exists());
+        assert!(!test_root.join("escaped").exists());
+        fs::remove_dir_all(test_root).unwrap();
     }
 
     #[test]

@@ -513,8 +513,14 @@ pub fn create_notebook(
 }
 
 #[tauri::command]
-pub fn rename_notebook(path: String, new_name: String) -> Result<String, String> {
-    operations::rename_notebook(&path, &new_name)
+pub fn rename_notebook(
+    state: State<'_, AppState>,
+    path: String,
+    new_name: String,
+) -> Result<String, String> {
+    let config = state.config.lock().map_err(|error| error.to_string())?;
+    let vault_path = config.active_vault.as_ref().ok_or("No active vault")?;
+    operations::rename_notebook(vault_path, &path, &new_name)
 }
 
 #[tauri::command]
@@ -531,7 +537,7 @@ pub fn move_notebook(
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    let new_full_path = operations::move_notebook(&notebook_path, &dest_parent)?;
+    let new_full_path = operations::move_notebook(vault_path, &notebook_path, &dest_parent)?;
 
     let new_relative = Path::new(&new_full_path)
         .strip_prefix(vault_path.as_str())
@@ -612,8 +618,10 @@ pub fn get_notes(
 }
 
 #[tauri::command]
-pub fn read_note(path: String) -> Result<NoteContent, String> {
-    operations::read_note(&path)
+pub fn read_note(state: State<'_, AppState>, path: String) -> Result<NoteContent, String> {
+    let config = state.config.lock().map_err(|error| error.to_string())?;
+    let vault_path = config.active_vault.as_ref().ok_or("No active vault")?;
+    operations::read_note(vault_path, &path)
 }
 
 #[tauri::command]
@@ -623,24 +631,23 @@ pub fn save_note(
     meta: NoteMeta,
     body: String,
 ) -> Result<(), String> {
-    // Snapshot current content before overwriting (if file exists)
-    let config = state.config.lock().map_err(|e| e.to_string())?;
-    if let Some(vault_path) = &config.active_vault {
-        if std::path::Path::new(&path).exists() {
-            if let Ok(old_raw) = std::fs::read_to_string(&path) {
-                let max_versions = config.max_versions_per_note;
-                let note_id = meta.id.clone();
-                let vp = vault_path.clone();
-                // Snapshot in background so save isn't slowed down
-                std::thread::spawn(move || {
-                    crate::history::maybe_snapshot(&vp, &note_id, &old_raw, max_versions);
-                });
-            }
-        }
-    }
+    let config = state.config.lock().map_err(|error| error.to_string())?;
+    let vault_path = config
+        .active_vault
+        .as_ref()
+        .ok_or("No active vault")?
+        .clone();
+    let max_versions = config.max_versions_per_note;
+    let old_raw = operations::read_vault_note(&vault_path, &path)?.raw;
     drop(config);
 
-    operations::save_note(&path, &meta, &body)?;
+    let note_id = meta.id.clone();
+    let snapshot_vault = vault_path.clone();
+    std::thread::spawn(move || {
+        crate::history::maybe_snapshot(&snapshot_vault, &note_id, &old_raw, max_versions);
+    });
+
+    operations::save_note(&vault_path, &path, &meta, &body)?;
 
 	// Re-index note so search picks up changes (background to avoid blocking on FUSE fsync)
 	index_note_bg(&state, &path);
@@ -724,7 +731,7 @@ pub fn move_note(
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    let new_full_path = operations::move_note(&note_path, &dest_notebook)?;
+    let new_full_path = operations::move_note(vault_path, &note_path, &dest_notebook)?;
 
     // Update quick access if the moved note was in it
     if !old_relative.is_empty() {
@@ -1057,6 +1064,21 @@ pub fn get_tasks(state: State<'_, AppState>) -> Result<Vec<crate::types::TaskIte
     Ok(tasks)
 }
 
+fn read_task_note(
+    state: &State<'_, AppState>,
+    note_path: &str,
+) -> Result<(String, NoteMeta, String), String> {
+    let config = state.config.lock().map_err(|error| error.to_string())?;
+    let vault_path = config
+        .active_vault
+        .as_ref()
+        .ok_or("No active vault")?
+        .clone();
+    drop(config);
+    let note = operations::read_vault_note(&vault_path, note_path)?;
+    Ok((vault_path, note.meta, note.content))
+}
+
 fn toggle_checkbox_line(line: &str, done: bool) -> String {
     let mut s = line.to_string();
     if done {
@@ -1082,11 +1104,7 @@ pub fn set_task_done(
     raw_line: String,
     done: bool,
 ) -> Result<(), String> {
-    let p = std::path::Path::new(&note_path);
-    let raw = std::fs::read_to_string(p).map_err(|e| e.to_string())?;
-    let filename = p.file_name().unwrap_or_default().to_string_lossy().to_string();
-    let (meta, body) = crate::vault::frontmatter::parse_note(&raw, &filename);
-
+    let (vault_path, meta, body) = read_task_note(&state, &note_path)?;
     let mut lines: Vec<String> = body.lines().map(|l| l.to_string()).collect();
     // Verify the expected line; if the note drifted, fall back to the first exact match.
     let idx = if lines.get(line).map(|l| *l == raw_line).unwrap_or(false) {
@@ -1107,7 +1125,7 @@ pub fn set_task_done(
     if body.ends_with('\n') && !new_body.ends_with('\n') {
         new_body.push('\n');
     }
-    operations::save_note(&note_path, &meta, &new_body)?;
+    operations::save_note(&vault_path, &note_path, &meta, &new_body)?;
 
     	index_note_bg(&state, &note_path);
     Ok(())
@@ -1140,11 +1158,7 @@ pub fn set_task_priority(
         Some(_) => return Err("Invalid priority".to_string()),
     };
 
-    let p = std::path::Path::new(&note_path);
-    let raw = std::fs::read_to_string(p).map_err(|e| e.to_string())?;
-    let filename = p.file_name().unwrap_or_default().to_string_lossy().to_string();
-    let (meta, body) = crate::vault::frontmatter::parse_note(&raw, &filename);
-
+    let (vault_path, meta, body) = read_task_note(&state, &note_path)?;
     let mut lines: Vec<String> = body.lines().map(|l| l.to_string()).collect();
     let idx = if lines.get(line).map(|l| *l == raw_line).unwrap_or(false) {
         line
@@ -1164,7 +1178,7 @@ pub fn set_task_priority(
     if body.ends_with('\n') && !new_body.ends_with('\n') {
         new_body.push('\n');
     }
-    operations::save_note(&note_path, &meta, &new_body)?;
+    operations::save_note(&vault_path, &note_path, &meta, &new_body)?;
 
     index_note_bg(&state, &note_path);
     Ok(())
@@ -1196,11 +1210,7 @@ pub fn set_task_due(
         Some(_) => return Err("Invalid due date".to_string()),
     };
 
-    let p = std::path::Path::new(&note_path);
-    let raw = std::fs::read_to_string(p).map_err(|e| e.to_string())?;
-    let filename = p.file_name().unwrap_or_default().to_string_lossy().to_string();
-    let (meta, body) = crate::vault::frontmatter::parse_note(&raw, &filename);
-
+    let (vault_path, meta, body) = read_task_note(&state, &note_path)?;
     let mut lines: Vec<String> = body.lines().map(|l| l.to_string()).collect();
     let idx = if lines.get(line).map(|l| *l == raw_line).unwrap_or(false) {
         line
@@ -1220,7 +1230,7 @@ pub fn set_task_due(
     if body.ends_with('\n') && !new_body.ends_with('\n') {
         new_body.push('\n');
     }
-    operations::save_note(&note_path, &meta, &new_body)?;
+    operations::save_note(&vault_path, &note_path, &meta, &new_body)?;
 
     index_note_bg(&state, &note_path);
     Ok(())
