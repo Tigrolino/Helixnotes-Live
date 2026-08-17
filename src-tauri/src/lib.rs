@@ -3,6 +3,7 @@ mod asset_scope;
 mod backup;
 mod commands;
 mod history;
+mod image_proxy;
 mod search;
 mod state;
 mod sync;
@@ -252,72 +253,21 @@ pub fn run() {
             std::thread::spawn(move || {
                 let encoded = path.strip_prefix('/').unwrap_or(&path);
                 let external_url = percent_decode(encoded);
-
-                if !external_url.starts_with("http://") && !external_url.starts_with("https://") {
-                    responder.respond(
+                let response = match image_proxy::fetch(&external_url) {
+                    Ok(image) => tauri::http::Response::builder()
+                        .status(200)
+                        .header("Content-Type", image.content_type)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .header("X-Content-Type-Options", "nosniff")
+                        .body(image.body),
+                    Err(error) => {
+                        log::warn!("Blocked external image request: {}", error.message());
                         tauri::http::Response::builder()
-                            .status(400)
+                            .status(error.status())
                             .body(Vec::new())
-                            .unwrap(),
-                    );
-                    return;
-                }
-
-                let client = match reqwest::blocking::Client::builder()
-                    .timeout(std::time::Duration::from_secs(30))
-                    .build()
-                {
-                    Ok(c) => c,
-                    Err(_) => {
-                        responder.respond(
-                            tauri::http::Response::builder()
-                                .status(502)
-                                .body(Vec::new())
-                                .unwrap(),
-                        );
-                        return;
                     }
                 };
-
-                match client.get(&external_url).send() {
-                    Ok(resp) => {
-                        let content_type = resp
-                            .headers()
-                            .get("content-type")
-                            .and_then(|h| h.to_str().ok())
-                            .unwrap_or("application/octet-stream")
-                            .to_string();
-                        let status = resp.status().as_u16();
-                        match resp.bytes() {
-                            Ok(bytes) => {
-                                responder.respond(
-                                    tauri::http::Response::builder()
-                                        .status(status)
-                                        .header("Content-Type", &content_type)
-                                        .header("Access-Control-Allow-Origin", "*")
-                                        .body(bytes.to_vec())
-                                        .unwrap(),
-                                );
-                            }
-                            Err(_) => {
-                                responder.respond(
-                                    tauri::http::Response::builder()
-                                        .status(502)
-                                        .body(Vec::new())
-                                        .unwrap(),
-                                );
-                            }
-                        }
-                    }
-                    Err(_) => {
-                        responder.respond(
-                            tauri::http::Response::builder()
-                                .status(502)
-                                .body(Vec::new())
-                                .unwrap(),
-                        );
-                    }
-                }
+                responder.respond(response.expect("valid image proxy response"));
             });
         });
 
