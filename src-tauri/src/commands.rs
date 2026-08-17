@@ -2463,10 +2463,56 @@ fn migrate_global_sync_to_vault(config: &mut AppConfig) -> bool {
     true
 }
 
+fn write_private_file(path: &std::path::Path, data: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).truncate(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+
+    let mut file = options.open(path).map_err(|error| error.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .map_err(|error| error.to_string())?;
+    }
+    file.write_all(data).map_err(|error| error.to_string())
+}
+
+#[cfg(all(test, unix))]
+mod config_permission_tests {
+    use super::write_private_file;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn config_files_are_owner_only() {
+        let path = std::env::temp_dir().join(format!(
+            "helixnotes-config-permissions-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&path, "old").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        write_private_file(&path, b"secret").unwrap();
+
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), b"secret");
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
 fn save_app_config(config: &AppConfig) -> Result<(), String> {
     let path = app_config_path()?;
     let data = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
-    std::fs::write(path, data).map_err(|e| e.to_string())?;
+    write_private_file(&path, data.as_bytes())?;
     Ok(())
 }
 
