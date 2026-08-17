@@ -2026,9 +2026,8 @@ pub fn create_version(
     let config = state.config.lock().map_err(|e| e.to_string())?;
     let vault_path = config.active_vault.as_ref().ok_or("No active vault")?;
     let max_versions = config.max_versions_per_note;
-    let raw = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    crate::history::force_snapshot(vault_path, &note_id, &raw, max_versions);
-    Ok(())
+    let raw = operations::read_vault_note(vault_path, &path)?.raw;
+    crate::history::force_snapshot(vault_path, &note_id, &raw, max_versions)
 }
 
 #[tauri::command]
