@@ -744,6 +744,10 @@
 		closeCustomThemeEditor();
 	}
 
+	function cancelCustomThemeFromOverlay(event: MouseEvent) {
+		if (event.target === event.currentTarget) cancelCustomThemeEditor();
+	}
+
 	async function selectCustomTheme(ct: CustomTheme) {
 		$theme = ct.id;
 		setTheme(ct.id);
@@ -1052,6 +1056,14 @@
 		$showSettings = false;
 	}
 
+	function closeSettingsFromOverlay(event: MouseEvent) {
+		if (event.target === event.currentTarget) close();
+	}
+
+	function dismissRestoreConfirm(event: MouseEvent) {
+		if (event.target === event.currentTarget) restoreConfirm = null;
+	}
+
 	// Apply saved settings on mount
 	$effect(() => {
 		const savedAccent = $appConfig?.accent_color;
@@ -1127,12 +1139,11 @@
 
 {#if $showSettings}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="settings-overlay" class:mobile={isMobile} onclick={close} onkeydown={(e) => { if (e.key === 'Escape') close(); }}>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="settings-panel" class:mobile={isMobile} onclick={(e) => e.stopPropagation()}>
+	<div class="settings-overlay" class:mobile={isMobile} onclick={closeSettingsFromOverlay} onkeydown={(e) => { if (e.key === 'Escape') close(); }}>
+		<div class="settings-panel" class:mobile={isMobile} role="dialog" aria-modal="true" aria-labelledby="settings-title" tabindex="-1">
 			<div class="settings-header">
-				<h2>Settings</h2>
-				<button class="close-btn" onclick={close}>
+				<h2 id="settings-title">Settings</h2>
+				<button class="close-btn" onclick={close} aria-label="Close settings">
 					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 						<line x1="18" y1="6" x2="6" y2="18" />
 						<line x1="6" y1="6" x2="18" y2="18" />
@@ -1214,7 +1225,7 @@
 										<span class="setting-name">Compact mode</span>
 										<span class="setting-desc">Show notes in a denser layout without preview</span>
 									</span>
-									<button class="toggle-switch" class:on={compactNotes} onclick={() => { compactNotes = !compactNotes; saveGeneralSettings(); }}>
+									<button class="toggle-switch" class:on={compactNotes} role="switch" aria-checked={compactNotes} aria-label="Compact notes" onclick={() => { compactNotes = !compactNotes; saveGeneralSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
@@ -1223,7 +1234,7 @@
 										<span class="setting-name">Show dates</span>
 										<span class="setting-desc">Show the date next to each note in the list</span>
 									</span>
-									<button class="toggle-switch" class:on={showNoteDates} onclick={() => { showNoteDates = !showNoteDates; saveGeneralSettings(); }}>
+									<button class="toggle-switch" class:on={showNoteDates} role="switch" aria-checked={showNoteDates} aria-label="Show note dates" onclick={() => { showNoteDates = !showNoteDates; saveGeneralSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
@@ -1231,12 +1242,12 @@
 
 							<div class="settings-section">
 								<h3>Notebooks</h3>
-								<label class="setting-toggle">
+								<div class="setting-toggle">
 									<span class="setting-label">
 										<span class="setting-name">Sort order</span>
 										<span class="setting-desc">Alphabetical (default) or manual. Drag notebooks above/below each other to reorder.</span>
 									</span>
-								</label>
+								</div>
 								<div class="setting-options" style="margin-top: 8px;">
 									<button class="option-btn" class:active={$notebookSortMode === 'alphabetical'} onclick={() => { $notebookSortMode = 'alphabetical'; }}>Alphabetical</button>
 									<button class="option-btn" class:active={$notebookSortMode === 'manual'} onclick={() => { $notebookSortMode = 'manual'; }}>Manual</button>
@@ -1249,31 +1260,31 @@
 								<p class="setting-desc" style="margin: 0 0 10px;">Hide navigation items you don't use, leaving search and the notebook tree. Any item you hide stays reachable from the command palette ({modKey}+P).</p>
 								<label class="setting-toggle">
 									<span class="setting-label"><span class="setting-name">All Notes</span></span>
-									<button class="toggle-switch" class:on={showAllNotes} onclick={() => { showAllNotes = !showAllNotes; saveGeneralSettings(); }}>
+									<button class="toggle-switch" class:on={showAllNotes} role="switch" aria-checked={showAllNotes} aria-label="Show All Notes" onclick={() => { showAllNotes = !showAllNotes; saveGeneralSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
 								<label class="setting-toggle">
 									<span class="setting-label"><span class="setting-name">Quick Access</span></span>
-									<button class="toggle-switch" class:on={showQuickAccess} onclick={() => { showQuickAccess = !showQuickAccess; saveGeneralSettings(); }}>
+									<button class="toggle-switch" class:on={showQuickAccess} role="switch" aria-checked={showQuickAccess} aria-label="Show Quick Access" onclick={() => { showQuickAccess = !showQuickAccess; saveGeneralSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
 								<label class="setting-toggle">
 									<span class="setting-label"><span class="setting-name">Tasks</span></span>
-									<button class="toggle-switch" class:on={showTasks} onclick={() => { showTasks = !showTasks; saveGeneralSettings(); }}>
+									<button class="toggle-switch" class:on={showTasks} role="switch" aria-checked={showTasks} aria-label="Show Tasks" onclick={() => { showTasks = !showTasks; saveGeneralSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
 								<label class="setting-toggle">
 									<span class="setting-label"><span class="setting-name">Daily Notes</span></span>
-									<button class="toggle-switch" class:on={showDailyNotes} onclick={() => { showDailyNotes = !showDailyNotes; saveGeneralSettings(); }}>
+									<button class="toggle-switch" class:on={showDailyNotes} role="switch" aria-checked={showDailyNotes} aria-label="Show Daily Notes" onclick={() => { showDailyNotes = !showDailyNotes; saveGeneralSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
 								<label class="setting-toggle">
 									<span class="setting-label"><span class="setting-name">Trash</span></span>
-									<button class="toggle-switch" class:on={showTrash} onclick={() => { showTrash = !showTrash; saveGeneralSettings(); }}>
+									<button class="toggle-switch" class:on={showTrash} role="switch" aria-checked={showTrash} aria-label="Show Trash" onclick={() => { showTrash = !showTrash; saveGeneralSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
@@ -1288,7 +1299,7 @@
 										<span class="setting-name">Show note switcher in title bar</span>
 										<span class="setting-desc">Show recent and Quick Access notes in the title bar.</span>
 									</span>
-									<button class="toggle-switch" class:on={showNoteSwitcher} onclick={() => { showNoteSwitcher = !showNoteSwitcher; saveGeneralSettings(); }}>
+									<button class="toggle-switch" class:on={showNoteSwitcher} role="switch" aria-checked={showNoteSwitcher} aria-label="Show note switcher in title bar" onclick={() => { showNoteSwitcher = !showNoteSwitcher; saveGeneralSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
@@ -1312,7 +1323,7 @@
 										<span class="setting-name">Restore last session on launch</span>
 										<span class="setting-desc">Reopen the last view and note when possible. This overrides the default view.</span>
 									</span>
-									<button class="toggle-switch" class:on={restoreLastSession} onclick={() => { restoreLastSession = !restoreLastSession; saveGeneralSettings(); }}>
+									<button class="toggle-switch" class:on={restoreLastSession} role="switch" aria-checked={restoreLastSession} aria-label="Restore last session on launch" onclick={() => { restoreLastSession = !restoreLastSession; saveGeneralSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
@@ -1368,7 +1379,7 @@
 										<span class="setting-name">GPU Acceleration</span>
 										<span class="setting-desc">Use hardware acceleration for rendering (requires restart)</span>
 									</span>
-									<button class="toggle-switch" class:on={gpuAcceleration} onclick={() => { gpuAcceleration = !gpuAcceleration; saveGeneralSettings(); }}>
+									<button class="toggle-switch" class:on={gpuAcceleration} role="switch" aria-checked={gpuAcceleration} aria-label="GPU acceleration" onclick={() => { gpuAcceleration = !gpuAcceleration; saveGeneralSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
@@ -1381,7 +1392,7 @@
 										<span class="setting-name">Start at system startup</span>
 										<span class="setting-desc">Launch HelixNotes when your computer starts</span>
 									</span>
-									<button class="toggle-switch" class:on={autostart} onclick={() => { autostart = !autostart; saveGeneralSettings(); }}>
+									<button class="toggle-switch" class:on={autostart} role="switch" aria-checked={autostart} aria-label="Start at system startup" onclick={() => { autostart = !autostart; saveGeneralSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
@@ -1390,7 +1401,7 @@
 										<span class="setting-name">Show in system tray</span>
 										<span class="setting-desc">Show an icon in the notification area (requires restart)</span>
 									</span>
-									<button class="toggle-switch" class:on={showTrayIcon} onclick={() => { showTrayIcon = !showTrayIcon; if (!showTrayIcon) closeToTray = false; saveGeneralSettings(); }}>
+									<button class="toggle-switch" class:on={showTrayIcon} role="switch" aria-checked={showTrayIcon} aria-label="Show in system tray" onclick={() => { showTrayIcon = !showTrayIcon; if (!showTrayIcon) closeToTray = false; saveGeneralSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
@@ -1400,7 +1411,7 @@
 										<span class="setting-name">Close to tray</span>
 										<span class="setting-desc">Minimize to tray instead of quitting when closing the window (requires restart)</span>
 									</span>
-									<button class="toggle-switch" class:on={closeToTray} onclick={() => { closeToTray = !closeToTray; saveGeneralSettings(); }}>
+									<button class="toggle-switch" class:on={closeToTray} role="switch" aria-checked={closeToTray} aria-label="Close to tray" onclick={() => { closeToTray = !closeToTray; saveGeneralSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
@@ -1489,7 +1500,7 @@
 										<span class="setting-name">Hide title in note body</span>
 										<span class="setting-desc">Hide the first heading when it matches the note title</span>
 									</span>
-									<button class="toggle-switch" class:on={hideTitleInBody} onclick={() => { hideTitleInBody = !hideTitleInBody; saveGeneralSettings(); }}>
+									<button class="toggle-switch" class:on={hideTitleInBody} role="switch" aria-checked={hideTitleInBody} aria-label="Hide title in note body" onclick={() => { hideTitleInBody = !hideTitleInBody; saveGeneralSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
@@ -1498,7 +1509,7 @@
 										<span class="setting-name">Show link arrows</span>
 										<span class="setting-desc">Display the arrow icon after external links</span>
 									</span>
-									<button class="toggle-switch" class:on={showLinkArrows} onclick={() => { showLinkArrows = !showLinkArrows; saveGeneralSettings(); applyLinkArrows(); }}>
+									<button class="toggle-switch" class:on={showLinkArrows} role="switch" aria-checked={showLinkArrows} aria-label="Show link arrows" onclick={() => { showLinkArrows = !showLinkArrows; saveGeneralSettings(); applyLinkArrows(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
@@ -1508,7 +1519,7 @@
 										<span class="setting-name">Show line numbers</span>
 										<span class="setting-desc">Display line numbers in the markdown source editor</span>
 									</span>
-									<button class="toggle-switch" class:on={showLineNumbers} onclick={() => { showLineNumbers = !showLineNumbers; saveGeneralSettings(); }}>
+									<button class="toggle-switch" class:on={showLineNumbers} role="switch" aria-checked={showLineNumbers} aria-label="Show line numbers" onclick={() => { showLineNumbers = !showLineNumbers; saveGeneralSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
@@ -1518,7 +1529,7 @@
 										<span class="setting-name">Open notes in View Mode</span>
 										<span class="setting-desc">Notes open as read-only by default. Click the eye icon to switch to editing.</span>
 									</span>
-									<button class="toggle-switch" class:on={defaultViewMode} onclick={() => { defaultViewMode = !defaultViewMode; saveGeneralSettings(); }}>
+									<button class="toggle-switch" class:on={defaultViewMode} role="switch" aria-checked={defaultViewMode} aria-label="Open notes in View Mode" onclick={() => { defaultViewMode = !defaultViewMode; saveGeneralSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
@@ -1527,7 +1538,7 @@
 										<span class="setting-name">Open new notes in source mode</span>
 										<span class="setting-desc">Start empty notes in the plain-text Markdown editor instead of rich-text mode</span>
 									</span>
-									<button class="toggle-switch" class:on={newNotesInSourceMode} onclick={() => { newNotesInSourceMode = !newNotesInSourceMode; saveGeneralSettings(); }}>
+									<button class="toggle-switch" class:on={newNotesInSourceMode} role="switch" aria-checked={newNotesInSourceMode} aria-label="Open new notes in source mode" onclick={() => { newNotesInSourceMode = !newNotesInSourceMode; saveGeneralSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
@@ -1541,7 +1552,7 @@
 										<span class="setting-name">Enable wiki links</span>
 										<span class="setting-desc">Link notes with [[Note Title]] syntax and visualize connections in a graph view</span>
 									</span>
-									<button class="toggle-switch" class:on={enableWikiLinks} onclick={() => { enableWikiLinks = !enableWikiLinks; saveGeneralSettings(); }}>
+									<button class="toggle-switch" class:on={enableWikiLinks} role="switch" aria-checked={enableWikiLinks} aria-label="Enable wiki links" onclick={() => { enableWikiLinks = !enableWikiLinks; saveGeneralSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
@@ -1556,7 +1567,7 @@
 										<span class="setting-name">Inline PDF preview</span>
 										<span class="setting-desc">Render embedded PDF files as inline previews inside notes</span>
 									</span>
-									<button class="toggle-switch" class:on={pdfPreview} onclick={() => { pdfPreview = !pdfPreview; saveGeneralSettings(); }}>
+									<button class="toggle-switch" class:on={pdfPreview} role="switch" aria-checked={pdfPreview} aria-label="Inline PDF preview" onclick={() => { pdfPreview = !pdfPreview; saveGeneralSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
@@ -1793,24 +1804,23 @@
 							<!-- Custom Theme Editor Modal -->
 							{#if customThemeEditorOpen && customThemeEditing}
 								<!-- svelte-ignore a11y_no_static_element_interactions -->
-								<div class="custom-theme-modal-overlay" onclick={cancelCustomThemeEditor} onkeydown={(e) => e.key === 'Escape' && cancelCustomThemeEditor()}>
-									<!-- svelte-ignore a11y_no_static_element_interactions -->
-									<div class="custom-theme-modal" onclick={(e) => e.stopPropagation()}>
+								<div class="custom-theme-modal-overlay" onclick={cancelCustomThemeFromOverlay} onkeydown={(e) => e.key === 'Escape' && cancelCustomThemeEditor()}>
+									<div class="custom-theme-modal" role="dialog" aria-modal="true" aria-labelledby="custom-theme-title" tabindex="-1">
 										<div class="custom-theme-modal-header">
-											<h3>{customThemeEditing.id.startsWith('custom-') && $customThemes.some(c => c.id === customThemeEditing!.id) ? 'Edit Theme' : 'New Custom Theme'}</h3>
-											<button class="close-btn" onclick={cancelCustomThemeEditor}>
+											<h3 id="custom-theme-title">{customThemeEditing.id.startsWith('custom-') && $customThemes.some(c => c.id === customThemeEditing!.id) ? 'Edit Theme' : 'New Custom Theme'}</h3>
+											<button class="close-btn" onclick={cancelCustomThemeEditor} aria-label="Close theme editor">
 												<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
 											</button>
 										</div>
 
 										<div class="custom-theme-modal-body">
 											<div class="ct-field">
-												<label class="ct-label">Theme Name</label>
-												<input class="ct-name-input" type="text" placeholder="My Theme" bind:value={customThemeEditing.name} maxlength={40} />
+												<label class="ct-label" for="custom-theme-name">Theme Name</label>
+												<input id="custom-theme-name" class="ct-name-input" type="text" placeholder="My Theme" bind:value={customThemeEditing.name} maxlength={40} />
 											</div>
 
 											<div class="ct-field">
-												<label class="ct-label">Mode</label>
+												<span class="ct-label">Mode</span>
 												<div class="setting-options">
 													<button class="option-btn" class:active={!customThemeEditing.is_dark} onclick={() => { if (customThemeEditing) { customThemeEditing.is_dark = false; previewCustomTheme(); } }}>Light</button>
 													<button class="option-btn" class:active={customThemeEditing.is_dark} onclick={() => { if (customThemeEditing) { customThemeEditing.is_dark = true; previewCustomTheme(); } }}>Dark</button>
@@ -1977,7 +1987,7 @@
 
 								<label class="setting-toggle">
 									<span>Enable automatic backup</span>
-									<button class="toggle-switch" class:on={$appConfig?.backup_enabled} onclick={() => { if ($appConfig) { $appConfig = { ...$appConfig, backup_enabled: !$appConfig.backup_enabled }; saveBackupSettings(); } }}>
+									<button class="toggle-switch" class:on={$appConfig?.backup_enabled} role="switch" aria-checked={$appConfig?.backup_enabled ?? false} aria-label="Enable automatic backup" onclick={() => { if ($appConfig) { $appConfig = { ...$appConfig, backup_enabled: !$appConfig.backup_enabled }; saveBackupSettings(); } }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
@@ -2005,7 +2015,7 @@
 										<span class="setting-name">Include attachments</span>
 										<span class="setting-desc">Include images and files in backups (increases size significantly)</span>
 									</span>
-									<button class="toggle-switch" class:on={$appConfig?.backup_include_attachments} onclick={() => { if ($appConfig) { $appConfig = { ...$appConfig, backup_include_attachments: !$appConfig.backup_include_attachments }; saveBackupSettings(); } }}>
+									<button class="toggle-switch" class:on={$appConfig?.backup_include_attachments} role="switch" aria-checked={$appConfig?.backup_include_attachments ?? false} aria-label="Include attachments in backups" onclick={() => { if ($appConfig) { $appConfig = { ...$appConfig, backup_include_attachments: !$appConfig.backup_include_attachments }; saveBackupSettings(); } }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
@@ -2091,10 +2101,9 @@
 
 							{#if restoreConfirm}
 								<!-- svelte-ignore a11y_no_static_element_interactions -->
-								<div class="restore-confirm-overlay" onclick={() => restoreConfirm = null}>
-									<!-- svelte-ignore a11y_no_static_element_interactions -->
-									<div class="restore-confirm" onclick={(e) => e.stopPropagation()}>
-										<h4>Restore Backup?</h4>
+								<div class="restore-confirm-overlay" onclick={dismissRestoreConfirm} onkeydown={(e) => { if (e.key === 'Escape') restoreConfirm = null; }}>
+									<div class="restore-confirm" role="alertdialog" aria-modal="true" aria-labelledby="restore-confirm-title" tabindex="-1">
+										<h4 id="restore-confirm-title">Restore Backup?</h4>
 										<p>This will replace all notes in your vault with the backup from <strong>{formatBackupDate(restoreConfirm.created)}</strong>. This action cannot be undone.</p>
 										<div class="restore-confirm-actions">
 											<button class="restore-cancel" onclick={() => restoreConfirm = null}>Cancel</button>
@@ -2443,14 +2452,14 @@
 											<span class="setting-name">Sync when a note changes</span>
 											<span class="setting-desc">Sync shortly after you edit a note.</span>
 										</span>
-										<button class="toggle-switch" class:on={syncOnChange} onclick={() => { syncOnChange = !syncOnChange; saveSyncSettings(); }}><span class="toggle-knob"></span></button>
+										<button class="toggle-switch" class:on={syncOnChange} role="switch" aria-checked={syncOnChange} aria-label="Sync when a note changes" onclick={() => { syncOnChange = !syncOnChange; saveSyncSettings(); }}><span class="toggle-knob"></span></button>
 									</label>
 									<label class="setting-toggle">
 										<span class="setting-label">
 											<span class="setting-name">Sync when the vault opens</span>
 											<span class="setting-desc">Sync once when the app starts.</span>
 										</span>
-										<button class="toggle-switch" class:on={syncOnOpen} onclick={() => { syncOnOpen = !syncOnOpen; saveSyncSettings(); }}><span class="toggle-knob"></span></button>
+										<button class="toggle-switch" class:on={syncOnOpen} role="switch" aria-checked={syncOnOpen} aria-label="Sync when the vault opens" onclick={() => { syncOnOpen = !syncOnOpen; saveSyncSettings(); }}><span class="toggle-knob"></span></button>
 									</label>
 								</div>
 							{/if}
