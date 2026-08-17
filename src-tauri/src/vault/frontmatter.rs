@@ -108,7 +108,7 @@ pub fn serialize_frontmatter(meta: &NoteMeta) -> String {
             "[{}]",
             meta.tags
                 .iter()
-                .map(|t| t.to_string())
+                .map(|t| format!("{}", t))
                 .collect::<Vec<_>>()
                 .join(", ")
         )
@@ -279,7 +279,7 @@ fn strip_html_and_markdown(input: &str) -> String {
             chars.next(); // skip '['
             let mut depth = 1;
             // Skip alt text
-            for c in chars.by_ref() {
+            while let Some(c) = chars.next() {
                 if c == '[' {
                     depth += 1;
                 }
@@ -294,7 +294,7 @@ fn strip_html_and_markdown(input: &str) -> String {
             if chars.peek() == Some(&'(') {
                 chars.next();
                 let mut depth = 1;
-                for c in chars.by_ref() {
+                while let Some(c) = chars.next() {
                     if c == '(' {
                         depth += 1;
                     }
@@ -313,7 +313,7 @@ fn strip_html_and_markdown(input: &str) -> String {
         if ch == '[' {
             let mut link_text = String::new();
             let mut depth = 1;
-            for c in chars.by_ref() {
+            while let Some(c) = chars.next() {
                 if c == '[' {
                     depth += 1;
                 }
@@ -329,7 +329,7 @@ fn strip_html_and_markdown(input: &str) -> String {
             if chars.peek() == Some(&'(') {
                 chars.next();
                 let mut depth = 1;
-                for c in chars.by_ref() {
+                while let Some(c) = chars.next() {
                     if c == '(' {
                         depth += 1;
                     }

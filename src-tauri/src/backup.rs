@@ -134,7 +134,7 @@ pub fn list_backups(backup_dir: &Path) -> Result<Vec<BackupEntry>, String> {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
 
-        if path.extension().is_some_and(|ext| ext == "zip") {
+        if path.extension().map_or(false, |ext| ext == "zip") {
             let filename = path
                 .file_name()
                 .unwrap_or_default()
@@ -184,28 +184,14 @@ pub fn list_backups(backup_dir: &Path) -> Result<Vec<BackupEntry>, String> {
     Ok(entries)
 }
 
-fn validated_backup_file(backup_dir: &Path, backup_path: &str) -> Result<PathBuf, String> {
-    let backup_dir = fs::canonicalize(backup_dir).map_err(|error| error.to_string())?;
-    let backup = fs::canonicalize(backup_path).map_err(|error| error.to_string())?;
-    if backup.parent() != Some(backup_dir.as_path())
-        || backup.extension().and_then(|extension| extension.to_str()) != Some("zip")
-        || !backup.is_file()
-    {
-        return Err(
-            "Backup path must point to a ZIP file in the configured backup directory".to_string(),
-        );
-    }
-    Ok(backup)
-}
-
 /// Restore a backup by extracting the zip over the vault directory
-pub fn restore_backup(
-    vault_path: &str,
-    backup_dir: &Path,
-    backup_path: &str,
-) -> Result<(), String> {
+pub fn restore_backup(vault_path: &str, backup_path: &str) -> Result<(), String> {
     let vault = Path::new(vault_path);
-    let backup = validated_backup_file(backup_dir, backup_path)?;
+    let backup = Path::new(backup_path);
+
+    if !backup.exists() {
+        return Err("Backup file does not exist".to_string());
+    }
 
     let file = fs::File::open(backup).map_err(|e| format!("Failed to open backup: {}", e))?;
     let mut archive =
@@ -259,9 +245,12 @@ pub fn restore_backup(
 }
 
 /// Delete a single backup file
-pub fn delete_backup(backup_dir: &Path, backup_path: &str) -> Result<(), String> {
-    let path = validated_backup_file(backup_dir, backup_path)?;
-    fs::remove_file(path).map_err(|error| error.to_string())
+pub fn delete_backup(backup_path: &str) -> Result<(), String> {
+    let path = Path::new(backup_path);
+    if path.exists() {
+        fs::remove_file(path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// Remove old backups keeping only the newest `max_count`
@@ -272,31 +261,9 @@ pub fn cleanup_old_backups(backup_dir: &Path, max_count: u32) -> Result<(), Stri
     if backups.len() as u32 > max_count {
         let to_remove = backups.split_off(max_count as usize);
         for entry in to_remove {
-            delete_backup(backup_dir, &entry.path)?;
+            delete_backup(&entry.path)?;
         }
     }
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::delete_backup;
-    use std::fs;
-    use uuid::Uuid;
-
-    #[test]
-    fn delete_backup_rejects_files_outside_backup_directory() {
-        let root = std::env::temp_dir().join(format!("helixnotes-backup-test-{}", Uuid::new_v4()));
-        let backup_dir = root.join("backups");
-        let outside = root.join("outside.zip");
-        fs::create_dir_all(&backup_dir).unwrap();
-        fs::write(&outside, "must survive").unwrap();
-
-        let result = delete_backup(&backup_dir, &outside.to_string_lossy());
-
-        assert!(result.is_err());
-        assert!(outside.exists());
-        fs::remove_dir_all(root).unwrap();
-    }
 }

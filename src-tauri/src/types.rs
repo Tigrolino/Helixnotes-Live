@@ -549,7 +549,10 @@ mod startup_view_tests {
         assert!(!config.show_note_switcher);
 
         let mut value = serde_json::to_value(config).unwrap();
-        value.as_object_mut().unwrap().remove("show_note_switcher");
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("show_note_switcher");
         let config: AppConfig = serde_json::from_value(value).unwrap();
 
         assert!(!config.show_note_switcher);

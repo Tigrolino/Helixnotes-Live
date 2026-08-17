@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "HelixNotes",
-  "version": "1.3.5",
+  "version": "1.3.4",
   "identifier": "com.helixnotes.app",
   "build": {
     "frontendDist": "../build",
@@ -24,7 +24,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost imgproxy: http://imgproxy.localhost https: blob: data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-src 'self' asset: http://asset.localhost",
+      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval'; img-src 'self' asset: http://asset.localhost imgproxy: http://imgproxy.localhost https: blob: data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-src 'self' asset: http://asset.localhost",
       "assetProtocol": {
         "enable": true,
         "scope": ["**/*", "/**", "**/.helixnotes/**"]

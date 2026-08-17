@@ -132,8 +132,6 @@
 	let highlightDropdown = $state(false);
 	let alignDropdown = $state(false);
 	let insertDropdown = $state(false);
-	let tablePickerOpen = $state(false);
-	let tablePickerHover = $state({ rows: 0, cols: 0 });
 
 	function scrollEditorBodyToBottom(source: HTMLElement | null | undefined = editorElement) {
 		const editorBody = source?.closest('.editor-body') as HTMLElement | null;
@@ -308,22 +306,6 @@
 	let editorState = $state(0);
 	let editorStateRaf = 0; // RAF handle for batching toolbar updates
 
-	function isEditorActive(
-		nameOrAttributes: string | Record<string, unknown>,
-		attributes?: Record<string, unknown>,
-	): boolean {
-		void editorState;
-		if (!editor) return false;
-		return typeof nameOrAttributes === 'string'
-			? editor.isActive(nameOrAttributes, attributes)
-			: editor.isActive(nameOrAttributes);
-	}
-
-	function getEditorAttributes(name: string): Record<string, unknown> {
-		void editorState;
-		return editor?.getAttributes(name) ?? {};
-	}
-
 	// AI
 	let aiMenu = $state<{ x: number; y: number } | null>(null);
 	let aiLoading = $state(false);
@@ -488,6 +470,8 @@
 	});
 	let textContextMenu = $state<{ x: number; y: number; submenuLeft: boolean } | null>(null);
 	let tableContextMenu = $state<{ x: number; y: number; hasStyling: boolean } | null>(null);
+	let tablePickerOpen = $state(false);
+	let tablePickerHover = $state({ rows: 0, cols: 0 });
 	let imageToolbar = $state<{ pos: number; x: number; y: number; size: string; src: string; alt: string } | null>(null);
 	let imageViewer = $state<{ src: string; alt: string } | null>(null);
 	let copyToast = $state<'copying' | 'done' | null>(null);
@@ -6583,16 +6567,16 @@
 
 				<!-- Heading dropdown -->
 				<div class="fmt-dropdown-wrap">
-					<button class="fmt-btn" class:active={isEditorActive('heading')} onclick={(e) => { e.stopPropagation(); headingDropdown = !headingDropdown; insertDropdown = false; }} title="Heading">
+					<button class="fmt-btn" class:active={(editorState, editor.isActive('heading'))} onclick={(e) => { e.stopPropagation(); headingDropdown = !headingDropdown; insertDropdown = false; }} title="Heading">
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12h12"/><path d="M6 20V4"/><path d="M18 20V4"/></svg>
 					</button>
 					{#if headingDropdown}
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
 						<div class="fmt-dropdown" onclick={(e) => e.stopPropagation()}>
-							<button class:active={isEditorActive('heading', { level: 1 })} onclick={() => { editor?.chain().focus().toggleHeading({ level: 1 }).run(); headingDropdown = false; }}>Heading 1</button>
-							<button class:active={isEditorActive('heading', { level: 2 })} onclick={() => { editor?.chain().focus().toggleHeading({ level: 2 }).run(); headingDropdown = false; }}>Heading 2</button>
-							<button class:active={isEditorActive('heading', { level: 3 })} onclick={() => { editor?.chain().focus().toggleHeading({ level: 3 }).run(); headingDropdown = false; }}>Heading 3</button>
-							<button class:active={isEditorActive('paragraph')} onclick={() => { editor?.chain().focus().setParagraph().run(); headingDropdown = false; }}>Paragraph</button>
+							<button class:active={(editorState, editor.isActive('heading', { level: 1 }))} onclick={() => { editor?.chain().focus().toggleHeading({ level: 1 }).run(); headingDropdown = false; }}>Heading 1</button>
+							<button class:active={(editorState, editor.isActive('heading', { level: 2 }))} onclick={() => { editor?.chain().focus().toggleHeading({ level: 2 }).run(); headingDropdown = false; }}>Heading 2</button>
+							<button class:active={(editorState, editor.isActive('heading', { level: 3 }))} onclick={() => { editor?.chain().focus().toggleHeading({ level: 3 }).run(); headingDropdown = false; }}>Heading 3</button>
+							<button class:active={(editorState, editor.isActive('paragraph'))} onclick={() => { editor?.chain().focus().setParagraph().run(); headingDropdown = false; }}>Paragraph</button>
 						</div>
 					{/if}
 				</div>
@@ -6600,36 +6584,36 @@
 				<div class="fmt-sep"></div>
 
 				<!-- Bold / Italic / Underline / Strike -->
-				<button class="fmt-btn" class:active={isEditorActive('bold')} onclick={() => editor?.chain().focus().toggleBold().run()} title="Bold">
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('bold'))} onclick={() => editor?.chain().focus().toggleBold().run()} title="Bold">
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12h9a4 4 0 010 8H7a1 1 0 01-1-1V5a1 1 0 011-1h7a4 4 0 010 8"/></svg>
 				</button>
-				<button class="fmt-btn" class:active={isEditorActive('italic')} onclick={() => editor?.chain().focus().toggleItalic().run()} title="Italic">
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('italic'))} onclick={() => editor?.chain().focus().toggleItalic().run()} title="Italic">
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" x2="10" y1="4" y2="4"/><line x1="14" x2="5" y1="20" y2="20"/><line x1="15" x2="9" y1="4" y2="20"/></svg>
 				</button>
-				<button class="fmt-btn" class:active={isEditorActive('underline')} onclick={() => editor?.chain().focus().toggleUnderline().run()} title="Underline">
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('underline'))} onclick={() => editor?.chain().focus().toggleUnderline().run()} title="Underline">
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v6a6 6 0 0012 0V4"/><line x1="4" x2="20" y1="20" y2="20"/></svg>
 				</button>
-				<button class="fmt-btn" class:active={isEditorActive('strike')} onclick={() => editor?.chain().focus().toggleStrike().run()} title="Strikethrough">
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('strike'))} onclick={() => editor?.chain().focus().toggleStrike().run()} title="Strikethrough">
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4H9a3 3 0 00-2.83 4"/><path d="M14 12a4 4 0 010 8H6"/><line x1="4" x2="20" y1="12" y2="12"/></svg>
 				</button>
 
 				<div class="fmt-sep"></div>
 
 				<!-- Link -->
-				<button class="fmt-btn" class:active={isEditorActive('link')} onclick={addLinkFromToolbar} title="Link">
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('link'))} onclick={addLinkFromToolbar} title="Link">
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
 				</button>
 
 				<div class="fmt-sep"></div>
 
 				<!-- Lists -->
-				<button class="fmt-btn" class:active={isEditorActive('bulletList')} onclick={toggleBulletList} title="Bullet List">
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('bulletList'))} onclick={toggleBulletList} title="Bullet List">
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h.01"/><path d="M3 12h.01"/><path d="M3 19h.01"/><path d="M8 5h13"/><path d="M8 12h13"/><path d="M8 19h13"/></svg>
 				</button>
-				<button class="fmt-btn" class:active={isEditorActive('orderedList')} onclick={() => editor?.chain().focus().toggleOrderedList().run()} title="Numbered List">
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('orderedList'))} onclick={() => editor?.chain().focus().toggleOrderedList().run()} title="Numbered List">
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5h10"/><path d="M11 12h10"/><path d="M11 19h10"/><path d="M4 4h1v5"/><path d="M4 9h2"/><path d="M6.5 20H3.4c0-1 2.6-1.925 2.6-3.5a1.5 1.5 0 00-2.6-1.02"/></svg>
 				</button>
-				<button class="fmt-btn" class:active={isEditorActive('taskList')} onclick={toggleTaskList} title="Task List">
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('taskList'))} onclick={toggleTaskList} title="Task List">
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 5h8"/><path d="M13 12h8"/><path d="M13 19h8"/><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/></svg>
 				</button>
 
@@ -6683,7 +6667,7 @@
 				<div class="fmt-sep"></div>
 
 				<!-- Highlight -->
-				<button class="fmt-btn" class:active={isEditorActive('highlight')} onclick={() => editor?.chain().focus().toggleHighlight({ color: highlightColors[0].value }).run()} title="Highlight">
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('highlight'))} onclick={() => editor?.chain().focus().toggleHighlight({ color: highlightColors[0].value }).run()} title="Highlight">
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 01-2.8 0l-5.2-5.2a2 2 0 010-2.8L14 4"/></svg>
 				</button>
 
@@ -6752,17 +6736,17 @@
 
 				<!-- Heading dropdown -->
 				<div class="fmt-dropdown-wrap">
-					<button class="fmt-btn" class:active={isEditorActive('heading')} onclick={(e) => { e.stopPropagation(); headingDropdown = !headingDropdown; colorDropdown = false; highlightDropdown = false; tablePickerOpen = false; alignDropdown = false; insertDropdown = false; }} title="Heading">
+					<button class="fmt-btn" class:active={(editorState, editor.isActive('heading'))} onclick={(e) => { e.stopPropagation(); headingDropdown = !headingDropdown; colorDropdown = false; highlightDropdown = false; tablePickerOpen = false; alignDropdown = false; insertDropdown = false; }} title="Heading">
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12h12"/><path d="M6 20V4"/><path d="M18 20V4"/></svg>
 					</button>
 					{#if headingDropdown}
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
 						<div class="fmt-dropdown" onclick={(e) => e.stopPropagation()}>
-							<button class:active={isEditorActive('heading', { level: 1 })} onclick={() => { editor?.chain().focus().toggleHeading({ level: 1 }).run(); headingDropdown = false; }}>Heading 1</button>
-							<button class:active={isEditorActive('heading', { level: 2 })} onclick={() => { editor?.chain().focus().toggleHeading({ level: 2 }).run(); headingDropdown = false; }}>Heading 2</button>
-							<button class:active={isEditorActive('heading', { level: 3 })} onclick={() => { editor?.chain().focus().toggleHeading({ level: 3 }).run(); headingDropdown = false; }}>Heading 3</button>
-							<button class:active={isEditorActive('heading', { level: 4 })} onclick={() => { editor?.chain().focus().toggleHeading({ level: 4 }).run(); headingDropdown = false; }}>Heading 4</button>
-							<button class:active={isEditorActive('paragraph')} onclick={() => { editor?.chain().focus().setParagraph().run(); headingDropdown = false; }}>Paragraph</button>
+							<button class:active={(editorState, editor.isActive('heading', { level: 1 }))} onclick={() => { editor?.chain().focus().toggleHeading({ level: 1 }).run(); headingDropdown = false; }}>Heading 1</button>
+							<button class:active={(editorState, editor.isActive('heading', { level: 2 }))} onclick={() => { editor?.chain().focus().toggleHeading({ level: 2 }).run(); headingDropdown = false; }}>Heading 2</button>
+							<button class:active={(editorState, editor.isActive('heading', { level: 3 }))} onclick={() => { editor?.chain().focus().toggleHeading({ level: 3 }).run(); headingDropdown = false; }}>Heading 3</button>
+							<button class:active={(editorState, editor.isActive('heading', { level: 4 }))} onclick={() => { editor?.chain().focus().toggleHeading({ level: 4 }).run(); headingDropdown = false; }}>Heading 4</button>
+							<button class:active={(editorState, editor.isActive('paragraph'))} onclick={() => { editor?.chain().focus().setParagraph().run(); headingDropdown = false; }}>Paragraph</button>
 						</div>
 					{/if}
 				</div>
@@ -6770,16 +6754,16 @@
 				<div class="fmt-sep"></div>
 
 				<!-- Text formatting -->
-				<button class="fmt-btn" class:active={isEditorActive('bold')} onclick={() => editor?.chain().focus().toggleBold().run()} title={`Bold (${modKey}+B)`}>
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('bold'))} onclick={() => editor?.chain().focus().toggleBold().run()} title={`Bold (${modKey}+B)`}>
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12h9a4 4 0 010 8H7a1 1 0 01-1-1V5a1 1 0 011-1h7a4 4 0 010 8"/></svg>
 				</button>
-				<button class="fmt-btn" class:active={isEditorActive('italic')} onclick={() => editor?.chain().focus().toggleItalic().run()} title={`Italic (${modKey}+I)`}>
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('italic'))} onclick={() => editor?.chain().focus().toggleItalic().run()} title={`Italic (${modKey}+I)`}>
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" x2="10" y1="4" y2="4"/><line x1="14" x2="5" y1="20" y2="20"/><line x1="15" x2="9" y1="4" y2="20"/></svg>
 				</button>
-				<button class="fmt-btn" class:active={isEditorActive('underline')} onclick={() => editor?.chain().focus().toggleUnderline().run()} title={`Underline (${modKey}+U)`}>
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('underline'))} onclick={() => editor?.chain().focus().toggleUnderline().run()} title={`Underline (${modKey}+U)`}>
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v6a6 6 0 0012 0V4"/><line x1="4" x2="20" y1="20" y2="20"/></svg>
 				</button>
-				<button class="fmt-btn" class:active={isEditorActive('strike')} onclick={() => editor?.chain().focus().toggleStrike().run()} title={`Strikethrough (${modKey}+Shift+X)`}>
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('strike'))} onclick={() => editor?.chain().focus().toggleStrike().run()} title={`Strikethrough (${modKey}+Shift+X)`}>
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4H9a3 3 0 00-2.83 4"/><path d="M14 12a4 4 0 010 8H6"/><line x1="4" x2="20" y1="12" y2="12"/></svg>
 				</button>
 
@@ -6787,14 +6771,14 @@
 				<div class="fmt-dropdown-wrap">
 					<button class="fmt-btn" onclick={(e) => { e.stopPropagation(); colorDropdown = !colorDropdown; headingDropdown = false; highlightDropdown = false; tablePickerOpen = false; alignDropdown = false; insertDropdown = false; }} title="Text Color">
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="m6 16 6-12 6 12"/><path d="M8 12h8"/></svg>
-						<span class="color-indicator" style="background: {getEditorAttributes('textStyle').color || 'var(--accent)'}"></span>
+						<span class="color-indicator" style="background: {editor.getAttributes('textStyle').color || 'var(--accent)'}"></span>
 					</button>
 					{#if colorDropdown}
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
 						<div class="fmt-dropdown color-grid-dropdown" onclick={(e) => e.stopPropagation()}>
 							{#each textColors as color}
 								<button class="color-swatch" title={color.name} onclick={() => setTextColor(color.value)} style="background: {color.value || 'var(--text-primary)'}">
-									{#if (color.value === '' && !getEditorAttributes('textStyle').color) || getEditorAttributes('textStyle').color === color.value}
+									{#if (color.value === '' && !editor.getAttributes('textStyle').color) || editor.getAttributes('textStyle').color === color.value}
 										<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
 									{/if}
 								</button>
@@ -6806,20 +6790,20 @@
 				<div class="fmt-sep"></div>
 
 				<!-- Link -->
-				<button class="fmt-btn" class:active={isEditorActive('link')} onclick={addLinkFromToolbar} title={`Link (${modKey}+K)`}>
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('link'))} onclick={addLinkFromToolbar} title={`Link (${modKey}+K)`}>
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
 				</button>
 
 				<div class="fmt-sep"></div>
 
 				<!-- Lists -->
-				<button class="fmt-btn" class:active={isEditorActive('bulletList')} onclick={toggleBulletList} title={`Bullet List (${modKey}+Shift+8)`}>
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('bulletList'))} onclick={toggleBulletList} title={`Bullet List (${modKey}+Shift+8)`}>
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h.01"/><path d="M3 12h.01"/><path d="M3 19h.01"/><path d="M8 5h13"/><path d="M8 12h13"/><path d="M8 19h13"/></svg>
 				</button>
-				<button class="fmt-btn" class:active={isEditorActive('orderedList')} onclick={() => editor?.chain().focus().toggleOrderedList().run()} title={`Ordered List (${modKey}+Shift+7)`}>
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('orderedList'))} onclick={() => editor?.chain().focus().toggleOrderedList().run()} title={`Ordered List (${modKey}+Shift+7)`}>
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5h10"/><path d="M11 12h10"/><path d="M11 19h10"/><path d="M4 4h1v5"/><path d="M4 9h2"/><path d="M6.5 20H3.4c0-1 2.6-1.925 2.6-3.5a1.5 1.5 0 00-2.6-1.02"/></svg>
 				</button>
-				<button class="fmt-btn" class:active={isEditorActive('taskList')} onclick={toggleTaskList} title={`Task List (${modKey}+Shift+9)`}>
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('taskList'))} onclick={toggleTaskList} title={`Task List (${modKey}+Shift+9)`}>
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 5h8"/><path d="M13 12h8"/><path d="M13 19h8"/><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/></svg>
 				</button>
 
@@ -6836,25 +6820,25 @@
 				<div class="fmt-sep"></div>
 
 				<!-- Code & Code Block -->
-				<button class="fmt-btn" class:active={isEditorActive('code')} onclick={() => editor?.chain().focus().toggleCode().run()} title={`Inline Code (${modKey}+E)`}>
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('code'))} onclick={() => editor?.chain().focus().toggleCode().run()} title={`Inline Code (${modKey}+E)`}>
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></svg>
 				</button>
-				<button class="fmt-btn" class:active={isEditorActive('codeBlock')} onclick={() => editor?.chain().focus().toggleCodeBlock().run()} title={`Code Block (${modKey}+Alt+C)`}>
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('codeBlock'))} onclick={() => editor?.chain().focus().toggleCodeBlock().run()} title={`Code Block (${modKey}+Alt+C)`}>
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m10 9-3 3 3 3"/><path d="m14 15 3-3-3-3"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
 				</button>
 
 				<!-- Blockquote -->
-				<button class="fmt-btn" class:active={isEditorActive('blockquote')} onclick={() => editor?.chain().focus().toggleBlockquote().run()} title={`Quote (${modKey}+Shift+B)`}>
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('blockquote'))} onclick={() => editor?.chain().focus().toggleBlockquote().run()} title={`Quote (${modKey}+Shift+B)`}>
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 5H3"/><path d="M21 12H8"/><path d="M21 19H8"/><path d="M3 12v7"/></svg>
 				</button>
 
 				<!-- Collapsible Section -->
-				<button class="fmt-btn" class:active={isEditorActive('details')} onclick={() => insertDetails()} title={`Collapsible Section (${modKey}+.)`}>
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('details'))} onclick={() => insertDetails()} title={`Collapsible Section (${modKey}+.)`}>
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="13" height="7" x="8" y="3" rx="1"/><path d="m2 9 3 3-3 3"/><rect width="13" height="7" x="8" y="14" rx="1"/></svg>
 				</button>
 
 				<!-- Callout -->
-				<button class="fmt-btn" class:active={isEditorActive('callout')} onclick={() => insertCallout('note')} title="Callout">
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('callout'))} onclick={() => insertCallout('note')} title="Callout">
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><line x1="7" y1="5" x2="7" y2="19"/></svg>
 				</button>
 
@@ -6895,22 +6879,22 @@
 
 				<!-- Highlight -->
 				<div class="fmt-dropdown-wrap">
-					<button class="fmt-btn" class:active={isEditorActive('highlight')} onclick={(e) => { e.stopPropagation(); highlightDropdown = !highlightDropdown; headingDropdown = false; colorDropdown = false; tablePickerOpen = false; alignDropdown = false; insertDropdown = false; }} title={`Highlight (${modKey}+Shift+H)`}>
+					<button class="fmt-btn" class:active={(editorState, editor.isActive('highlight'))} onclick={(e) => { e.stopPropagation(); highlightDropdown = !highlightDropdown; headingDropdown = false; colorDropdown = false; tablePickerOpen = false; alignDropdown = false; insertDropdown = false; }} title={`Highlight (${modKey}+Shift+H)`}>
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 01-2.8 0l-5.2-5.2a2 2 0 010-2.8L14 4"/></svg>
-						<span class="color-indicator" style="background: {getEditorAttributes('highlight').color || 'var(--accent)'}"></span>
+						<span class="color-indicator" style="background: {editor.getAttributes('highlight').color || 'var(--accent)'}"></span>
 					</button>
 					{#if highlightDropdown}
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
 						<div class="fmt-dropdown color-grid-dropdown" onclick={(e) => e.stopPropagation()}>
 							{#each highlightColors as color}
 								<button class="color-swatch" title={color.name} onclick={() => setHighlightColor(color.value)} style="background: {color.swatch}">
-									{#if isEditorActive('highlight', { color: color.value })}
+									{#if editor.isActive('highlight', { color: color.value })}
 										<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
 									{/if}
 								</button>
 							{/each}
 							<button class="color-swatch" title="Remove highlight" onclick={() => setHighlightColor('')} style="background: var(--bg-tertiary);">
-								{#if !isEditorActive('highlight')}
+								{#if !editor.isActive('highlight')}
 									<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-primary)" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
 								{:else}
 									<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -6921,10 +6905,10 @@
 				</div>
 
 				<!-- Subscript & Superscript -->
-				<button class="fmt-btn" class:active={isEditorActive('subscript')} onclick={() => editor?.chain().focus().toggleSubscript().run()} title="Subscript">
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('subscript'))} onclick={() => editor?.chain().focus().toggleSubscript().run()} title="Subscript">
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 5 8 8"/><path d="m12 5-8 8"/><path d="M20 19h-4c0-1.5.44-2 1.5-2.5S20 15.33 20 14c0-.47-.17-.93-.48-1.29a2.11 2.11 0 00-2.62-.44c-.42.24-.74.62-.9 1.07"/></svg>
 				</button>
-				<button class="fmt-btn" class:active={isEditorActive('superscript')} onclick={() => editor?.chain().focus().toggleSuperscript().run()} title="Superscript">
+				<button class="fmt-btn" class:active={(editorState, editor.isActive('superscript'))} onclick={() => editor?.chain().focus().toggleSuperscript().run()} title="Superscript">
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 19 8-8"/><path d="m12 19-8-8"/><path d="M20 12h-4c0-1.5.442-2 1.5-2.5S20 8.334 20 7.002c0-.472-.17-.93-.484-1.29a2.105 2.105 0 00-2.617-.436c-.42.239-.738.614-.899 1.06"/></svg>
 				</button>
 
@@ -6933,11 +6917,11 @@
 				<!-- Text Alignment -->
 				<div class="fmt-dropdown-wrap">
 					<button class="fmt-btn" onclick={(e) => { e.stopPropagation(); alignDropdown = !alignDropdown; headingDropdown = false; colorDropdown = false; highlightDropdown = false; tablePickerOpen = false; insertDropdown = false; }} title="Text Alignment">
-						{#if isEditorActive({ textAlign: 'center' })}
+						{#if (editorState, editor.isActive({ textAlign: 'center' }))}
 							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 5H3"/><path d="M17 12H7"/><path d="M19 19H5"/></svg>
-						{:else if isEditorActive({ textAlign: 'right' })}
+						{:else if (editorState, editor.isActive({ textAlign: 'right' }))}
 							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 5H3"/><path d="M21 12H9"/><path d="M21 19H7"/></svg>
-						{:else if isEditorActive({ textAlign: 'justify' })}
+						{:else if (editorState, editor.isActive({ textAlign: 'justify' }))}
 							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18"/><path d="M3 12h18"/><path d="M3 19h18"/></svg>
 						{:else}
 							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 5H3"/><path d="M15 12H3"/><path d="M17 19H3"/></svg>
@@ -6946,19 +6930,19 @@
 					{#if alignDropdown}
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
 						<div class="fmt-dropdown align-dropdown" onclick={(e) => e.stopPropagation()}>
-							<button class:active={isEditorActive({ textAlign: 'left' })} onclick={() => { editor?.chain().focus().setTextAlign('left').run(); alignDropdown = false; }}>
+							<button class:active={(editorState, editor.isActive({ textAlign: 'left' }))} onclick={() => { editor?.chain().focus().setTextAlign('left').run(); alignDropdown = false; }}>
 								<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 5H3"/><path d="M15 12H3"/><path d="M17 19H3"/></svg>
 								Left
 							</button>
-							<button class:active={isEditorActive({ textAlign: 'center' })} onclick={() => { editor?.chain().focus().setTextAlign('center').run(); alignDropdown = false; }}>
+							<button class:active={(editorState, editor.isActive({ textAlign: 'center' }))} onclick={() => { editor?.chain().focus().setTextAlign('center').run(); alignDropdown = false; }}>
 								<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 5H3"/><path d="M17 12H7"/><path d="M19 19H5"/></svg>
 								Center
 							</button>
-							<button class:active={isEditorActive({ textAlign: 'right' })} onclick={() => { editor?.chain().focus().setTextAlign('right').run(); alignDropdown = false; }}>
+							<button class:active={(editorState, editor.isActive({ textAlign: 'right' }))} onclick={() => { editor?.chain().focus().setTextAlign('right').run(); alignDropdown = false; }}>
 								<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 5H3"/><path d="M21 12H9"/><path d="M21 19H7"/></svg>
 								Right
 							</button>
-							<button class:active={isEditorActive({ textAlign: 'justify' })} onclick={() => { editor?.chain().focus().setTextAlign('justify').run(); alignDropdown = false; }}>
+							<button class:active={(editorState, editor.isActive({ textAlign: 'justify' }))} onclick={() => { editor?.chain().focus().setTextAlign('justify').run(); alignDropdown = false; }}>
 								<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18"/><path d="M3 12h18"/><path d="M3 19h18"/></svg>
 								Justify
 							</button>
@@ -7119,12 +7103,12 @@
 				</button>
 				{#if ctxHeadingSubmenu}
 					<div class="text-ctx-submenu" class:flip-left={textContextMenu?.submenuLeft}>
-						<button class:active={isEditorActive('heading', { level: 1 })} onclick={() => ctxSetHeading(1)}>Heading 1</button>
-						<button class:active={isEditorActive('heading', { level: 2 })} onclick={() => ctxSetHeading(2)}>Heading 2</button>
-						<button class:active={isEditorActive('heading', { level: 3 })} onclick={() => ctxSetHeading(3)}>Heading 3</button>
-						<button class:active={isEditorActive('heading', { level: 4 })} onclick={() => ctxSetHeading(4)}>Heading 4</button>
+						<button class:active={(editorState, editor?.isActive('heading', { level: 1 }))} onclick={() => ctxSetHeading(1)}>Heading 1</button>
+						<button class:active={(editorState, editor?.isActive('heading', { level: 2 }))} onclick={() => ctxSetHeading(2)}>Heading 2</button>
+						<button class:active={(editorState, editor?.isActive('heading', { level: 3 }))} onclick={() => ctxSetHeading(3)}>Heading 3</button>
+						<button class:active={(editorState, editor?.isActive('heading', { level: 4 }))} onclick={() => ctxSetHeading(4)}>Heading 4</button>
 						<div class="text-ctx-sep"></div>
-						<button class:active={isEditorActive('paragraph')} onclick={ctxSetParagraph}>Paragraph</button>
+						<button class:active={(editorState, editor?.isActive('paragraph'))} onclick={ctxSetParagraph}>Paragraph</button>
 					</div>
 				{/if}
 			</div>

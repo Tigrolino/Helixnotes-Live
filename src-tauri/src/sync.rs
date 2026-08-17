@@ -81,10 +81,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 fn normalize_etag(s: &str) -> String {
-    s.trim()
-        .trim_start_matches("W/")
-        .trim_matches('"')
-        .to_string()
+    s.trim().trim_start_matches("W/").trim_matches('"').to_string()
 }
 
 /// Percent-encode each path segment, keeping the `/` separators.
@@ -268,11 +265,7 @@ impl WebdavClient {
             .send()
             .map_err(|e| e.to_string())?;
         if !resp.status().is_success() {
-            return Err(format!(
-                "GET {} failed: HTTP {}",
-                relpath,
-                resp.status().as_u16()
-            ));
+            return Err(format!("GET {} failed: HTTP {}", relpath, resp.status().as_u16()));
         }
         Ok(resp.bytes().map_err(|e| e.to_string())?.to_vec())
     }
@@ -286,11 +279,7 @@ impl WebdavClient {
             .send()
             .map_err(|e| e.to_string())?;
         if !resp.status().is_success() {
-            return Err(format!(
-                "PUT {} failed: HTTP {}",
-                relpath,
-                resp.status().as_u16()
-            ));
+            return Err(format!("PUT {} failed: HTTP {}", relpath, resp.status().as_u16()));
         }
         Ok(resp
             .headers()
@@ -464,10 +453,8 @@ fn parse_multistatus(xml: &str, base_path: &str) -> Result<Vec<RemoteEntry>, Str
             }
             Ok(Event::Text(e)) => {
                 if cap != Cap::None {
-                    if let Ok(decoded) = e.decode() {
-                        if let Ok(text) = quick_xml::escape::unescape(&decoded) {
-                            buf.push_str(&text);
-                        }
+                    if let Ok(t) = e.unescape() {
+                        buf.push_str(&t);
                     }
                 }
             }
@@ -528,8 +515,8 @@ fn apply_changes(
 
         match (l, r) {
             (Some(lf), Some(re)) => {
-                let local_changed = m.is_none_or(|me| me.local_hash != lf.hash);
-                let remote_changed = m.is_none_or(|me| &me.remote_etag != re);
+                let local_changed = m.map_or(true, |me| me.local_hash != lf.hash);
+                let remote_changed = m.map_or(true, |me| &me.remote_etag != re);
                 if !local_changed && !remote_changed {
                     new_m.files.insert(
                         key.clone(),
@@ -682,11 +669,7 @@ pub fn test_connection(cfg: WebdavConfig) -> Result<String, String> {
 
 /// Run a full sync. Mutes the file watcher while applying local writes, then
 /// rebuilds the search index. Returns a summary of what changed.
-pub fn run_sync(
-    app: tauri::AppHandle,
-    vault: String,
-    cfg: WebdavConfig,
-) -> Result<SyncSummary, String> {
+pub fn run_sync(app: tauri::AppHandle, vault: String, cfg: WebdavConfig) -> Result<SyncSummary, String> {
     use std::sync::atomic::Ordering;
 
     let state = app.state::<AppState>();
