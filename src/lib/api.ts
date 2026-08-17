@@ -185,7 +185,7 @@ export async function getNoteSwitcherTitles(
   return invoke("get_note_switcher_titles", { recentPaths });
 }
 
-export async function getGraphData(): Promise<{ nodes: { title: string; path: string }[]; edges: { source: number; target: number }[] }> {
+export async function getGraphData(): Promise<{ nodes: { title: string; path: string }[]; edges: { source: number; target: number; bidirectional: boolean }[] }> {
   return invoke("get_graph_data");
 }
 

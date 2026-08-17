@@ -1,0 +1,44 @@
+stages:
+  - verify
+
+frontend:
+  stage: verify
+  image: node:24-bookworm
+  before_script:
+    - corepack enable
+    - corepack prepare pnpm@11.18.0 --activate
+    - pnpm config set store-dir .pnpm-store
+    - pnpm install --frozen-lockfile
+  script:
+    - pnpm test
+    - pnpm check
+    - pnpm build
+    - pnpm audit --audit-level=high
+  cache:
+    key:
+      files:
+        - pnpm-lock.yaml
+    paths:
+      - .pnpm-store/
+
+rust:
+  stage: verify
+  image: rust:1.97-bookworm
+  variables:
+    CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+    - rustup component add clippy rustfmt
+  script:
+    - cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+    - cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+    - cargo test --manifest-path src-tauri/Cargo.toml
+  cache:
+    key:
+      files:
+        - src-tauri/Cargo.lock
+    paths:
+      - src-tauri/target/
+      - .cargo/registry/
+      - .cargo/git/

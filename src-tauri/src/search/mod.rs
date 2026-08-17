@@ -26,7 +26,10 @@ fn vault_index_base(vault_path: &str) -> Option<std::path::PathBuf> {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(vault_path.as_bytes());
-    let key: String = hasher.finalize()[..8].iter().map(|b| format!("{:02x}", b)).collect();
+    let key: String = hasher.finalize()[..8]
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect();
     dirs::data_local_dir().map(|d| d.join("helixnotes").join("search").join(key))
 }
 
@@ -235,7 +238,9 @@ impl SearchIndex {
         // before the writer is created, so both indexing and querying use it).
         index.tokenizers().register(
             "cjk",
-            TextAnalyzer::builder(CjkTokenizer).filter(LowerCaser).build(),
+            TextAnalyzer::builder(CjkTokenizer)
+                .filter(LowerCaser)
+                .build(),
         );
 
         #[cfg(mobile)]
@@ -290,7 +295,7 @@ impl SearchIndex {
                 doc.add_text(self.path_field, &path_str);
                 doc.add_text(self.title_field, &meta.title);
                 doc.add_text(self.body_field, &content);
-                doc.add_text(self.tags_field, &meta.tags.join(" "));
+                doc.add_text(self.tags_field, meta.tags.join(" "));
                 let _ = writer.add_document(doc);
             }
         }
@@ -321,7 +326,7 @@ impl SearchIndex {
         doc.add_text(self.path_field, path);
         doc.add_text(self.title_field, &meta.title);
         doc.add_text(self.body_field, &content);
-        doc.add_text(self.tags_field, &meta.tags.join(" "));
+        doc.add_text(self.tags_field, meta.tags.join(" "));
         let _ = writer.add_document(doc);
 
         writer.commit().map_err(|e| e.to_string())?;
@@ -341,7 +346,7 @@ impl SearchIndex {
         let reader = self.index.reader().map_err(|e| e.to_string())?;
         let searcher = reader.searcher();
 
-        let fields = vec![self.title_field, self.body_field, self.tags_field];
+        let fields = [self.title_field, self.body_field, self.tags_field];
         // Tokenize the query with the SAME CJK-aware analyzer used for indexing, so a
         // Chinese/Japanese/Korean query becomes the same uni/bigram tokens as the docs.
         // (For pure-ASCII queries this yields the same lowercased word tokens as before.)
@@ -376,9 +381,10 @@ impl SearchIndex {
                             ));
                             vec![(Occur::Should, exact)]
                         } else {
-                            let prefix: Box<dyn Query> = Box::new(PhrasePrefixQuery::new(
-                                vec![Term::from_field_text(field, term)],
-                            ));
+                            let prefix: Box<dyn Query> =
+                                Box::new(PhrasePrefixQuery::new(vec![Term::from_field_text(
+                                    field, term,
+                                )]));
                             let fuzzy: Box<dyn Query> = Box::new(FuzzyTermQuery::new(
                                 Term::from_field_text(field, term),
                                 1,
