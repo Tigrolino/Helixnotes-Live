@@ -81,7 +81,10 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 fn normalize_etag(s: &str) -> String {
-    s.trim().trim_start_matches("W/").trim_matches('"').to_string()
+    s.trim()
+        .trim_start_matches("W/")
+        .trim_matches('"')
+        .to_string()
 }
 
 /// Percent-encode each path segment, keeping the `/` separators.
@@ -265,7 +268,11 @@ impl WebdavClient {
             .send()
             .map_err(|e| e.to_string())?;
         if !resp.status().is_success() {
-            return Err(format!("GET {} failed: HTTP {}", relpath, resp.status().as_u16()));
+            return Err(format!(
+                "GET {} failed: HTTP {}",
+                relpath,
+                resp.status().as_u16()
+            ));
         }
         Ok(resp.bytes().map_err(|e| e.to_string())?.to_vec())
     }
@@ -279,7 +286,11 @@ impl WebdavClient {
             .send()
             .map_err(|e| e.to_string())?;
         if !resp.status().is_success() {
-            return Err(format!("PUT {} failed: HTTP {}", relpath, resp.status().as_u16()));
+            return Err(format!(
+                "PUT {} failed: HTTP {}",
+                relpath,
+                resp.status().as_u16()
+            ));
         }
         Ok(resp
             .headers()
@@ -671,7 +682,11 @@ pub fn test_connection(cfg: WebdavConfig) -> Result<String, String> {
 
 /// Run a full sync. Mutes the file watcher while applying local writes, then
 /// rebuilds the search index. Returns a summary of what changed.
-pub fn run_sync(app: tauri::AppHandle, vault: String, cfg: WebdavConfig) -> Result<SyncSummary, String> {
+pub fn run_sync(
+    app: tauri::AppHandle,
+    vault: String,
+    cfg: WebdavConfig,
+) -> Result<SyncSummary, String> {
     use std::sync::atomic::Ordering;
 
     let state = app.state::<AppState>();

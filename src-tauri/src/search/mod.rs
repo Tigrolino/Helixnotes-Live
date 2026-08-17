@@ -26,7 +26,10 @@ fn vault_index_base(vault_path: &str) -> Option<std::path::PathBuf> {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(vault_path.as_bytes());
-    let key: String = hasher.finalize()[..8].iter().map(|b| format!("{:02x}", b)).collect();
+    let key: String = hasher.finalize()[..8]
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect();
     dirs::data_local_dir().map(|d| d.join("helixnotes").join("search").join(key))
 }
 
@@ -235,7 +238,9 @@ impl SearchIndex {
         // before the writer is created, so both indexing and querying use it).
         index.tokenizers().register(
             "cjk",
-            TextAnalyzer::builder(CjkTokenizer).filter(LowerCaser).build(),
+            TextAnalyzer::builder(CjkTokenizer)
+                .filter(LowerCaser)
+                .build(),
         );
 
         #[cfg(mobile)]
@@ -376,9 +381,10 @@ impl SearchIndex {
                             ));
                             vec![(Occur::Should, exact)]
                         } else {
-                            let prefix: Box<dyn Query> = Box::new(PhrasePrefixQuery::new(
-                                vec![Term::from_field_text(field, term)],
-                            ));
+                            let prefix: Box<dyn Query> =
+                                Box::new(PhrasePrefixQuery::new(vec![Term::from_field_text(
+                                    field, term,
+                                )]));
                             let fuzzy: Box<dyn Query> = Box::new(FuzzyTermQuery::new(
                                 Term::from_field_text(field, term),
                                 1,

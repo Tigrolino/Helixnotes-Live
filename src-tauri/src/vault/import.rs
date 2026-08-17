@@ -112,7 +112,11 @@ pub fn import(vault_path: &str) -> Result<ImportResult, String> {
                     "png" | "jpg" | "jpeg" | "gif" | "svg" | "webp" | "bmp" | "ico" | "pdf"
                 );
                 if is_embeddable {
-                    let alt = if is_dimension_spec(alt_param) { "" } else { alt_param };
+                    let alt = if is_dimension_spec(alt_param) {
+                        ""
+                    } else {
+                        alt_param
+                    };
                     result.links_converted += 1;
                     format!("![{}]({})", alt, link_target)
                 } else {
@@ -135,7 +139,11 @@ pub fn import(vault_path: &str) -> Result<ImportResult, String> {
                 let (file_part, anchor) = split_anchor(note_ref);
                 if file_part.is_empty() {
                     if let Some(a) = anchor {
-                        let display = if display_param.is_empty() { a } else { display_param };
+                        let display = if display_param.is_empty() {
+                            a
+                        } else {
+                            display_param
+                        };
                         result.links_converted += 1;
                         return format!("[{}](#{})", display, a);
                     }
@@ -163,8 +171,22 @@ pub fn import(vault_path: &str) -> Result<ImportResult, String> {
             .to_string();
         content = after_links;
 
-        content = fix_md_image_refs(&content, &md_img_re, vault, note_dir, &file_index, &mut result.links_converted);
-        content = fix_md_link_refs(&content, &md_link_re, vault, note_dir, &file_index, &mut result.links_converted);
+        content = fix_md_image_refs(
+            &content,
+            &md_img_re,
+            vault,
+            note_dir,
+            &file_index,
+            &mut result.links_converted,
+        );
+        content = fix_md_link_refs(
+            &content,
+            &md_link_re,
+            vault,
+            note_dir,
+            &file_index,
+            &mut result.links_converted,
+        );
 
         if result.links_converted > links_before {
             changed = true;
@@ -387,9 +409,7 @@ fn file_created(path: &Path) -> Option<chrono::DateTime<Utc>> {
         .ok()
         .and_then(|m| m.created().ok())
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .and_then(|d| {
-            chrono::DateTime::from_timestamp(d.as_secs() as i64, d.subsec_nanos())
-        })
+        .and_then(|d| chrono::DateTime::from_timestamp(d.as_secs() as i64, d.subsec_nanos()))
 }
 
 fn file_modified(path: &Path) -> Option<chrono::DateTime<Utc>> {
@@ -397,9 +417,7 @@ fn file_modified(path: &Path) -> Option<chrono::DateTime<Utc>> {
         .ok()
         .and_then(|m| m.modified().ok())
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .and_then(|d| {
-            chrono::DateTime::from_timestamp(d.as_secs() as i64, d.subsec_nanos())
-        })
+        .and_then(|d| chrono::DateTime::from_timestamp(d.as_secs() as i64, d.subsec_nanos()))
 }
 
 fn convert_syntax(content: &str, highlight_re: &Regex, comment_re: &Regex) -> String {
@@ -511,7 +529,9 @@ fn fix_md_link_refs(
         let display = &caps[1];
         let href = &caps[2];
         let decoded = percent_decode(href);
-        if decoded.starts_with("http") || decoded.starts_with('/') || decoded.starts_with("data:")
+        if decoded.starts_with("http")
+            || decoded.starts_with('/')
+            || decoded.starts_with("data:")
             || decoded.starts_with('#')
         {
             return format!("[{}]({})", display, href);
@@ -547,9 +567,7 @@ fn fix_md_link_refs(
     .to_string()
 }
 
-fn move_attachments(
-    vault: &Path,
-) -> Result<HashMap<String, String>, String> {
+fn move_attachments(vault: &Path) -> Result<HashMap<String, String>, String> {
     let attachments_dir = vault.join(".helixnotes").join("attachments");
     let _ = std::fs::create_dir_all(&attachments_dir);
 
@@ -599,10 +617,7 @@ fn move_attachments(
     Ok(moved)
 }
 
-fn rewrite_attachment_refs(
-    vault: &Path,
-    moved: &HashMap<String, String>,
-) -> Result<(), String> {
+fn rewrite_attachment_refs(vault: &Path, moved: &HashMap<String, String>) -> Result<(), String> {
     let md_ref = Regex::new(r"(!?\[[^\]]*\])\(([^)]+)\)").map_err(|e| e.to_string())?;
 
     let md_files: Vec<_> = walkdir::WalkDir::new(vault)
@@ -717,7 +732,8 @@ fn is_dimension_spec(s: &str) -> bool {
     if s.is_empty() {
         return false;
     }
-    s.chars().all(|c| c.is_ascii_digit() || c == 'x' || c == 'X')
+    s.chars()
+        .all(|c| c.is_ascii_digit() || c == 'x' || c == 'X')
 }
 
 fn resolve_wiki_ref(file_index: &HashMap<String, String>, reference: &str) -> String {
@@ -905,7 +921,10 @@ mod tests {
             extract_heading_title("# My Title\n\nBody"),
             Some("My Title".to_string())
         );
-        assert_eq!(extract_heading_title("\n\n# Spaced Title"), Some("Spaced Title".to_string()));
+        assert_eq!(
+            extract_heading_title("\n\n# Spaced Title"),
+            Some("Spaced Title".to_string())
+        );
         assert_eq!(extract_heading_title("Body without heading"), None);
         assert_eq!(extract_heading_title("## Subheading"), None);
         assert_eq!(extract_heading_title(""), None);
@@ -945,8 +964,7 @@ mod tests {
 
     #[test]
     fn test_normalize_tags_strips_hash() {
-        let mapping: serde_yaml::Mapping =
-            serde_yaml::from_str("tags:\n  - \"#hashed\"").unwrap();
+        let mapping: serde_yaml::Mapping = serde_yaml::from_str("tags:\n  - \"#hashed\"").unwrap();
         let tags = normalize_tags(&mapping);
         assert_eq!(tags, vec!["hashed"]);
     }

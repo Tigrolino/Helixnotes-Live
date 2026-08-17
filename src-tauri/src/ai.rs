@@ -23,7 +23,11 @@ pub fn ai_request(
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             // Handle all API keys as optional; ollama and v1 completions doesnt always require it.
-            let key_opt = if api_key.is_empty() { None } else { Some(api_key.as_str()) };
+            let key_opt = if api_key.is_empty() {
+                None
+            } else {
+                Some(api_key.as_str())
+            };
             let result = match provider.as_str() {
                 "openai" => {
                     stream_openai(
@@ -99,7 +103,10 @@ pub fn ai_request(
 /// so both `https://host` and `https://host/v1` work (we append `/v1/chat/completions`).
 fn normalize_openai_base(base: &str) -> String {
     let b = base.trim().trim_end_matches('/');
-    b.strip_suffix("/v1").unwrap_or(b).trim_end_matches('/').to_string()
+    b.strip_suffix("/v1")
+        .unwrap_or(b)
+        .trim_end_matches('/')
+        .to_string()
 }
 
 async fn stream_anthropic(
@@ -269,9 +276,7 @@ async fn stream_openai(
         body["temperature"] = json!(0.7);
     }
 
-    let mut req = client
-        .post(url)
-        .header("content-type", "application/json");
+    let mut req = client.post(url).header("content-type", "application/json");
 
     if let Some(key) = api_key {
         req = req.header("Authorization", format!("Bearer {}", key));
@@ -381,7 +386,11 @@ pub async fn test_connection(
     model: &str,
     base_url: Option<&str>,
 ) -> Result<String, String> {
-    let key_opt = if api_key.is_empty() { None } else { Some(api_key) };
+    let key_opt = if api_key.is_empty() {
+        None
+    } else {
+        Some(api_key)
+    };
     match provider {
         "openai" => test_openai(OPENAI_API_URL, Some(api_key), model).await,
         "ollama" => {
@@ -435,14 +444,18 @@ async fn test_anthropic(api_key: &str, model: &str) -> Result<String, String> {
 }
 
 async fn test_openai(url: &str, api_key: Option<&str>, model: &str) -> Result<String, String> {
-	let client = Client::new();
-	let is_gpt5 = model.starts_with("gpt-5");
-	let token_key = if is_gpt5 { "max_completion_tokens" } else { "max_tokens" };
+    let client = Client::new();
+    let is_gpt5 = model.starts_with("gpt-5");
+    let token_key = if is_gpt5 {
+        "max_completion_tokens"
+    } else {
+        "max_tokens"
+    };
 
-	let body = json!({
-		"model": model,
-		token_key: 20,
-		"messages": [
+    let body = json!({
+        "model": model,
+        token_key: 20,
+        "messages": [
             {
                 "role": "user",
                 "content": "Hi"
@@ -450,9 +463,7 @@ async fn test_openai(url: &str, api_key: Option<&str>, model: &str) -> Result<St
         ]
     });
 
-    let mut req = client
-        .post(url)
-        .header("content-type", "application/json");
+    let mut req = client.post(url).header("content-type", "application/json");
 
     if let Some(key) = api_key {
         req = req.header("Authorization", format!("Bearer {}", key));

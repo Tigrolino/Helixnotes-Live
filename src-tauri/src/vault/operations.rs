@@ -51,7 +51,10 @@ fn ensure_vault_content_dir(vault_path: &str, requested_path: &Path) -> Result<P
 fn ensure_note_path(vault_path: &str, requested_path: &Path) -> Result<PathBuf, String> {
     let requested = ensure_vault_content_path(vault_path, requested_path, false)?;
     if !requested.is_file()
-        || requested.extension().and_then(|extension| extension.to_str()) != Some("md")
+        || requested
+            .extension()
+            .and_then(|extension| extension.to_str())
+            != Some("md")
     {
         return Err("Note path must point to a Markdown file".to_string());
     }
@@ -65,7 +68,10 @@ fn ensure_readable_note_path(vault_path: &str, requested_path: &Path) -> Result<
 
     let trashed_note = ensure_trash_entry(vault_path, requested_path)?;
     if !trashed_note.is_file()
-        || trashed_note.extension().and_then(|extension| extension.to_str()) != Some("md")
+        || trashed_note
+            .extension()
+            .and_then(|extension| extension.to_str())
+            != Some("md")
     {
         return Err("Note path must point to a Markdown file".to_string());
     }
@@ -235,7 +241,11 @@ fn scan_dir_recursive(dir: &Path, vault_root: &str) -> Vec<NotebookEntry> {
     paths
         .par_iter()
         .map(|path| {
-            let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             let relative = path
                 .strip_prefix(root)
                 .unwrap_or(path)
@@ -286,7 +296,11 @@ fn scan_dir_with_count(dir: &Path, vault_root: &str) -> (Vec<NotebookEntry>, usi
     let entries: Vec<NotebookEntry> = paths
         .par_iter()
         .map(|path| {
-            let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             let relative = path
                 .strip_prefix(root)
                 .unwrap_or(path)
@@ -341,7 +355,12 @@ pub fn scan_notes(vault_path: &str, notebook_path: Option<&str>) -> Result<Vec<N
     ensure_vault_content_dir(vault_path, root)?;
     let vault_root = Path::new(vault_path);
 
-    log::info!("scan_notes: vault={}, scan={}, exists={}", vault_path, scan_path, root.exists());
+    log::info!(
+        "scan_notes: vault={}, scan={}, exists={}",
+        vault_path,
+        scan_path,
+        root.exists()
+    );
 
     if !root.exists() {
         return Err("Path does not exist".to_string());
@@ -397,7 +416,9 @@ pub fn scan_notes(vault_path: &str, notebook_path: Option<&str>) -> Result<Vec<N
         } else {
             WalkDir::new(root)
                 .into_iter()
-                .filter_entry(|e| !is_hidden(e.path()) && !e.path().starts_with(helixnotes_dir(vault_path)))
+                .filter_entry(|e| {
+                    !is_hidden(e.path()) && !e.path().starts_with(helixnotes_dir(vault_path))
+                })
                 .filter_map(|e| e.ok())
                 .map(|e| e.path().to_path_buf())
                 .filter(|p| p.is_file() && p.extension().and_then(|x| x.to_str()) == Some("md"))
@@ -774,7 +795,9 @@ pub fn create_daily_note(
         "eu" => target_date.format("%d/%m/%Y").to_string(),
         _ => {
             let locale = get_system_locale();
-            target_date.format_localized("%B %d, %Y", locale).to_string()
+            target_date
+                .format_localized("%B %d, %Y", locale)
+                .to_string()
         }
     };
 
@@ -935,7 +958,13 @@ pub fn rename_note(path: &str, new_title: &str, vault_path: &str) -> Result<Stri
     let new_path_str = new_path.to_string_lossy().to_string();
 
     // Update wikilinks in other notes that reference this note
-    update_wikilinks_after_rename(vault_path, &old_path_str, &new_path_str, &old_title, new_title);
+    update_wikilinks_after_rename(
+        vault_path,
+        &old_path_str,
+        &new_path_str,
+        &old_title,
+        new_title,
+    );
 
     Ok(new_path_str)
 }
@@ -994,11 +1023,17 @@ fn update_wikilinks_after_rename(
         .filter_map(|e| e.ok())
     {
         let path = entry.path();
-        if !path.is_file() { continue; }
+        if !path.is_file() {
+            continue;
+        }
         let path_str = path.to_string_lossy();
-        if path.extension().and_then(|e| e.to_str()) != Some("md") { continue; }
+        if path.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
         // Skip the renamed note itself
-        if *path_str == *new_path { continue; }
+        if *path_str == *new_path {
+            continue;
+        }
 
         let content = match fs::read_to_string(path) {
             Ok(c) => c,
@@ -1014,22 +1049,13 @@ fn update_wikilinks_after_rename(
         // If another note shares the same title, these would be ambiguous.
         if old_title != new_title && title_is_unique {
             // 1. Short title ref: [[Old Title]] → [[New Title]]
-            result = result.replace(
-                &format!("[[{}]]", old_title),
-                &format!("[[{}]]", new_title),
-            );
+            result = result.replace(&format!("[[{}]]", old_title), &format!("[[{}]]", new_title));
 
             // 2. Short title with alias: [[Old Title|display]] → [[New Title|display]]
-            result = result.replace(
-                &format!("[[{}|", old_title),
-                &format!("[[{}|", new_title),
-            );
+            result = result.replace(&format!("[[{}|", old_title), &format!("[[{}|", new_title));
 
             // 3. Short title as alias display: [[ref|Old Title]] → [[ref|New Title]]
-            result = result.replace(
-                &format!("|{}]]", old_title),
-                &format!("|{}]]", new_title),
-            );
+            result = result.replace(&format!("|{}]]", old_title), &format!("|{}]]", new_title));
         }
 
         // Path-based rules are always safe (paths are unique).
@@ -1144,7 +1170,10 @@ fn cleanup_empty_trash_dir(vault_path: &str, dir: Option<&Path>) {
 pub fn get_trash_contents(vault_path: &str) -> Result<TrashContents, String> {
     let trash_dir = helixnotes_dir(vault_path).join("trash");
     if !trash_dir.exists() {
-        return Ok(TrashContents { notes: Vec::new(), notebooks: Vec::new() });
+        return Ok(TrashContents {
+            notes: Vec::new(),
+            notebooks: Vec::new(),
+        });
     }
 
     let vault_root = Path::new(vault_path);
@@ -1163,7 +1192,10 @@ pub fn get_trash_contents(vault_path: &str) -> Result<TrashContents, String> {
                 .min_depth(1)
                 .into_iter()
                 .filter_map(|e| e.ok())
-                .filter(|e| e.path().is_file() && e.path().extension().and_then(|x| x.to_str()) == Some("md"))
+                .filter(|e| {
+                    e.path().is_file()
+                        && e.path().extension().and_then(|x| x.to_str()) == Some("md")
+                })
                 .count();
             let dirname = path.file_name().unwrap_or_default().to_string_lossy();
             // Strip timestamp prefix to get original notebook name
@@ -1239,7 +1271,9 @@ pub fn restore_notebook(vault_path: &str, trash_path: &str) -> Result<String, St
     let dirname = src.file_name().unwrap_or_default().to_string_lossy();
 
     // Try to read original path from sidecar .meta file
-    let meta_path = src.with_extension("").with_file_name(format!("{}.meta", dirname));
+    let meta_path = src
+        .with_extension("")
+        .with_file_name(format!("{}.meta", dirname));
     let relative = if let Ok(original) = fs::read_to_string(&meta_path) {
         original
     } else {
@@ -1542,10 +1576,7 @@ mod tests {
     fn compares_numeric_segments_anywhere_in_names() {
         let mut names = ["Class 10b", "Class 2b", "Class 10a", "Class 2a"];
         names.sort_by(|left, right| compare_natural_names(left, right));
-        assert_eq!(
-            names,
-            ["Class 2a", "Class 2b", "Class 10a", "Class 10b"]
-        );
+        assert_eq!(names, ["Class 2a", "Class 2b", "Class 10a", "Class 10b"]);
         assert_eq!(
             compare_natural_names("Class 02", "Class 2b"),
             std::cmp::Ordering::Less

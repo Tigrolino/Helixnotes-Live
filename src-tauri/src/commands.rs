@@ -6,19 +6,23 @@ use std::path::Path;
 use tauri::{AppHandle, Manager, State};
 
 fn index_note_bg(state: &State<'_, AppState>, path: &str) {
-	let search = state.search_index.lock().ok().and_then(|g| g.clone());
-	if let Some(search) = search {
-		let p = path.to_string();
-		std::thread::spawn(move || { let _ = search.index_note(&p); });
-	}
+    let search = state.search_index.lock().ok().and_then(|g| g.clone());
+    if let Some(search) = search {
+        let p = path.to_string();
+        std::thread::spawn(move || {
+            let _ = search.index_note(&p);
+        });
+    }
 }
 
 fn remove_note_bg(state: &State<'_, AppState>, path: &str) {
-	let search = state.search_index.lock().ok().and_then(|g| g.clone());
-	if let Some(search) = search {
-		let p = path.to_string();
-		std::thread::spawn(move || { let _ = search.remove_note(&p); });
-	}
+    let search = state.search_index.lock().ok().and_then(|g| g.clone());
+    if let Some(search) = search {
+        let p = path.to_string();
+        std::thread::spawn(move || {
+            let _ = search.remove_note(&p);
+        });
+    }
 }
 
 fn clear_vault_runtime(state: &State<'_, AppState>) -> Result<(), String> {
@@ -189,9 +193,7 @@ pub async fn choose_external_vault(
             if bookmark_was_registered {
                 let _ = app.ios_vault_access().rollback_staged();
             } else {
-                let _ = app
-                    .ios_vault_access()
-                    .forget_bookmark(&result.bookmark_id);
+                let _ = app.ios_vault_access().forget_bookmark(&result.bookmark_id);
             }
             return Err(error);
         }
@@ -353,7 +355,10 @@ pub fn set_accent_color(state: State<'_, AppState>, color: String) -> Result<(),
 }
 
 #[tauri::command]
-pub fn save_custom_theme(state: State<'_, AppState>, theme: crate::types::CustomTheme) -> Result<(), String> {
+pub fn save_custom_theme(
+    state: State<'_, AppState>,
+    theme: crate::types::CustomTheme,
+) -> Result<(), String> {
     let mut config = state.config.lock().map_err(|e| e.to_string())?;
     if let Some(pos) = config.custom_themes.iter().position(|t| t.id == theme.id) {
         config.custom_themes[pos] = theme;
@@ -407,9 +412,16 @@ mod custom_theme_reference_tests {
 }
 
 #[tauri::command]
-pub fn export_custom_theme(state: State<'_, AppState>, id: String, path: String) -> Result<(), String> {
+pub fn export_custom_theme(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+) -> Result<(), String> {
     let config = state.config.lock().map_err(|e| e.to_string())?;
-    let theme = config.custom_themes.iter().find(|t| t.id == id)
+    let theme = config
+        .custom_themes
+        .iter()
+        .find(|t| t.id == id)
         .ok_or_else(|| "Theme not found".to_string())?;
     let export = serde_json::json!({ "version": 1, "themes": [theme] });
     let data = serde_json::to_string_pretty(&export).map_err(|e| e.to_string())?;
@@ -418,11 +430,15 @@ pub fn export_custom_theme(state: State<'_, AppState>, id: String, path: String)
 }
 
 #[tauri::command]
-pub fn import_custom_themes(state: State<'_, AppState>, path: String) -> Result<Vec<crate::types::CustomTheme>, String> {
+pub fn import_custom_themes(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<Vec<crate::types::CustomTheme>, String> {
     let data = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let parsed: serde_json::Value = serde_json::from_str(&data).map_err(|e| e.to_string())?;
-    let themes: Vec<crate::types::CustomTheme> = serde_json::from_value(parsed["themes"].clone())
-        .map_err(|e| format!("Invalid theme file: {}", e))?;
+    let themes: Vec<crate::types::CustomTheme> =
+        serde_json::from_value(parsed["themes"].clone())
+            .map_err(|e| format!("Invalid theme file: {}", e))?;
     let mut config = state.config.lock().map_err(|e| e.to_string())?;
     for theme in &themes {
         if let Some(pos) = config.custom_themes.iter().position(|t| t.id == theme.id) {
@@ -464,11 +480,7 @@ pub fn set_line_height(state: State<'_, AppState>, height: f64) -> Result<(), St
 }
 
 #[tauri::command]
-pub fn set_ui_scale(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    scale: f64,
-) -> Result<(), String> {
+pub fn set_ui_scale(app: AppHandle, state: State<'_, AppState>, scale: f64) -> Result<(), String> {
     let mut config = state.config.lock().map_err(|e| e.to_string())?;
     config.ui_scale = Some(scale);
     save_app_config(&config)?;
@@ -602,7 +614,11 @@ pub fn move_notebook(
 pub fn delete_notebook(state: State<'_, AppState>, path: String) -> Result<(), String> {
     let vault_path = {
         let config = state.config.lock().map_err(|e| e.to_string())?;
-        config.active_vault.as_ref().ok_or("No active vault")?.clone()
+        config
+            .active_vault
+            .as_ref()
+            .ok_or("No active vault")?
+            .clone()
     };
     operations::delete_notebook(&vault_path, &path)
 }
@@ -651,8 +667,8 @@ pub fn save_note(
 
     operations::save_note(&vault_path, &path, &meta, &body)?;
 
-	// Re-index note so search picks up changes (background to avoid blocking on FUSE fsync)
-	index_note_bg(&state, &path);
+    // Re-index note so search picks up changes (background to avoid blocking on FUSE fsync)
+    index_note_bg(&state, &path);
 
     Ok(())
 }
@@ -663,7 +679,11 @@ pub fn duplicate_note(
     path: String,
 ) -> Result<crate::types::NoteEntry, String> {
     let config = state.config.lock().map_err(|e| e.to_string())?;
-    let vault = config.active_vault.as_ref().ok_or("No active vault")?.clone();
+    let vault = config
+        .active_vault
+        .as_ref()
+        .ok_or("No active vault")?
+        .clone();
     drop(config);
 
     let entry = operations::duplicate_note(&path, &vault)?;
@@ -677,31 +697,43 @@ pub fn create_note(
     notebook_relative: Option<String>,
     title: String,
 ) -> Result<NoteEntry, String> {
-	let config = state.config.lock().map_err(|e| e.to_string())?;
-	let vault_path = config.active_vault.as_ref().ok_or("No active vault")?;
-	let entry = operations::create_note(vault_path, notebook_relative.as_deref(), &title)?;
-
-	// Index new note (background to avoid blocking on FUSE fsync)
-	index_note_bg(&state, &entry.path);
-
-	Ok(entry)
-}
-
-#[tauri::command]
-pub fn create_daily_note(state: State<'_, AppState>, date: Option<String>) -> Result<NoteEntry, String> {
     let config = state.config.lock().map_err(|e| e.to_string())?;
     let vault_path = config.active_vault.as_ref().ok_or("No active vault")?;
-    let entry = operations::create_daily_note(vault_path, date.as_deref(), &config.daily_title_format)?;
+    let entry = operations::create_note(vault_path, notebook_relative.as_deref(), &title)?;
 
-    	index_note_bg(&state, &entry.path);
+    // Index new note (background to avoid blocking on FUSE fsync)
+    index_note_bg(&state, &entry.path);
 
     Ok(entry)
 }
 
 #[tauri::command]
-pub fn rename_note(state: State<'_, AppState>, path: String, new_title: String) -> Result<String, String> {
+pub fn create_daily_note(
+    state: State<'_, AppState>,
+    date: Option<String>,
+) -> Result<NoteEntry, String> {
     let config = state.config.lock().map_err(|e| e.to_string())?;
-    let vault_path = config.active_vault.as_ref().ok_or("No active vault")?.clone();
+    let vault_path = config.active_vault.as_ref().ok_or("No active vault")?;
+    let entry =
+        operations::create_daily_note(vault_path, date.as_deref(), &config.daily_title_format)?;
+
+    index_note_bg(&state, &entry.path);
+
+    Ok(entry)
+}
+
+#[tauri::command]
+pub fn rename_note(
+    state: State<'_, AppState>,
+    path: String,
+    new_title: String,
+) -> Result<String, String> {
+    let config = state.config.lock().map_err(|e| e.to_string())?;
+    let vault_path = config
+        .active_vault
+        .as_ref()
+        .ok_or("No active vault")?
+        .clone();
     drop(config);
     operations::rename_note(&path, &new_title, &vault_path)
 }
@@ -712,8 +744,8 @@ pub fn delete_note(state: State<'_, AppState>, path: String) -> Result<(), Strin
     let vault_path = config.active_vault.as_ref().ok_or("No active vault")?;
     operations::delete_note(vault_path, &path)?;
 
-	// Remove from index (background to avoid blocking on FUSE fsync)
-	remove_note_bg(&state, &path);
+    // Remove from index (background to avoid blocking on FUSE fsync)
+    remove_note_bg(&state, &path);
 
     Ok(())
 }
@@ -809,10 +841,7 @@ pub fn get_all_note_titles(state: State<'_, AppState>) -> Result<Vec<NoteTitleEn
             .map(|r| r.to_string_lossy().replace('\\', "/").to_string())
             .unwrap_or_else(|_| path.to_string_lossy().to_string());
 
-        entries.push(NoteTitleEntry {
-            title,
-            path: rel,
-        });
+        entries.push(NoteTitleEntry { title, path: rel });
     }
 
     Ok(entries)
@@ -868,23 +897,34 @@ pub fn get_graph_data(state: State<'_, AppState>) -> Result<crate::types::GraphD
         .filter_map(|e| e.ok())
     {
         let path = entry.path();
-        if !path.is_file() { continue; }
+        if !path.is_file() {
+            continue;
+        }
         let path_str = path.to_string_lossy().to_string();
-        if path.extension().and_then(|e| e.to_str()) != Some("md") { continue; }
+        if path.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
         // Skip Syncthing conflict files
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            if name.contains(".sync-conflict-") { continue; }
+            if name.contains(".sync-conflict-") {
+                continue;
+            }
         }
         // Deduplicate by canonical path (handles symlinks)
         let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         let canonical_str = canonical.to_string_lossy().to_string();
-        if !seen_paths.insert(canonical_str) { continue; }
+        if !seen_paths.insert(canonical_str) {
+            continue;
+        }
 
         let raw = std::fs::read_to_string(path).unwrap_or_default();
 
         // Fast title extraction: scan for "title: " line in frontmatter without full YAML parse
         let title = extract_title_fast(&raw).unwrap_or_else(|| {
-            path.file_stem().unwrap_or_default().to_string_lossy().to_string()
+            path.file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string()
         });
 
         let idx = graph_nodes.len();
@@ -896,7 +936,10 @@ pub fn get_graph_data(state: State<'_, AppState>) -> Result<crate::types::GraphD
         if let Ok(rel) = path.strip_prefix(vault) {
             let rel_no_ext = rel.with_extension("");
             // Normalize Windows backslashes so [[folder/note]] links resolve cross-platform.
-            let rel_lower = rel_no_ext.to_string_lossy().replace('\\', "/").to_lowercase();
+            let rel_lower = rel_no_ext
+                .to_string_lossy()
+                .replace('\\', "/")
+                .to_lowercase();
             relpath_to_idx.entry(rel_lower).or_insert(idx);
         }
 
@@ -912,16 +955,27 @@ pub fn get_graph_data(state: State<'_, AppState>) -> Result<crate::types::GraphD
     let mut edges: Vec<crate::types::GraphEdge> = Vec::new();
     let mut edge_map: HashMap<(usize, usize), usize> = HashMap::new();
 
-    let add_edge = |edges: &mut Vec<crate::types::GraphEdge>, edge_map: &mut HashMap<(usize, usize), usize>, src: usize, tgt: usize| {
-        if src == tgt { return; }
-        if edge_map.contains_key(&(src, tgt)) { return; } // exact duplicate
+    let add_edge = |edges: &mut Vec<crate::types::GraphEdge>,
+                    edge_map: &mut HashMap<(usize, usize), usize>,
+                    src: usize,
+                    tgt: usize| {
+        if src == tgt {
+            return;
+        }
+        if edge_map.contains_key(&(src, tgt)) {
+            return;
+        } // exact duplicate
         if let Some(&rev_idx) = edge_map.get(&(tgt, src)) {
             // Reverse direction already exists - mark it as bidirectional
             edges[rev_idx].bidirectional = true;
         } else {
             let idx = edges.len();
             edge_map.insert((src, tgt), idx);
-            edges.push(crate::types::GraphEdge { source: src, target: tgt, bidirectional: false });
+            edges.push(crate::types::GraphEdge {
+                source: src,
+                target: tgt,
+                bidirectional: false,
+            });
         }
     };
 
@@ -970,14 +1024,19 @@ pub fn get_graph_data(state: State<'_, AppState>) -> Result<crate::types::GraphD
         }
     }
 
-    Ok(crate::types::GraphData { nodes: graph_nodes, edges })
+    Ok(crate::types::GraphData {
+        nodes: graph_nodes,
+        edges,
+    })
 }
 
 /// Fast title extraction from frontmatter without full YAML parsing.
 /// Scans for `title: ...` line within `---` fences.
 fn extract_title_fast(raw: &str) -> Option<String> {
     let trimmed = raw.trim_start();
-    if !trimmed.starts_with("---") { return None; }
+    if !trimmed.starts_with("---") {
+        return None;
+    }
     // Find the closing ---
     let after_open = &trimmed[3..];
     let end = after_open.find("\n---")?;
@@ -987,8 +1046,10 @@ fn extract_title_fast(raw: &str) -> Option<String> {
         if let Some(title) = line.strip_prefix("title:") {
             let val = title.trim();
             // Strip surrounding quotes
-            if (val.starts_with('"') && val.ends_with('"')) || (val.starts_with('\'') && val.ends_with('\'')) {
-                return Some(val[1..val.len()-1].to_string());
+            if (val.starts_with('"') && val.ends_with('"'))
+                || (val.starts_with('\'') && val.ends_with('\''))
+            {
+                return Some(val[1..val.len() - 1].to_string());
             }
             if !val.is_empty() {
                 return Some(val.to_string());
@@ -1031,7 +1092,11 @@ pub fn get_tasks(state: State<'_, AppState>) -> Result<Vec<crate::types::TaskIte
                 Ok(r) => r,
                 Err(_) => return out,
             };
-            let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let filename = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             let (meta, body) = crate::vault::frontmatter::parse_note(&raw, &filename);
             let note_path = path.to_string_lossy().to_string();
             for (i, line) in body.lines().enumerate() {
@@ -1044,7 +1109,11 @@ pub fn get_tasks(state: State<'_, AppState>) -> Result<Vec<crate::types::TaskIte
                 let due = due_re.captures(&content).map(|c| c[1].to_string());
                 let priority = prio_re.captures(&content).map(|c| {
                     let p = c[1].to_lowercase();
-                    if p == "medium" { "med".to_string() } else { p }
+                    if p == "medium" {
+                        "med".to_string()
+                    } else {
+                        p
+                    }
                 });
                 let mut text = due_re.replace_all(&content, "").to_string();
                 text = prio_re.replace_all(&text, " ").to_string();
@@ -1129,7 +1198,7 @@ pub fn set_task_done(
     }
     operations::save_note(&vault_path, &note_path, &meta, &new_body)?;
 
-    	index_note_bg(&state, &note_path);
+    index_note_bg(&state, &note_path);
     Ok(())
 }
 
@@ -1281,7 +1350,11 @@ pub fn restore_note(
 ) -> Result<String, String> {
     let vault_path = {
         let config = state.config.lock().map_err(|e| e.to_string())?;
-        config.active_vault.as_ref().ok_or("No active vault")?.clone()
+        config
+            .active_vault
+            .as_ref()
+            .ok_or("No active vault")?
+            .clone()
     };
     operations::restore_note(&vault_path, &trash_path, dest_notebook.as_deref())
 }
@@ -1290,7 +1363,11 @@ pub fn restore_note(
 pub fn restore_notebook(state: State<'_, AppState>, trash_path: String) -> Result<String, String> {
     let vault_path = {
         let config = state.config.lock().map_err(|e| e.to_string())?;
-        config.active_vault.as_ref().ok_or("No active vault")?.clone()
+        config
+            .active_vault
+            .as_ref()
+            .ok_or("No active vault")?
+            .clone()
     };
     operations::restore_notebook(&vault_path, &trash_path)
 }
@@ -1299,7 +1376,11 @@ pub fn restore_notebook(state: State<'_, AppState>, trash_path: String) -> Resul
 pub fn permanent_delete(state: State<'_, AppState>, path: String) -> Result<(), String> {
     let vault_path = {
         let config = state.config.lock().map_err(|e| e.to_string())?;
-        config.active_vault.as_ref().ok_or("No active vault")?.clone()
+        config
+            .active_vault
+            .as_ref()
+            .ok_or("No active vault")?
+            .clone()
     };
     operations::permanent_delete(&vault_path, &path)
 }
@@ -1359,8 +1440,11 @@ pub fn read_clipboard_image() -> Result<Vec<u8>, String> {
     // Encode RGBA data to PNG
     let mut buf: Vec<u8> = Vec::new();
     {
-        let mut encoder =
-            png::Encoder::new(std::io::Cursor::new(&mut buf), img.width as u32, img.height as u32);
+        let mut encoder = png::Encoder::new(
+            std::io::Cursor::new(&mut buf),
+            img.width as u32,
+            img.height as u32,
+        );
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
         let mut writer = encoder
@@ -1384,8 +1468,8 @@ pub fn read_clipboard_image() -> Result<Vec<u8>, String> {
 #[tauri::command]
 pub fn copy_image_to_clipboard(path: String) -> Result<(), String> {
     let data = std::fs::read(&path).map_err(|e| format!("Failed to read image: {}", e))?;
-    let img = image::load_from_memory(&data)
-        .map_err(|e| format!("Failed to decode image: {}", e))?;
+    let img =
+        image::load_from_memory(&data).map_err(|e| format!("Failed to decode image: {}", e))?;
     let rgba = img.to_rgba8();
     let (w, h) = rgba.dimensions();
     let img_data = arboard::ImageData {
@@ -1393,9 +1477,10 @@ pub fn copy_image_to_clipboard(path: String) -> Result<(), String> {
         height: h as usize,
         bytes: std::borrow::Cow::Owned(rgba.into_raw()),
     };
-    let mut clipboard = arboard::Clipboard::new()
-        .map_err(|e| format!("Clipboard init failed: {}", e))?;
-    clipboard.set_image(img_data)
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|e| format!("Clipboard init failed: {}", e))?;
+    clipboard
+        .set_image(img_data)
         .map_err(|e| format!("Failed to set clipboard image: {}", e))?;
     Ok(())
 }
@@ -1410,8 +1495,8 @@ pub fn copy_image_to_clipboard(_path: String) -> Result<(), String> {
 #[cfg(desktop)]
 #[tauri::command]
 pub fn copy_png_to_clipboard(data: Vec<u8>) -> Result<(), String> {
-    let img = image::load_from_memory(&data)
-        .map_err(|e| format!("Failed to decode image: {}", e))?;
+    let img =
+        image::load_from_memory(&data).map_err(|e| format!("Failed to decode image: {}", e))?;
     let rgba = img.to_rgba8();
     let (w, h) = rgba.dimensions();
     let img_data = arboard::ImageData {
@@ -1419,9 +1504,10 @@ pub fn copy_png_to_clipboard(data: Vec<u8>) -> Result<(), String> {
         height: h as usize,
         bytes: std::borrow::Cow::Owned(rgba.into_raw()),
     };
-    let mut clipboard = arboard::Clipboard::new()
-        .map_err(|e| format!("Clipboard init failed: {}", e))?;
-    clipboard.set_image(img_data)
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|e| format!("Clipboard init failed: {}", e))?;
+    clipboard
+        .set_image(img_data)
         .map_err(|e| format!("Failed to set clipboard image: {}", e))?;
     Ok(())
 }
@@ -1706,7 +1792,11 @@ fn scan_orphaned_attachments(vault: &str) -> Result<Vec<(String, u64)>, String> 
         let entry = entry.map_err(|e| e.to_string())?;
         let p = entry.path();
         if p.is_file() {
-            let name = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let name = p
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
             files.push((name, size));
         }
@@ -1715,7 +1805,10 @@ fn scan_orphaned_attachments(vault: &str) -> Result<Vec<(String, u64)>, String> 
         return Ok(Vec::new());
     }
     let mut haystack = String::new();
-    for entry in walkdir::WalkDir::new(vault).into_iter().filter_map(|e| e.ok()) {
+    for entry in walkdir::WalkDir::new(vault)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
         let p = entry.path();
         if p.is_file() && p.extension().and_then(|x| x.to_str()) == Some("md") {
             if let Ok(content) = std::fs::read_to_string(p) {
@@ -1886,7 +1979,6 @@ pub fn write_bytes_to(destination: String, data: Vec<u8>) -> Result<(), String> 
     std::fs::write(&destination, &data).map_err(|e| format!("Failed to write file: {}", e))?;
     Ok(())
 }
-
 
 // ── Backup ──
 
@@ -2068,7 +2160,8 @@ pub fn set_ai_settings(
             config.ollama_api_key = ollama_api_key.filter(|k| !k.is_empty());
         }
         Some("openai_compatible") => {
-            config.openai_compatible_base_url = openai_compatible_base_url.filter(|u| !u.trim().is_empty());
+            config.openai_compatible_base_url =
+                openai_compatible_base_url.filter(|u| !u.trim().is_empty());
             config.openai_compatible_api_key = openai_compatible_api_key.filter(|k| !k.is_empty());
         }
         _ => config.ai_api_key = key,
@@ -2091,7 +2184,9 @@ pub fn test_ai_connection(app: AppHandle) -> Result<(), String> {
             .unwrap_or_else(|| "anthropic".to_string());
         let key = match provider.as_str() {
             "ollama" => Some(config.ollama_api_key.clone().unwrap_or_default()),
-            "openai_compatible" => Some(config.openai_compatible_api_key.clone().unwrap_or_default()),
+            "openai_compatible" => {
+                Some(config.openai_compatible_api_key.clone().unwrap_or_default())
+            }
             "openai" => config.openai_api_key.clone(),
             _ => config.ai_api_key.clone(),
         }
@@ -2133,11 +2228,7 @@ pub fn test_ai_connection(app: AppHandle) -> Result<(), String> {
 
 // ── Sync (WebDAV) ──
 
-fn vault_matches_identity(
-    vault: &VaultConfig,
-    path: &str,
-    bookmark_id: Option<&str>,
-) -> bool {
+fn vault_matches_identity(vault: &VaultConfig, path: &str, bookmark_id: Option<&str>) -> bool {
     if let Some(bookmark_id) = bookmark_id {
         vault.bookmark_id.as_deref() == Some(bookmark_id)
     } else {
@@ -2282,9 +2373,7 @@ pub fn sync_now(app: AppHandle) -> Result<(), String> {
             .clone()
             .ok_or_else(|| "No active vault".to_string())
             .and_then(|vault| {
-                sync_config_from(&config).map(|cfg| {
-                    (vault, config.active_bookmark_id.clone(), cfg)
-                })
+                sync_config_from(&config).map(|cfg| (vault, config.active_bookmark_id.clone(), cfg))
             });
         match gathered {
             Ok(vault_config) => vault_config,
@@ -2298,7 +2387,9 @@ pub fn sync_now(app: AppHandle) -> Result<(), String> {
     std::thread::spawn(move || {
         use tauri::Emitter;
         let result = crate::sync::run_sync(app.clone(), vault.clone(), cfg);
-        app.state::<AppState>().syncing.store(false, Ordering::SeqCst);
+        app.state::<AppState>()
+            .syncing
+            .store(false, Ordering::SeqCst);
         match result {
             Ok(summary) => {
                 let ts = chrono::Utc::now().to_rfc3339();
@@ -2316,7 +2407,10 @@ pub fn sync_now(app: AppHandle) -> Result<(), String> {
                 );
             }
             Err(e) => {
-                let _ = app.emit("sync-error", serde_json::json!({ "success": false, "error": e }));
+                let _ = app.emit(
+                    "sync-error",
+                    serde_json::json!({ "success": false, "error": e }),
+                );
             }
         }
     });
@@ -2340,7 +2434,9 @@ pub fn ai_ask(
             .unwrap_or_else(|| "anthropic".to_string());
         let key = match provider.as_str() {
             "ollama" => Some(config.ollama_api_key.clone().unwrap_or_default()),
-            "openai_compatible" => Some(config.openai_compatible_api_key.clone().unwrap_or_default()),
+            "openai_compatible" => {
+                Some(config.openai_compatible_api_key.clone().unwrap_or_default())
+            }
             "openai" => config.openai_api_key.clone(),
             _ => config.ai_api_key.clone(),
         }
@@ -2445,7 +2541,9 @@ fn migrate_global_sync_to_vault(config: &mut AppConfig) -> bool {
     if config.sync_provider.is_none() && config.webdav_url.is_none() {
         return false;
     }
-    let Ok(active_index) = active_vault_index(config) else { return false; };
+    let Ok(active_index) = active_vault_index(config) else {
+        return false;
+    };
     let g_provider = config.sync_provider.clone();
     let g_url = config.webdav_url.clone();
     let g_user = config.webdav_username.clone();
@@ -2555,13 +2653,15 @@ pub fn get_install_type() -> String {
     } else if std::path::Path::new("/var/lib/dpkg/info/helix-notes.list").exists() {
         "deb".to_string()
     } else if std::path::Path::new("/var/lib/pacman/local").exists()
-        && ["helixnotes", "helixnotes-bin", "helixnotes-appimage-bin"].iter().any(|pkg| {
-            std::process::Command::new("pacman")
-                .args(["-Q", pkg])
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false)
-        })
+        && ["helixnotes", "helixnotes-bin", "helixnotes-appimage-bin"]
+            .iter()
+            .any(|pkg| {
+                std::process::Command::new("pacman")
+                    .args(["-Q", pkg])
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false)
+            })
     {
         "aur".to_string()
     } else if std::env::var("APPIMAGE").is_ok() {
