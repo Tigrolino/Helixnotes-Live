@@ -7,6 +7,7 @@
 	import { darkThemes, isMobile, isAndroid } from '$lib/platform';
 	import type { CustomTheme } from '$lib/types';
 	import ResizeHandles from '$lib/components/ResizeHandles.svelte';
+	import { resolveVaultFilePath } from '$lib/utils/paths';
 
 	let { children } = $props();
 
@@ -73,16 +74,6 @@
 		}
 	}
 
-	function normalizePath(p: string): string {
-		const parts = p.split('/');
-		const resolved: string[] = [];
-		for (const seg of parts) {
-			if (seg === '..') resolved.pop();
-			else if (seg !== '.') resolved.push(seg);
-		}
-		return resolved.join('/');
-	}
-
 	function openLocalFile(path: string) {
 		if (isAndroid) {
 			const bridge = (window as any).Android;
@@ -98,24 +89,12 @@
 		if (href.startsWith('http://') || href.startsWith('https://') || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('sms:')) {
 			openUrl(href).catch((err) => console.error('Failed to open URL:', err));
 		} else if (!href.startsWith('#')) {
-			const decoded = decodeURIComponent(href);
 			const config = get(appConfig);
-			const vaultRoot = config?.active_vault;
-			let absPath = decoded;
-			if (!decoded.startsWith('/') && vaultRoot) {
-				// .helixnotes/ paths are always relative to vault root, not the note's directory
-				if (decoded.startsWith('.helixnotes/')) {
-					absPath = normalizePath(`${vaultRoot}/${decoded}`);
-				} else {
-					const notePath = get(activeNotePath);
-					if (notePath) {
-						const noteDir = notePath.substring(0, notePath.lastIndexOf('/'));
-						absPath = normalizePath(`${noteDir}/${decoded}`);
-					} else {
-						absPath = normalizePath(`${vaultRoot}/${decoded}`);
-					}
-				}
-			}
+			const absPath = resolveVaultFilePath(
+				decodeURIComponent(href),
+				get(activeNotePath),
+				config?.active_vault ?? null,
+			);
 			// Internal .md note link - navigate within the app
 			if (absPath.endsWith('.md')) {
 				readNote(absPath).then((content) => {

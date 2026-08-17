@@ -54,7 +54,7 @@
 	import { convertListNode, type MixedListName } from '$lib/editor/mixedLists';
 	import { clearFormatting } from '$lib/editor/clearFormatting';
 	import { serializeInlineMarkdown } from '$lib/editor/markdown';
-	import { relativePath, resolvePathFromFile } from '$lib/utils/paths';
+	import { assetSourceToMarkdown, assetUrlToLocalPath, normalizeLocalAssetPath, resolveVaultFilePath } from '$lib/utils/paths';
 	import GraphView from './GraphView.svelte';
 	import TagSuggestInput from './TagSuggestInput.svelte';
 	import ImageViewer from './ImageViewer.svelte';
@@ -2974,13 +2974,11 @@
 		if (src.startsWith('http://') || src.startsWith('https://')) {
 			return convertFileSrc(src, 'imgproxy');
 		}
-		// Decode percent-encoding (%20 → space, etc.) for filesystem resolution
-		let decoded = decodeURIComponent(src);
-		// Fix multiple leading slashes (from broken saves)
-		if (decoded.match(/^\/{2,}/)) {
-			decoded = decoded.replace(/^\/{2,}/, '/');
-		}
-		if (decoded.startsWith('/')) {
+		// Decode URL encoding and undo the extra leading slash added to Windows drive paths.
+		let decoded = normalizeLocalAssetPath(decodeURIComponent(src));
+		// Keep repairing legacy POSIX paths that were saved with duplicate leading slashes.
+		if (/^\/{2,}/.test(decoded)) decoded = decoded.replace(/^\/{2,}/, '/');
+		if (decoded.startsWith('/') || /^[A-Za-z]:\//.test(decoded)) {
 			return convertFileSrc(normalizePath(decoded));
 		}
 		// Paths containing .helixnotes/ are vault-root relative (our own attachments)
@@ -3925,42 +3923,7 @@
 	}
 
 	function stripAssetSrc(src: string): string {
-		// blob: URLs are not persistable - they were temporary browser references
-		if (src.startsWith('blob:')) return '';
-		// Convert imgproxy:// URLs back to original external URLs for saving
-		if (src.startsWith('imgproxy:') || src.startsWith('http://imgproxy.localhost') || src.startsWith('https://imgproxy.localhost')) {
-			try {
-				const url = new URL(src);
-				return decodeURIComponent(url.pathname.substring(1));
-			} catch {
-				return src;
-			}
-		}
-		// Convert asset:// URLs back to relative paths for saving
-		if (!src.startsWith('asset:') && !src.startsWith('http://asset.localhost') && !src.startsWith('https://asset.localhost')) return src;
-		let absPath = '';
-		try {
-			const url = new URL(src);
-			absPath = decodeURIComponent(url.pathname);
-		} catch {
-			return src;
-		}
-		// Clean up any leading double/triple slashes (URL parsing artifact)
-		absPath = absPath.replace(/^\/{2,}/, '/');
-		absPath = absPath.replace(/^\/([A-Za-z]:\/)/, '$1').replace(/\\/g, '/');
-		const notePath = $activeNotePath;
-		const vaultRoot = $appConfig?.active_vault?.replace(/\\/g, '/').replace(/\/$/, '');
-		if (vaultRoot && absPath.startsWith(vaultRoot + '/')) {
-			const vaultRelative = absPath.substring(vaultRoot.length + 1);
-			if (vaultRelative.startsWith('.helixnotes/')) return vaultRelative;
-			if (notePath) {
-				const normalizedNotePath = notePath.replace(/\\/g, '/');
-				const noteDir = normalizedNotePath.substring(0, normalizedNotePath.lastIndexOf('/'));
-				return relativePath(noteDir, absPath);
-			}
-			return vaultRelative;
-		}
-		return absPath;
+		return assetSourceToMarkdown(src, $activeNotePath, $appConfig?.active_vault ?? null);
 	}
 
 	function htmlToMarkdown(html: string): string {
@@ -4855,34 +4818,13 @@
 	}
 
 	function getImageAbsPath(src: string): string {
-		// asset:// or http://asset.localhost → extract absolute path
-		if (src.startsWith('asset:') || src.startsWith('http://asset.localhost')) {
-			try {
-				const url = new URL(src);
-				let absPath = decodeURIComponent(url.pathname);
-				absPath = absPath.replace(/^\/{2,}/, '/');
-				return absPath;
-			} catch { /* fall through */ }
-		}
-		// Relative path → resolve against note directory
-		let decoded = decodeURIComponent(src);
-		if (decoded.match(/^\/{2,}/)) decoded = decoded.replace(/^\/{2,}/, '/');
-		if (decoded.startsWith('/')) return decoded;
-		if (decoded.includes('.helixnotes/')) {
-			const vaultRoot = $appConfig?.active_vault;
-			if (vaultRoot) {
-				const idx = decoded.indexOf('.helixnotes/');
-				return `${vaultRoot}/${decoded.substring(idx)}`;
-			}
-		}
-		const notePath = $activeNotePath;
-		if (notePath) {
-			const noteDir = notePath.substring(0, notePath.lastIndexOf('/'));
-			return normalizePath(`${noteDir}/${decoded}`);
-		}
-		const vaultRoot = $appConfig?.active_vault;
-		if (vaultRoot) return normalizePath(`${vaultRoot}/${decoded}`);
-		return src;
+		const assetPath = assetUrlToLocalPath(src);
+		if (assetPath !== null) return assetPath;
+		return resolveVaultFilePath(
+			decodeURIComponent(src),
+			$activeNotePath,
+			$appConfig?.active_vault ?? null,
+		);
 	}
 
 	async function copyImageToClipboard() {
@@ -5535,17 +5477,8 @@
 	function resolveNoteHref(href: string): string | null {
 		const decoded = decodeURIComponent(href);
 		if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(decoded)) return null;
-		let absPath = decoded;
-		if (!decoded.startsWith('/')) {
-			const notePath = $activeNotePath;
-			if (notePath) {
-				absPath = resolvePathFromFile(notePath, decoded);
-			} else {
-				const vaultRoot = $appConfig?.active_vault;
-				if (vaultRoot) absPath = normalizePath(`${vaultRoot}/${decoded}`);
-			}
-		}
-		return absPath.endsWith('.md') ? absPath : null;
+		const path = resolveVaultFilePath(decoded, $activeNotePath, $appConfig?.active_vault ?? null);
+		return path.endsWith('.md') ? path : null;
 	}
 
 	function linkMenuOpen() {
@@ -5609,20 +5542,11 @@
 	}
 
 	function resolveHrefToAbsPath(href: string): string {
-		const decoded = decodeURIComponent(href);
-		if (decoded.startsWith('/')) return decoded;
-		// .helixnotes/ paths are always relative to vault root, not the note's directory
-		const vaultRoot = $appConfig?.active_vault;
-		if (decoded.startsWith('.helixnotes/') && vaultRoot) {
-			return normalizePath(`${vaultRoot}/${decoded}`);
-		}
-		const notePath = $activeNotePath;
-		if (notePath) {
-			const noteDir = notePath.substring(0, notePath.lastIndexOf('/'));
-			return normalizePath(`${noteDir}/${decoded}`);
-		}
-		if (vaultRoot) return normalizePath(`${vaultRoot}/${decoded}`);
-		return decoded;
+		return resolveVaultFilePath(
+			decodeURIComponent(href),
+			$activeNotePath,
+			$appConfig?.active_vault ?? null,
+		);
 	}
 
 	function isFileLink(href: string): boolean {
@@ -7363,7 +7287,7 @@
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 00-2 2v3M16 3h3a2 2 0 012 2v3M8 21H5a2 2 0 01-2-2v-3M16 21h3a2 2 0 002-2v-3"/></svg>
 				</button>
 			{/if}
-			{#if !isMobile && !imageToolbar.src.startsWith('imgproxy:') && !imageToolbar.src.startsWith('http://imgproxy.localhost')}
+			{#if !isMobile && !imageToolbar.src.startsWith('imgproxy:') && !imageToolbar.src.startsWith('http://imgproxy.localhost') && !imageToolbar.src.startsWith('https://imgproxy.localhost')}
 				<span class="img-toolbar-sep"></span>
 				<button onclick={copyImageToClipboard} title="Copy image">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
