@@ -3697,6 +3697,27 @@
 		requestAnimationFrame(() => el.focus());
 	}
 
+	function closeFromOverlay(event: MouseEvent, close: () => void) {
+		if (event.target === event.currentTarget) close();
+	}
+
+	function closeOnEscape(event: KeyboardEvent, close: () => void) {
+		if (event.key === 'Escape') close();
+	}
+
+	function closeFormattingDropdowns() {
+		headingDropdown = false;
+		colorDropdown = false;
+		highlightDropdown = false;
+		tablePickerOpen = false;
+		alignDropdown = false;
+		insertDropdown = false;
+	}
+
+	function handleFormattingBarClick(event: MouseEvent) {
+		if (!(event.target as Element).closest('.fmt-dropdown')) closeFormattingDropdowns();
+	}
+
 	// ── In-note search functions ──
 	let noteSearchTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -6238,7 +6259,7 @@
 					></textarea>
 					</div>
 					<!-- svelte-ignore a11y_no_static_element_interactions -->
-					<div class="tiptap-wrapper" class:large-doc={isLargeDoc} style={$sourceMode ? 'display:none' : ''} spellcheck="false" bind:this={editorElement} onclick={(e) => { closeLinkContextMenu(); handleEditorClick(e); }}></div>
+					<div class="tiptap-wrapper" class:large-doc={isLargeDoc} style={$sourceMode ? 'display:none' : ''} spellcheck="false" bind:this={editorElement} onclick={(e) => { closeLinkContextMenu(); handleEditorClick(e); }} onkeydown={(e) => { if (e.key === 'Escape') closeLinkContextMenu(); }}></div>
 				{:else}
 					<!-- Desktop: conditional rendering with line numbers -->
 					{#if $sourceMode}
@@ -6342,7 +6363,7 @@
 						</div>
 					{:else}
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
-						<div class="tiptap-wrapper" class:large-doc={isLargeDoc} spellcheck="false" bind:this={editorElement} onclick={(e) => { closeLinkContextMenu(); handleEditorClick(e); }} oncontextmenu={handleEditorContextMenu}></div>
+						<div class="tiptap-wrapper" class:large-doc={isLargeDoc} spellcheck="false" bind:this={editorElement} onclick={(e) => { closeLinkContextMenu(); handleEditorClick(e); }} onkeydown={(e) => { if (e.key === 'Escape') closeLinkContextMenu(); }} oncontextmenu={handleEditorContextMenu}></div>
 					{/if}
 				{/if}
 			</div>
@@ -6358,7 +6379,7 @@
 									<line x1="5" y1="12" x2="19" y2="12" />
 								</svg>
 							</button>
-							<button class="history-close" onclick={() => { showHistory = false; historyPreview = null; historySelected = null; }}>
+							<button class="history-close" onclick={() => { showHistory = false; historyPreview = null; historySelected = null; }} aria-label="Close version history">
 								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 									<line x1="18" y1="6" x2="6" y2="18" />
 									<line x1="6" y1="6" x2="18" y2="18" />
@@ -6398,7 +6419,7 @@
 				<div class="outline-panel" style="width: {$outlineWidth}px">
 					<div class="outline-header">
 						<h3>Outline</h3>
-						<button class="outline-close" onclick={() => { showOutline = false; }}>
+						<button class="outline-close" onclick={() => { showOutline = false; }} aria-label="Close outline">
 							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 								<line x1="18" y1="6" x2="6" y2="18" />
 								<line x1="6" y1="6" x2="18" y2="18" />
@@ -6425,7 +6446,7 @@
 				<div class="info-panel">
 					<div class="info-panel-header">
 						<span class="info-panel-title">Note Info</span>
-						<button class="info-close-btn" onclick={() => showInfo = false}>
+						<button class="info-close-btn" onclick={() => showInfo = false} aria-label="Close note info">
 							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 								<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
 							</svg>
@@ -6521,7 +6542,7 @@
 
 		{#if editorReady && !$sourceMode && !$viewerNote}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<div class="editor-formatting-bar" style={isMobile ? `${keyboardHeight > 0 ? `bottom: ${keyboardHeight}px;` : ''}${anyDropdownOpen ? 'overflow: visible;' : ''}` : ''} onclick={() => { headingDropdown = false; colorDropdown = false; highlightDropdown = false; tablePickerOpen = false; alignDropdown = false; insertDropdown = false; }}>
+			<div class="editor-formatting-bar" style={isMobile ? `${keyboardHeight > 0 ? `bottom: ${keyboardHeight}px;` : ''}${anyDropdownOpen ? 'overflow: visible;' : ''}` : ''} onclick={handleFormattingBarClick} onkeydown={(e) => { if (e.key === 'Escape') closeFormattingDropdowns(); }}>
 				{#if isMobile}
 				<!-- ═══ MOBILE formatting bar: compact, relevant buttons only ═══ -->
 
@@ -6531,8 +6552,7 @@
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
 					</button>
 					{#if insertDropdown}
-						<!-- svelte-ignore a11y_no_static_element_interactions -->
-						<div class="fmt-dropdown insert-dropdown" onclick={(e) => e.stopPropagation()}>
+						<div class="fmt-dropdown insert-dropdown">
 							<button onclick={() => { insertDropdown = false; document.querySelector<HTMLInputElement>('#insert-image-input')?.click(); }}>
 								<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 00-2.828 0L6 21"/></svg>
 								Image
@@ -6587,8 +6607,7 @@
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12h12"/><path d="M6 20V4"/><path d="M18 20V4"/></svg>
 					</button>
 					{#if headingDropdown}
-						<!-- svelte-ignore a11y_no_static_element_interactions -->
-						<div class="fmt-dropdown" onclick={(e) => e.stopPropagation()}>
+						<div class="fmt-dropdown">
 							<button class:active={isEditorActive('heading', { level: 1 })} onclick={() => { editor?.chain().focus().toggleHeading({ level: 1 }).run(); headingDropdown = false; }}>Heading 1</button>
 							<button class:active={isEditorActive('heading', { level: 2 })} onclick={() => { editor?.chain().focus().toggleHeading({ level: 2 }).run(); headingDropdown = false; }}>Heading 2</button>
 							<button class:active={isEditorActive('heading', { level: 3 })} onclick={() => { editor?.chain().focus().toggleHeading({ level: 3 }).run(); headingDropdown = false; }}>Heading 3</button>
@@ -6722,8 +6741,7 @@
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
 					</button>
 					{#if insertDropdown}
-						<!-- svelte-ignore a11y_no_static_element_interactions -->
-						<div class="fmt-dropdown insert-dropdown" onclick={(e) => e.stopPropagation()}>
+						<div class="fmt-dropdown insert-dropdown">
 							<button onclick={() => { insertDropdown = false; document.querySelector<HTMLInputElement>('#insert-image-input')?.click(); }}>
 								<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 00-2.828 0L6 21"/></svg>
 								Image
@@ -6756,8 +6774,7 @@
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12h12"/><path d="M6 20V4"/><path d="M18 20V4"/></svg>
 					</button>
 					{#if headingDropdown}
-						<!-- svelte-ignore a11y_no_static_element_interactions -->
-						<div class="fmt-dropdown" onclick={(e) => e.stopPropagation()}>
+						<div class="fmt-dropdown">
 							<button class:active={isEditorActive('heading', { level: 1 })} onclick={() => { editor?.chain().focus().toggleHeading({ level: 1 }).run(); headingDropdown = false; }}>Heading 1</button>
 							<button class:active={isEditorActive('heading', { level: 2 })} onclick={() => { editor?.chain().focus().toggleHeading({ level: 2 }).run(); headingDropdown = false; }}>Heading 2</button>
 							<button class:active={isEditorActive('heading', { level: 3 })} onclick={() => { editor?.chain().focus().toggleHeading({ level: 3 }).run(); headingDropdown = false; }}>Heading 3</button>
@@ -6790,8 +6807,7 @@
 						<span class="color-indicator" style="background: {getEditorAttributes('textStyle').color || 'var(--accent)'}"></span>
 					</button>
 					{#if colorDropdown}
-						<!-- svelte-ignore a11y_no_static_element_interactions -->
-						<div class="fmt-dropdown color-grid-dropdown" onclick={(e) => e.stopPropagation()}>
+						<div class="fmt-dropdown color-grid-dropdown">
 							{#each textColors as color}
 								<button class="color-swatch" title={color.name} onclick={() => setTextColor(color.value)} style="background: {color.value || 'var(--text-primary)'}">
 									{#if (color.value === '' && !getEditorAttributes('textStyle').color) || getEditorAttributes('textStyle').color === color.value}
@@ -6864,18 +6880,18 @@
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/></svg>
 					</button>
 					{#if tablePickerOpen}
-						<!-- svelte-ignore a11y_no_static_element_interactions -->
-						<div class="fmt-dropdown table-picker-dropdown" onclick={(e) => e.stopPropagation()}>
+						<div class="fmt-dropdown table-picker-dropdown">
 							<div class="table-picker-grid">
 								{#each Array(8) as _, r}
 									{#each Array(10) as _, c}
-										<!-- svelte-ignore a11y_no_static_element_interactions -->
-										<div
+										<button
+											type="button"
 											class="table-picker-cell"
 											class:active={r < tablePickerHover.rows && c < tablePickerHover.cols}
+											aria-label={`Insert ${r + 1} by ${c + 1} table`}
 											onmouseenter={() => tablePickerHover = { rows: r + 1, cols: c + 1 }}
 											onclick={() => insertTable(r + 1, c + 1)}
-										></div>
+										></button>
 									{/each}
 								{/each}
 							</div>
@@ -6900,8 +6916,7 @@
 						<span class="color-indicator" style="background: {getEditorAttributes('highlight').color || 'var(--accent)'}"></span>
 					</button>
 					{#if highlightDropdown}
-						<!-- svelte-ignore a11y_no_static_element_interactions -->
-						<div class="fmt-dropdown color-grid-dropdown" onclick={(e) => e.stopPropagation()}>
+						<div class="fmt-dropdown color-grid-dropdown">
 							{#each highlightColors as color}
 								<button class="color-swatch" title={color.name} onclick={() => setHighlightColor(color.value)} style="background: {color.swatch}">
 									{#if isEditorActive('highlight', { color: color.value })}
@@ -6944,8 +6959,7 @@
 						{/if}
 					</button>
 					{#if alignDropdown}
-						<!-- svelte-ignore a11y_no_static_element_interactions -->
-						<div class="fmt-dropdown align-dropdown" onclick={(e) => e.stopPropagation()}>
+						<div class="fmt-dropdown align-dropdown">
 							<button class:active={isEditorActive({ textAlign: 'left' })} onclick={() => { editor?.chain().focus().setTextAlign('left').run(); alignDropdown = false; }}>
 								<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 5H3"/><path d="M15 12H3"/><path d="M17 19H3"/></svg>
 								Left
@@ -7038,9 +7052,8 @@
 
 {#if linkContextMenu}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="link-context-overlay" onclick={closeLinkContextMenu}>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="link-context-menu" style="left: {linkContextMenu.x}px; top: {linkContextMenu.y}px" onclick={(e) => e.stopPropagation()}>
+	<div class="link-context-overlay" onclick={(e) => closeFromOverlay(e, closeLinkContextMenu)} onkeydown={(e) => closeOnEscape(e, closeLinkContextMenu)}>
+		<div class="link-context-menu" style="left: {linkContextMenu.x}px; top: {linkContextMenu.y}px">
 			<div class="link-context-url">{linkContextMenu.href}</div>
 			<button onclick={linkMenuOpen}>
 				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -7085,9 +7098,8 @@
 
 {#if textContextMenu}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="text-ctx-overlay" onclick={closeTextContextMenu}>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="text-ctx-menu" style="left: {textContextMenu.x}px; top: {textContextMenu.y}px" onclick={(e) => e.stopPropagation()}>
+	<div class="text-ctx-overlay" onclick={(e) => closeFromOverlay(e, closeTextContextMenu)} onkeydown={(e) => closeOnEscape(e, closeTextContextMenu)}>
+		<div class="text-ctx-menu" style="left: {textContextMenu.x}px; top: {textContextMenu.y}px">
 			<button onclick={ctxCut}>
 				<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
 				Cut
@@ -7215,9 +7227,8 @@
 
 {#if tableContextMenu}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="table-ctx-overlay" onclick={closeTableContextMenu}>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="table-ctx-menu" style="left: {tableContextMenu.x}px; top: {tableContextMenu.y}px; max-height: calc(100vh - {tableContextMenu.y}px - 8px); overflow-y: auto;" onclick={(e) => e.stopPropagation()}>
+	<div class="table-ctx-overlay" onclick={(e) => closeFromOverlay(e, closeTableContextMenu)} onkeydown={(e) => closeOnEscape(e, closeTableContextMenu)}>
+		<div class="table-ctx-menu" style="left: {tableContextMenu.x}px; top: {tableContextMenu.y}px; max-height: calc(100vh - {tableContextMenu.y}px - 8px); overflow-y: auto;">
 			<button onclick={tblAddRowBefore}>
 				<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/><path d="M12 3v3"/><polyline points="9 4.5 12 2 15 4.5"/></svg>
 				Add Row Above
@@ -7291,9 +7302,8 @@
 
 {#if imageToolbar}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="img-toolbar-overlay" onclick={() => (imageToolbar = null)}>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="img-toolbar" class:mobile-viewer-toolbar={isAndroid} style="left: {imageToolbar.x}px; top: {imageToolbar.y}px" onclick={(e) => e.stopPropagation()}>
+	<div class="img-toolbar-overlay" onclick={(e) => closeFromOverlay(e, () => (imageToolbar = null))} onkeydown={(e) => closeOnEscape(e, () => (imageToolbar = null))}>
+		<div class="img-toolbar" class:mobile-viewer-toolbar={isAndroid} style="left: {imageToolbar.x}px; top: {imageToolbar.y}px">
 			<button class:active={imageToolbar.size === 'small'} onclick={() => setImageSize('small')} title="Small (33%)">S</button>
 			<button class:active={imageToolbar.size === 'medium'} onclick={() => setImageSize('medium')} title="Medium (50%)">M</button>
 			<button class:active={imageToolbar.size === 'full'} onclick={() => setImageSize('full')} title="Full width">L</button>
@@ -7339,8 +7349,8 @@
 
 {#if mathModal}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="math-modal-overlay" onclick={cancelMathModal}>
-		<div class="math-modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-label="Math editor">
+	<div class="math-modal-overlay" onclick={(e) => closeFromOverlay(e, cancelMathModal)} onkeydown={(e) => closeOnEscape(e, cancelMathModal)}>
+		<div class="math-modal" role="dialog" aria-modal="true" aria-label="Math editor" tabindex="-1">
 			<div class="math-modal-header">
 				<span>{mathModal.editPos !== null ? 'Edit' : 'Insert'} {mathModal.kind === 'block' ? 'Math Block' : 'Inline Math'}</span>
 				<button type="button" class="math-modal-close" onclick={cancelMathModal} aria-label="Close">
@@ -7355,7 +7365,7 @@
 					if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); commitMathModal(); }
 					if (e.key === 'Escape') { e.preventDefault(); cancelMathModal(); }
 				}}
-				autofocus
+				use:autofocus
 			></textarea>
 			<div class="math-modal-preview">
 				{#if mathModal.tex.trim()}
@@ -7379,8 +7389,8 @@
 
 {#if secretModal}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="math-modal-overlay" onclick={cancelSecretModal}>
-		<div class="math-modal secret-modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-label="Encrypted secret editor">
+	<div class="math-modal-overlay" onclick={(e) => closeFromOverlay(e, cancelSecretModal)} onkeydown={(e) => closeOnEscape(e, cancelSecretModal)}>
+		<div class="math-modal secret-modal" role="dialog" aria-modal="true" aria-label="Encrypted secret editor" tabindex="-1">
 			<div class="math-modal-header">
 				<span>Insert Secret</span>
 				<button type="button" class="math-modal-close" onclick={cancelSecretModal} aria-label="Close">
@@ -7447,8 +7457,8 @@
 
 {#if viewerImportPickerOpen}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="viewer-import-overlay" onclick={() => (viewerImportPickerOpen = false)}>
-		<div class="viewer-import-picker" onclick={(e) => e.stopPropagation()} role="dialog">
+	<div class="viewer-import-overlay" onclick={(e) => closeFromOverlay(e, () => (viewerImportPickerOpen = false))} onkeydown={(e) => closeOnEscape(e, () => (viewerImportPickerOpen = false))}>
+		<div class="viewer-import-picker" role="dialog" aria-modal="true" aria-label="Import image to folder" tabindex="-1">
 			<div class="viewer-import-header">
 				<span>Import to folder</span>
 				<button type="button" class="viewer-import-close" onclick={() => (viewerImportPickerOpen = false)} aria-label="Close">
@@ -7473,11 +7483,8 @@
 
 {#if tagMenu && $activeNote}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<!-- svelte-ignore a11y_click_events_have_key_events -->
-	<div class="tag-menu-overlay" onclick={() => (tagMenu = null)}>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<!-- svelte-ignore a11y_click_events_have_key_events -->
-		<div class="tag-menu" style="left: {tagMenu.x}px; top: {tagMenu.y}px" onclick={(e) => e.stopPropagation()}>
+	<div class="tag-menu-overlay" onclick={(e) => closeFromOverlay(e, () => (tagMenu = null))} onkeydown={(e) => closeOnEscape(e, () => (tagMenu = null))}>
+		<div class="tag-menu" style="left: {tagMenu.x}px; top: {tagMenu.y}px">
 			{#if $activeNote.meta.tags.length > 0}
 				<div class="tag-menu-list">
 					{#each $activeNote.meta.tags as tag}
@@ -7502,9 +7509,8 @@
 
 {#if codeLangDropdown}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="code-lang-overlay" onclick={closeCodeLangDropdown}>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="code-lang-dropdown" style="left: {codeLangDropdown.x}px; top: {codeLangDropdown.y}px" onclick={(e) => e.stopPropagation()}>
+	<div class="code-lang-overlay" onclick={(e) => closeFromOverlay(e, closeCodeLangDropdown)} onkeydown={(e) => closeOnEscape(e, closeCodeLangDropdown)}>
+		<div class="code-lang-dropdown" style="left: {codeLangDropdown.x}px; top: {codeLangDropdown.y}px">
 			<input class="code-lang-search" type="text" placeholder="Search..." bind:this={codeLangInput} bind:value={codeLangSearch} onkeydown={(e) => {
 				if (e.key === 'Enter' && codeLangFiltered.length > 0) { e.preventDefault(); e.stopPropagation(); selectCodeLang(codeLangFiltered[0]); }
 				if (e.key === 'Escape') closeCodeLangDropdown();
@@ -7532,9 +7538,8 @@
 
 {#if slashMenu}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="slash-menu-overlay" onclick={closeSlashMenu}>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="slash-menu" style="left: {slashMenu.x}px; top: {slashMenu.y}px" onclick={(e) => e.stopPropagation()}>
+	<div class="slash-menu-overlay" onclick={(e) => closeFromOverlay(e, closeSlashMenu)} onkeydown={(e) => closeOnEscape(e, closeSlashMenu)}>
+		<div class="slash-menu" style="left: {slashMenu.x}px; top: {slashMenu.y}px">
 			{#if slashTablePicker}
 				<div class="slash-table-picker">
 					<div class="slash-table-picker-grid">
@@ -7596,9 +7601,8 @@
 
 {#if taskMetaMenu}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="slash-menu-overlay" onclick={closeTaskMetaMenu}>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="slash-menu" style="left: {taskMetaMenu.x}px; top: {taskMetaMenu.y}px" onclick={(e) => e.stopPropagation()}>
+	<div class="slash-menu-overlay" onclick={(e) => closeFromOverlay(e, closeTaskMetaMenu)} onkeydown={(e) => closeOnEscape(e, closeTaskMetaMenu)}>
+		<div class="slash-menu" style="left: {taskMetaMenu.x}px; top: {taskMetaMenu.y}px">
 			{#if taskMetaFiltered.length === 0}
 				<div class="slash-menu-empty">No match</div>
 			{:else}
@@ -7620,13 +7624,12 @@
 
 {#if taskDuePicker}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="slash-menu-overlay" onclick={() => { taskDuePicker = null; editor?.commands.focus(); }}>
+	<div class="slash-menu-overlay" onclick={(e) => closeFromOverlay(e, () => { taskDuePicker = null; editor?.commands.focus(); })} onkeydown={(e) => closeOnEscape(e, () => { taskDuePicker = null; editor?.commands.focus(); })}>
 		<input
 			type="date"
 			class="task-due-input"
 			bind:this={taskDueInputEl}
 			style="left: {taskDuePicker.x}px; top: {taskDuePicker.y}px"
-			onclick={(e) => e.stopPropagation()}
 			onchange={(e) => applyTaskDue((e.currentTarget as HTMLInputElement).value)}
 			onkeydown={(e) => { if (e.key === 'Escape') { taskDuePicker = null; editor?.commands.focus(); } }}
 		/>
@@ -7635,9 +7638,8 @@
 
 {#if wikiLinkMenu}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="wiki-link-overlay" onclick={closeWikiLinkMenu}>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="wiki-link-menu" style="left: {wikiLinkMenu.x}px; top: {wikiLinkMenu.y}px" onclick={(e) => e.stopPropagation()}>
+	<div class="wiki-link-overlay" onclick={(e) => closeFromOverlay(e, closeWikiLinkMenu)} onkeydown={(e) => closeOnEscape(e, closeWikiLinkMenu)}>
+		<div class="wiki-link-menu" style="left: {wikiLinkMenu.x}px; top: {wikiLinkMenu.y}px">
 			{#if wikiLinkFiltered.length === 0}
 				<div class="wiki-link-empty">
 					{wikiLinkMenu.query ? 'No matching notes' : 'Type to search notes...'}
@@ -7666,9 +7668,8 @@
 
 {#if wikiLinkNavDisambig}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="wiki-link-overlay" onclick={() => wikiLinkNavDisambig = null}>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="wiki-link-menu" style="left: {wikiLinkNavDisambig.x}px; top: {wikiLinkNavDisambig.y}px" onclick={(e) => e.stopPropagation()}>
+	<div class="wiki-link-overlay" onclick={(e) => closeFromOverlay(e, () => wikiLinkNavDisambig = null)} onkeydown={(e) => closeOnEscape(e, () => wikiLinkNavDisambig = null)}>
+		<div class="wiki-link-menu" style="left: {wikiLinkNavDisambig.x}px; top: {wikiLinkNavDisambig.y}px">
 			<div class="wiki-link-disambig-header">Multiple notes found - choose one:</div>
 			{#each wikiLinkNavDisambig.entries as entry, i}
 				<button
@@ -7690,9 +7691,8 @@
 
 {#if aiMenu}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="ai-menu-overlay" class:mobile={isMobile} onclick={closeAiMenu}>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="ai-menu" class:mobile={isMobile} style={isMobile ? '' : `left: ${aiMenu.x}px; top: ${aiMenu.y}px`} onclick={(e) => e.stopPropagation()}>
+	<div class="ai-menu-overlay" class:mobile={isMobile} onclick={(e) => closeFromOverlay(e, closeAiMenu)} onkeydown={(e) => closeOnEscape(e, closeAiMenu)}>
+		<div class="ai-menu" class:mobile={isMobile} style={isMobile ? '' : `left: ${aiMenu.x}px; top: ${aiMenu.y}px`}>
 			{#if aiResult !== null || aiLoading}
 				<!-- Result view -->
 				<div class="ai-result-header">
@@ -7704,7 +7704,7 @@
 							AI Result
 						{/if}
 					</span>
-					<button class="ai-result-close" onclick={closeAiMenu}>
+					<button class="ai-result-close" onclick={closeAiMenu} aria-label="Close AI menu">
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
 					</button>
 				</div>
@@ -7728,7 +7728,7 @@
 			{:else if aiShowCustom}
 				<!-- Custom prompt input -->
 				<div class="ai-custom-header">
-					<button class="ai-back-btn" onclick={() => aiShowCustom = false}>
+					<button class="ai-back-btn" onclick={() => aiShowCustom = false} aria-label="Back to AI actions">
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
 					</button>
 					<span>Custom Prompt</span>
@@ -7749,7 +7749,7 @@
 			{:else if aiTranslateMenu}
 				<!-- Translate submenu -->
 				<div class="ai-custom-header">
-					<button class="ai-back-btn" onclick={() => aiTranslateMenu = false}>
+					<button class="ai-back-btn" onclick={() => aiTranslateMenu = false} aria-label="Back to AI actions">
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
 					</button>
 					<span>Translate to</span>
@@ -7831,9 +7831,8 @@
 
 {#if linkModal}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="link-modal-overlay" onclick={linkModalCancel}>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="link-modal" onclick={(e) => e.stopPropagation()}>
+	<div class="link-modal-overlay" onclick={(e) => closeFromOverlay(e, linkModalCancel)} onkeydown={(e) => closeOnEscape(e, linkModalCancel)}>
+		<div class="link-modal" role="dialog" aria-modal="true" aria-label="Insert link" tabindex="-1">
 			<div class="link-modal-header">
 				<svg width="28" height="28" viewBox="0 0 48 48" fill="none">
 					<rect width="48" height="48" rx="12" fill="var(--accent)" />
@@ -11256,11 +11255,11 @@
 		gap: 2px;
 	}
 
-	.toolbar-actions.mobile {
+	.editor-container.mobile .toolbar-actions {
 		gap: 4px;
 	}
 
-	.toolbar-actions.mobile .icon-btn {
+	.editor-container.mobile .toolbar-actions .icon-btn {
 		min-width: 32px;
 		min-height: 32px;
 		display: flex;
@@ -11268,8 +11267,8 @@
 		justify-content: center;
 	}
 
-	.toolbar-actions.mobile .save-indicator,
-	.toolbar-actions.mobile .readonly-indicator {
+	.editor-container.mobile .toolbar-actions .save-indicator,
+	.editor-container.mobile .toolbar-actions .readonly-indicator {
 		font-size: 12px;
 	}
 
