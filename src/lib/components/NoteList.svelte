@@ -966,9 +966,19 @@
 		await Promise.all([...toDelete].map(p => permanentDelete(p).catch(e => console.error('Failed to delete:', p, e))));
 	}
 
-	function handleWindowClick() {
+	function handleWindowClick(event: MouseEvent) {
+		const target = event.target as Element | null;
+		if (target?.closest('.context-menu, .sort-menu')) return;
 		if (contextMenu) { contextMenu = null; movePickerNote = null; tagEditNote = null; batchTagEdit = false; }
 		if (sortMenu) sortMenu = null;
+	}
+
+	function closeBatchMoveOverlay(event: MouseEvent) {
+		if (event.target === event.currentTarget) batchMovePicker = false;
+	}
+
+	function closeBatchTagOverlay(event: MouseEvent) {
+		if (event.target === event.currentTarget) batchTagEdit = false;
 	}
 
 	function openSortMenu(e: MouseEvent) {
@@ -1076,12 +1086,11 @@
 
 	{#if batchMovePicker}
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="batch-move-overlay" onclick={() => batchMovePicker = false}>
-			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<div class="batch-move-picker" onclick={(e) => e.stopPropagation()}>
+		<div class="batch-move-overlay" onclick={closeBatchMoveOverlay} onkeydown={(e) => { if (e.key === 'Escape') batchMovePicker = false; }}>
+			<div class="batch-move-picker" role="dialog" aria-modal="true" aria-labelledby="batch-move-title" tabindex="-1">
 				<div class="batch-move-header">
-					<span>Move {selectedPaths.size} notes to...</span>
-					<button class="selection-close" onclick={() => batchMovePicker = false}>
+					<span id="batch-move-title">Move {selectedPaths.size} notes to...</span>
+					<button class="selection-close" onclick={() => batchMovePicker = false} aria-label="Close move picker">
 						<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
 					</button>
 				</div>
@@ -1105,12 +1114,11 @@
 
 	{#if batchTagEdit && !contextMenu}
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="batch-move-overlay" onclick={() => batchTagEdit = false}>
-			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<div class="batch-move-picker" onclick={(e) => e.stopPropagation()}>
+		<div class="batch-move-overlay" onclick={closeBatchTagOverlay} onkeydown={(e) => { if (e.key === 'Escape') batchTagEdit = false; }}>
+			<div class="batch-move-picker" role="dialog" aria-modal="true" aria-labelledby="batch-tags-title" tabindex="-1">
 				<div class="batch-move-header">
-					<span>Tags for {selectedPaths.size} notes</span>
-					<button class="selection-close" onclick={() => batchTagEdit = false}>
+					<span id="batch-tags-title">Tags for {selectedPaths.size} notes</span>
+					<button class="selection-close" onclick={() => batchTagEdit = false} aria-label="Close tag editor">
 						<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
 					</button>
 				</div>
@@ -1408,7 +1416,7 @@
 </div>
 
 {#if contextMenu}
-	<div class="context-menu" class:mobile={isMobile} style="left: {contextMenu.x}px; top: {contextMenu.y}px" onclick={(e) => e.stopPropagation()} role="menu">
+	<div class="context-menu" class:mobile={isMobile} style="left: {contextMenu.x}px; top: {contextMenu.y}px" role="group" aria-label="Note actions">
 		{#if selectedPaths.size > 1 && selectedPaths.has(contextMenu.note.path)}
 			<!-- Batch context menu -->
 			{#if $viewMode === 'trash'}
@@ -1611,8 +1619,7 @@
 {/if}
 
 {#if sortMenu}
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="sort-menu" style="left: {sortMenu.x}px; top: {sortMenu.y}px" onmousedown={(e) => e.stopPropagation()}>
+	<div class="sort-menu" class:mobile={isMobile} style="left: {sortMenu.x}px; top: {sortMenu.y}px">
 		<div class="sort-menu-title">Sort by</div>
 		<button class:active={$sortMode === 'modified'} onclick={() => setSortMode('modified')}>
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -2335,13 +2342,13 @@
 		border-radius: 8px;
 	}
 
-	.note-list.mobile .sort-menu {
+	.sort-menu.mobile {
 		min-width: 220px;
 		border-radius: 12px;
 		padding: 6px;
 	}
 
-	.note-list.mobile .sort-menu button {
+	.sort-menu.mobile button {
 		padding: 12px 16px;
 		font-size: 15px;
 		min-height: 44px;
@@ -2363,26 +2370,6 @@
 		padding: 12px 16px;
 		font-size: 15px;
 		min-height: 44px;
-	}
-
-	/* Mobile selection checkboxes */
-	.mobile-select-check {
-		width: 22px;
-		height: 22px;
-		border-radius: 50%;
-		border: 2px solid var(--text-tertiary);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		flex-shrink: 0;
-		margin-bottom: 4px;
-		transition: all 0.15s ease;
-	}
-
-	.mobile-select-check.checked {
-		background: var(--accent);
-		border-color: var(--accent);
-		color: white;
 	}
 
 	/* Mobile create note button (round, accent-colored) */
