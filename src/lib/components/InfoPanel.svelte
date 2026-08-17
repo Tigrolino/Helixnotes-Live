@@ -91,6 +91,10 @@
 		activeTab = isMobile ? 'about' : 'shortcuts';
 	}
 
+	function closeFromOverlay(event: MouseEvent) {
+		if (event.target === event.currentTarget) close();
+	}
+
 	function openLink(url: string) {
 		openUrl(url).catch(console.error);
 	}
@@ -100,9 +104,8 @@
 
 {#if $showInfo}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="info-overlay" onclick={close} onkeydown={(e) => { if (e.key === 'Escape') close(); }}>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="info-panel" onclick={(e) => e.stopPropagation()}>
+	<div class="info-overlay" onclick={closeFromOverlay} onkeydown={(e) => { if (e.key === 'Escape') close(); }}>
+		<div class="info-panel">
 			<div class="info-header">
 				<h2>Info</h2>
 				<button class="close-btn" onclick={close} aria-label="Close info">
