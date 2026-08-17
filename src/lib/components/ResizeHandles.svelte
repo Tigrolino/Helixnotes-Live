@@ -30,14 +30,14 @@
 
 {#if appWindow && !maximized}
 	<div class="resize-layer" aria-hidden="true">
-		<div class="rz rz-n" onmousedown={(e) => start(e, 'North')}></div>
-		<div class="rz rz-s" onmousedown={(e) => start(e, 'South')}></div>
-		<div class="rz rz-w" onmousedown={(e) => start(e, 'West')}></div>
-		<div class="rz rz-e" onmousedown={(e) => start(e, 'East')}></div>
-		<div class="rz rz-nw" onmousedown={(e) => start(e, 'NorthWest')}></div>
-		<div class="rz rz-ne" onmousedown={(e) => start(e, 'NorthEast')}></div>
-		<div class="rz rz-sw" onmousedown={(e) => start(e, 'SouthWest')}></div>
-		<div class="rz rz-se" onmousedown={(e) => start(e, 'SouthEast')}></div>
+		<div class="rz rz-n" role="presentation" onmousedown={(e) => start(e, 'North')}></div>
+		<div class="rz rz-s" role="presentation" onmousedown={(e) => start(e, 'South')}></div>
+		<div class="rz rz-w" role="presentation" onmousedown={(e) => start(e, 'West')}></div>
+		<div class="rz rz-e" role="presentation" onmousedown={(e) => start(e, 'East')}></div>
+		<div class="rz rz-nw" role="presentation" onmousedown={(e) => start(e, 'NorthWest')}></div>
+		<div class="rz rz-ne" role="presentation" onmousedown={(e) => start(e, 'NorthEast')}></div>
+		<div class="rz rz-sw" role="presentation" onmousedown={(e) => start(e, 'SouthWest')}></div>
+		<div class="rz rz-se" role="presentation" onmousedown={(e) => start(e, 'SouthEast')}></div>
 	</div>
 {/if}
 
