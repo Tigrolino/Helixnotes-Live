@@ -54,6 +54,7 @@
 	import { convertListNode, type MixedListName } from '$lib/editor/mixedLists';
 	import { clearFormatting } from '$lib/editor/clearFormatting';
 	import { serializeInlineMarkdown } from '$lib/editor/markdown';
+	import { replaceWithWikiLink } from '$lib/editor/wikiLinks';
 	import { assetSourceToMarkdown, assetUrlToLocalPath, normalizeLocalAssetPath, resolveVaultFilePath } from '$lib/utils/paths';
 	import GraphView from './GraphView.svelte';
 	import TagSuggestInput from './TagSuggestInput.svelte';
@@ -2547,10 +2548,7 @@
 	function insertWikiLink(entry: NoteTitleEntry, originalRef?: string) {
 		if (!editor || !wikiLinkMenu) return;
 		const { from } = wikiLinkMenu;
-		// Delete the [[ trigger and query text
 		const to = editor.state.selection.from;
-		editor.chain().focus().deleteRange({ from, to }).run();
-		// Insert the wiki-link mark
 		// For ambiguous titles, use vault-relative path as the ref so it survives source-mode roundtrips
 		const displayText = entry.title;
 		let titleAttr = originalRef || entry.title;
@@ -2562,17 +2560,16 @@
 				titleAttr = relPath + anchor;
 			}
 		}
-		tick().then(() => {
-			if (!editor) return;
-			editor.chain().focus()
-				.insertContent({
-					type: 'text',
-					text: displayText,
-					marks: [{ type: 'wikiLink', attrs: { title: titleAttr, path: entry.path, aliased: displayText !== titleAttr } }],
-				})
-				.run();
-		});
+		const transaction = replaceWithWikiLink(
+			editor.state,
+			from,
+			to,
+			displayText,
+			{ title: titleAttr, path: entry.path || '', aliased: displayText !== titleAttr },
+		);
 		closeWikiLinkMenu();
+		editor.view.dispatch(transaction);
+		editor.view.focus();
 	}
 
 	function executeWikiLinkCommand(index: number) {
@@ -2759,21 +2756,13 @@
 										closeWikiLinkMenu();
 										tick().then(() => {
 											if (!editor) return;
-											// Use a single ProseMirror transaction to replace [[query] with the
-											// wiki-link and clear stored marks atomically, preventing the inclusive
-											// mark from bleeding into subsequent text. Do NOT call deleteRange first
-											// — that would shift positions and make menuFrom/curTo invalid here.
-											const { tr, schema } = editor.view.state;
-											const wikiLinkMark = schema.marks.wikiLink.create({
-												title: noteRef,
-												path: '',
-												aliased: display !== noteRef,
-											});
-											const textNode = schema.text(display, [wikiLinkMark]);
-											tr.replaceWith(menuFrom, curTo, textNode);
-											tr.setSelection(TextSelection.create(tr.doc, menuFrom + display.length));
-											tr.setStoredMarks([]);
-											editor.view.dispatch(tr);
+											editor.view.dispatch(replaceWithWikiLink(
+												editor.state,
+												menuFrom,
+												curTo,
+												display,
+												{ title: noteRef, path: '', aliased: display !== noteRef },
+											));
 										});
 										}
 									} else {
