@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { showSettings, theme, resolvedTheme, appConfig, platformIsMobile, activeVaultConfig, updateAvailable as globalUpdateAvailable, updateObj as globalUpdateObj, installType, settingsTab, vaultReady, androidApkUrl, checkForUpdateMobile, notebookSortMode, isManagedInstall, customThemes } from '$lib/stores/app';
-	import { setTheme, setSystemThemes, setAccentColor, setFontSize, setFontFamily, setLineHeight, setUiScale, setContentWidth, setGeneralSettings, importObsidian, createBackup, listBackups, restoreBackup, deleteBackup, setBackupSettings, setAiSettings, testAiConnection, setSyncSettings, testSyncConnection, syncNow, getAppConfig, saveCustomTheme, deleteCustomTheme, exportCustomTheme, importCustomThemes, getVaultStats, findOrphanedAttachments, trashOrphanedAttachments } from '$lib/api';
+	import { setTheme, setSystemThemes, setAccentColor, setFontSize, setScrollToChangeFontSize, setFontFamily, setLineHeight, setUiScale, setContentWidth, setGeneralSettings, importObsidian, createBackup, listBackups, restoreBackup, deleteBackup, setBackupSettings, setAiSettings, testAiConnection, setSyncSettings, testSyncConnection, syncNow, getAppConfig, saveCustomTheme, deleteCustomTheme, exportCustomTheme, importCustomThemes, getVaultStats, findOrphanedAttachments, trashOrphanedAttachments } from '$lib/api';
 	import { darkThemes, isMobile, isAndroid } from '$lib/platform';
 	import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 	import { listen } from '@tauri-apps/api/event';
@@ -583,6 +583,7 @@
 	let activeAccent = $state($appConfig?.accent_color ?? 'Indigo');
 	let customAccentColor = $state(($appConfig?.accent_color?.startsWith('#') ? $appConfig.accent_color : null) ?? '#5b6abf');
 	let activeFontSize = $state($appConfig?.font_size ?? 14);
+	let scrollToChangeFontSize = $state($appConfig?.scroll_to_change_font_size ?? true);
 	let activeFontFamily = $state($appConfig?.font_family ?? 'system');
 	let activeLineHeight = $state($appConfig?.line_height ?? 1.6);
 	let activeUiScale = $state($appConfig?.ui_scale ?? 1);
@@ -987,6 +988,13 @@
 		setFontSize(size).catch((e) => console.error('Failed to save font size:', e));
 	}
 
+	function toggleScrollToChangeFontSize() {
+		scrollToChangeFontSize = !scrollToChangeFontSize;
+		if ($appConfig) $appConfig.scroll_to_change_font_size = scrollToChangeFontSize;
+		setScrollToChangeFontSize(scrollToChangeFontSize)
+			.catch((e) => console.error('Failed to save scroll font size setting:', e));
+	}
+
 	function applyFontSize(size: number) {
 		document.documentElement.style.setProperty('--editor-font-size', `${size}px`);
 	}
@@ -1080,6 +1088,7 @@
 				}
 			}
 		}
+		scrollToChangeFontSize = $appConfig?.scroll_to_change_font_size ?? true;
 		const savedSize = $appConfig?.font_size;
 		if (savedSize) {
 			activeFontSize = savedSize;
@@ -1910,6 +1919,17 @@
 										</button>
 									{/each}
 								</div>
+								{#if !isMobile}
+									<label class="setting-toggle">
+										<span class="setting-label">
+											<span class="setting-name">Scroll to change font size</span>
+											<span class="setting-desc">Allow Cmd/Ctrl + scroll to resize editor text</span>
+										</span>
+										<button class="toggle-switch" class:on={scrollToChangeFontSize} role="switch" aria-checked={scrollToChangeFontSize} aria-label="Scroll to change font size" onclick={toggleScrollToChangeFontSize}>
+											<span class="toggle-knob"></span>
+										</button>
+									</label>
+								{/if}
 							</div>
 
 							{#if !isMobile}

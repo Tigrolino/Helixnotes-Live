@@ -92,6 +92,7 @@ export interface AppConfig {
   system_dark_theme: string;
   accent_color: string | null;
   font_size: number | null;
+  scroll_to_change_font_size: boolean;
   font_family: string | null;
   line_height: number | null;
   ui_scale: number | null;
