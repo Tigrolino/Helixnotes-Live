@@ -71,6 +71,10 @@ export async function setFontSize(size: number): Promise<void> {
   return invoke("set_font_size", { size });
 }
 
+export async function setScrollToChangeFontSize(enabled: boolean): Promise<void> {
+  return invoke("set_scroll_to_change_font_size", { enabled });
+}
+
 export async function setFontFamily(family: string): Promise<void> {
   return invoke("set_font_family", { family });
 }

@@ -124,6 +124,8 @@ pub struct AppConfig {
     pub accent_color: Option<String>,
     #[serde(default)]
     pub font_size: Option<u32>,
+    #[serde(default = "default_true")]
+    pub scroll_to_change_font_size: bool,
     #[serde(default)]
     pub font_family: Option<String>,
     #[serde(default)]
@@ -296,6 +298,7 @@ impl Default for AppConfig {
             system_dark_theme: default_system_dark_theme(),
             accent_color: None,
             font_size: None,
+            scroll_to_change_font_size: true,
             font_family: None,
             line_height: None,
             ui_scale: None,
@@ -553,5 +556,20 @@ mod startup_view_tests {
         let config: AppConfig = serde_json::from_value(value).unwrap();
 
         assert!(!config.show_note_switcher);
+    }
+
+    #[test]
+    fn scroll_font_sizing_stays_enabled_for_new_and_existing_configs() {
+        let config = AppConfig::default();
+        assert!(config.scroll_to_change_font_size);
+
+        let mut value = serde_json::to_value(config).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("scroll_to_change_font_size");
+        let config: AppConfig = serde_json::from_value(value).unwrap();
+
+        assert!(config.scroll_to_change_font_size);
     }
 }

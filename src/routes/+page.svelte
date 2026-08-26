@@ -3,6 +3,7 @@
 	import { appConfig, vaultReady, theme } from '$lib/stores/app';
 	import { getAppConfig, openVault, restoreExternalVault, setFontSize } from '$lib/api';
 	import { darkThemes, isIOS, isMobile } from '$lib/platform';
+	import { getWheelFontSizeAction } from '$lib/utils/editor-zoom';
 	import { getCurrentWebview } from '@tauri-apps/api/webview';
 	import { listen } from '@tauri-apps/api/event';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -16,6 +17,7 @@
 	let fontSizeSaveTimer: ReturnType<typeof setTimeout> | null = null;
 	let removeEditorZoomShortcuts: (() => void) | null = null;
 	let removeFontSizeListener: (() => void) | null = null;
+	let removeScrollFontSizeListener: (() => void) | null = null;
 	let startupRevealTimer: ReturnType<typeof setTimeout> | null = null;
 	let startupWindowRevealed = false;
 
@@ -121,10 +123,15 @@
 		};
 
 		const handleWheel = (event: WheelEvent) => {
-			if (!event.ctrlKey && !event.metaKey) return;
+			const action = getWheelFontSizeAction(
+				event,
+				$appConfig?.scroll_to_change_font_size ?? true
+			);
+			if (action === 'ignore') return;
 			event.preventDefault();
 			event.stopPropagation();
-			zoomEditor(event.deltaY < 0 ? 1 : -1);
+			if (action === 'increase') zoomEditor(1);
+			else if (action === 'decrease') zoomEditor(-1);
 		};
 
 		window.addEventListener('keydown', handleKeydown);
@@ -152,6 +159,9 @@
 			$appConfig = config;
 			removeFontSizeListener = await listen<number>('editor-font-size-changed', (event) => {
 				if ($appConfig?.font_size !== event.payload) applyEditorFontSize(event.payload);
+			});
+			removeScrollFontSizeListener = await listen<boolean>('scroll-to-change-font-size-changed', (event) => {
+				if ($appConfig) $appConfig.scroll_to_change_font_size = event.payload;
 			});
 			$theme = config.theme || 'system';
 
@@ -287,6 +297,7 @@
 	onDestroy(() => {
 		removeEditorZoomShortcuts?.();
 		removeFontSizeListener?.();
+		removeScrollFontSizeListener?.();
 		if (fontSizeSaveTimer) clearTimeout(fontSizeSaveTimer);
 		if (startupRevealTimer) clearTimeout(startupRevealTimer);
 	});

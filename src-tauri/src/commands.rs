@@ -471,6 +471,22 @@ pub fn set_font_size(app: AppHandle, state: State<'_, AppState>, size: u32) -> R
 }
 
 #[tauri::command]
+pub fn set_scroll_to_change_font_size(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut config = state.config.lock().map_err(|e| e.to_string())?;
+    config.scroll_to_change_font_size = enabled;
+    save_app_config(&config)?;
+    drop(config);
+
+    use tauri::Emitter;
+    app.emit("scroll-to-change-font-size-changed", enabled)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn set_font_family(state: State<'_, AppState>, family: String) -> Result<(), String> {
     let mut config = state.config.lock().map_err(|e| e.to_string())?;
     config.font_family = Some(family);
