@@ -5629,17 +5629,20 @@
 			}
 			return true;
 		}
-		// WebKitGTK fallback (bug #218519): older WebKitGTK versions return
-		// empty DataTransferItemList for image pastes. Detect this and read
-		// the image directly from the system clipboard via Rust/arboard.
-		if (items.length === 0) {
-			const hasText = event.clipboardData!.getData('text/plain');
-			const hasHtml = event.clipboardData!.getData('text/html');
-			if (!hasText && !hasHtml) {
-				event.preventDefault();
-				insertClipboardImage();
-				return true;
-			}
+		// WebKitGTK fallback (bug #218519): WebKitGTK never exposes a clipboard image
+		// through DataTransfer, so the loop above cannot fire on Linux and this is the
+		// only path that can work there. The guard used to also require an empty
+		// DataTransferItemList and no text/html, which no real image copy satisfies:
+		// Chromium's "Copy image" writes an <img> HTML fragment alongside the bitmap
+		// (but no text/plain), so the image was dropped and its remote URL pasted
+		// instead. Key off text/plain, and accept HTML that is just an <img>.
+		const hasText = event.clipboardData!.getData('text/plain');
+		const html = event.clipboardData!.getData('text/html');
+		const htmlIsBareImage = /^\s*(?:<meta[^>]*>\s*)?<img\b[^>]*>\s*$/i.test(html);
+		if (!hasText && (!html || htmlIsBareImage)) {
+			event.preventDefault();
+			insertClipboardImage();
+			return true;
 		}
 		return false;
 	}
