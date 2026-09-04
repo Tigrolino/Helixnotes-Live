@@ -44,10 +44,15 @@
 		if (item) item.scrollIntoView({ block: 'nearest' });
 	}
 
+	function handleEscape(e: KeyboardEvent) {
+		if (e.key !== 'Escape') return;
+		e.preventDefault();
+		e.stopPropagation();
+		$showSearch = false;
+	}
+
 	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			$showSearch = false;
-		} else if (e.key === 'ArrowDown') {
+		if (e.key === 'ArrowDown') {
 			e.preventDefault();
 			selectedIndex = Math.min(selectedIndex + 1, results.length - 1);
 			scrollToSelected();
@@ -128,7 +133,7 @@
 
 {#if $showSearch}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="search-overlay" onclick={close} onkeydown={handleKeydown}>
+	<div class="search-overlay" onclick={close} onkeydowncapture={handleEscape} onkeydown={handleKeydown}>
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="search-panel" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
 			<div class="search-input-wrapper">

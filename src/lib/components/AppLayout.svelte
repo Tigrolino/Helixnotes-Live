@@ -578,6 +578,11 @@
 		}
 
 		if (e.key === 'Escape') {
+			const dismissesAppUi = $showSettings || $showInfo || $focusMode || $showSearch || $showCommandPalette;
+			if (!dismissesAppUi) return;
+
+			e.preventDefault();
+			e.stopPropagation();
 			if ($showSettings) $showSettings = false;
 			else if ($showInfo) $showInfo = false;
 			else if ($focusMode) $focusMode = false;

@@ -164,10 +164,15 @@
 		}
 	});
 
+	function handleEscape(e: KeyboardEvent) {
+		if (e.key !== 'Escape') return;
+		e.preventDefault();
+		e.stopPropagation();
+		$showCommandPalette = false;
+	}
+
 	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			$showCommandPalette = false;
-		} else if (e.key === 'ArrowDown') {
+		if (e.key === 'ArrowDown') {
 			e.preventDefault();
 			selectedIndex = Math.min(selectedIndex + 1, filteredCommands.length - 1);
 		} else if (e.key === 'ArrowUp') {
@@ -194,7 +199,7 @@
 
 {#if $showCommandPalette}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="palette-overlay" onclick={() => ($showCommandPalette = false)} onkeydown={handleKeydown}>
+	<div class="palette-overlay" onclick={() => ($showCommandPalette = false)} onkeydowncapture={handleEscape} onkeydown={handleKeydown}>
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="palette-panel" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
 			<div class="palette-input-wrapper">
