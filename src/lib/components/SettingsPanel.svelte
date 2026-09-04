@@ -1068,6 +1068,15 @@
 		if (event.target === event.currentTarget) close();
 	}
 
+	function handleEscape(event: KeyboardEvent) {
+		if (event.key !== 'Escape') return;
+		event.preventDefault();
+		event.stopPropagation();
+		if (restoreConfirm) restoreConfirm = null;
+		else if (customThemeEditorOpen) cancelCustomThemeEditor();
+		else close();
+	}
+
 	function dismissRestoreConfirm(event: MouseEvent) {
 		if (event.target === event.currentTarget) restoreConfirm = null;
 	}
@@ -1148,7 +1157,7 @@
 
 {#if $showSettings}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="settings-overlay" class:mobile={isMobile} onclick={closeSettingsFromOverlay} onkeydown={(e) => { if (e.key === 'Escape') close(); }}>
+	<div class="settings-overlay" class:mobile={isMobile} onclick={closeSettingsFromOverlay} onkeydowncapture={handleEscape} onkeydown={handleEscape}>
 		<div class="settings-panel" class:mobile={isMobile} role="dialog" aria-modal="true" aria-labelledby="settings-title" tabindex="-1">
 			<div class="settings-header">
 				<h2 id="settings-title">Settings</h2>
@@ -1813,7 +1822,7 @@
 							<!-- Custom Theme Editor Modal -->
 							{#if customThemeEditorOpen && customThemeEditing}
 								<!-- svelte-ignore a11y_no_static_element_interactions -->
-								<div class="custom-theme-modal-overlay" onclick={cancelCustomThemeFromOverlay} onkeydown={(e) => e.key === 'Escape' && cancelCustomThemeEditor()}>
+								<div class="custom-theme-modal-overlay" onclick={cancelCustomThemeFromOverlay} onkeydown={handleEscape}>
 									<div class="custom-theme-modal" role="dialog" aria-modal="true" aria-labelledby="custom-theme-title" tabindex="-1">
 										<div class="custom-theme-modal-header">
 											<h3 id="custom-theme-title">{customThemeEditing.id.startsWith('custom-') && $customThemes.some(c => c.id === customThemeEditing!.id) ? 'Edit Theme' : 'New Custom Theme'}</h3>
@@ -2121,7 +2130,7 @@
 
 							{#if restoreConfirm}
 								<!-- svelte-ignore a11y_no_static_element_interactions -->
-								<div class="restore-confirm-overlay" onclick={dismissRestoreConfirm} onkeydown={(e) => { if (e.key === 'Escape') restoreConfirm = null; }}>
+								<div class="restore-confirm-overlay" onclick={dismissRestoreConfirm} onkeydown={handleEscape}>
 									<div class="restore-confirm" role="alertdialog" aria-modal="true" aria-labelledby="restore-confirm-title" tabindex="-1">
 										<h4 id="restore-confirm-title">Restore Backup?</h4>
 										<p>This will replace all notes in your vault with the backup from <strong>{formatBackupDate(restoreConfirm.created)}</strong>. This action cannot be undone.</p>

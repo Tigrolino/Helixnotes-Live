@@ -95,6 +95,13 @@
 		if (event.target === event.currentTarget) close();
 	}
 
+	function handleEscape(event: KeyboardEvent) {
+		if (event.key !== 'Escape') return;
+		event.preventDefault();
+		event.stopPropagation();
+		close();
+	}
+
 	function openLink(url: string) {
 		openUrl(url).catch(console.error);
 	}
@@ -104,7 +111,7 @@
 
 {#if $showInfo}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="info-overlay" onclick={closeFromOverlay} onkeydown={(e) => { if (e.key === 'Escape') close(); }}>
+	<div class="info-overlay" onclick={closeFromOverlay} onkeydowncapture={handleEscape} onkeydown={handleEscape}>
 		<div class="info-panel">
 			<div class="info-header">
 				<h2>Info</h2>
