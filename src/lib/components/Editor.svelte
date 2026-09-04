@@ -54,6 +54,7 @@
 	import { convertListNode, type MixedListName } from '$lib/editor/mixedLists';
 	import { clearFormatting } from '$lib/editor/clearFormatting';
 	import { serializeInlineMarkdown } from '$lib/editor/markdown';
+	import { restoreTitleHeading, stripTitleHeading, type HiddenTitleHeading } from '$lib/editor/titleVisibility';
 	import { replaceWithWikiLink } from '$lib/editor/wikiLinks';
 	import { assetSourceToMarkdown, assetUrlToLocalPath, normalizeLocalAssetPath, resolveVaultFilePath } from '$lib/utils/paths';
 	import GraphView from './GraphView.svelte';
@@ -117,9 +118,7 @@
 	let hasPendingBlobs = false;
 	let lastSourceMode = $sourceMode;
 	let linkContextMenu = $state<{ x: number; y: number; href: string; anchor: HTMLAnchorElement } | null>(null);
-	let titleWasStripped = false;
-	let strippedTitle = '';
-	let strippedHeadingPrefix = '';
+	let hiddenTitleHeading: HiddenTitleHeading | null = null;
 	let taskRevealTimer: ReturnType<typeof setTimeout> | null = null;
 	let taskRevealElement: HTMLElement | null = null;
 	let taskRevealRequest = 0;
@@ -3403,44 +3402,13 @@
 	}
 
 	function stripTitleH1(md: string): string {
-		const title = $activeNote?.meta.title;
-		if (!$appConfig?.hide_title_in_body || !title) {
-			titleWasStripped = false;
-			strippedTitle = '';
-			strippedHeadingPrefix = '';
-			return md;
-		}
-		// Find the first non-empty line
-		const lines = md.split('\n');
-		for (let i = 0; i < lines.length; i++) {
-			const line = lines[i].trim();
-			if (line === '') continue;
-			// Check if it's a heading (any level) matching the note title
-			// Normalize: lowercase, collapse whitespace, strip common separators (- - _)
-			const normalize = (s: string) => s.trim().toLowerCase().replace(/[\s\-—_]+/g, ' ');
-			const match = line.match(/^(#{1,6})\s+(.+)$/);
-			if (match && normalize(match[2]) === normalize(title)) {
-				titleWasStripped = true;
-				strippedTitle = title.trim();
-				strippedHeadingPrefix = match[1]; // preserve original heading level (e.g. "##")
-				lines.splice(i, 1);
-				// Also remove a trailing blank line after the heading if present
-				if (i < lines.length && lines[i].trim() === '') {
-					lines.splice(i, 1);
-				}
-				return lines.join('\n');
-			}
-			break; // First non-empty line isn't a matching heading, stop
-		}
-		titleWasStripped = false;
-		strippedTitle = '';
-		strippedHeadingPrefix = '';
-		return md;
+		const result = stripTitleHeading(md, $activeNote?.meta.title, $appConfig?.hide_title_in_body ?? false);
+		hiddenTitleHeading = result.hiddenTitle;
+		return result.markdown;
 	}
 
 	function restoreTitleH1(md: string): string {
-		if (!titleWasStripped || !strippedTitle) return md;
-		return `${strippedHeadingPrefix} ${strippedTitle}\n\n${md}`;
+		return restoreTitleHeading(md, hiddenTitleHeading);
 	}
 
 	function editorToMarkdown(): string {
@@ -5794,7 +5762,7 @@
 				? editor.state.doc.textBetween(0, editor.state.selection.from, '\n', '').replace(/\s/g, '').length
 				: 0;
 			const docNonWs = docNonWhitespace();
-			sourceContent = editor ? editorToMarkdown() : ($activeNote?.content ?? '');
+			sourceContent = stripTitleH1(editor ? editorToMarkdown() : ($activeNote?.content ?? ''));
 			resetSourceHistory(sourceContent);
 			lastSourceMode = true;
 			const target = caretNonWs > 0 ? scanAlign(sourceContent, docNonWs, { stopAtNw: caretNonWs }).srcOffset : 0;
@@ -5821,20 +5789,20 @@
 			};
 			if (isMobile) {
 				// Mobile: editor stays in DOM, just update its content
-				const content = srcText || ($activeNote?.content ?? '');
+				const content = srcText;
 				if (editor) {
 					ignoreNextUpdate = true;
-					editor.commands.setContent(markdownToHtml(content));
+					editor.commands.setContent(markdownToHtml(restoreTitleH1(content)));
 					tick().then(restoreRichCaret);
 				}
 			} else {
 				// Desktop: destroy old editor (its DOM element is gone),
 				// wait for DOM to swap textarea→div, then create editor on new element.
 				destroyEditor();
-				const content = srcText || ($activeNote?.content ?? '');
+				const content = srcText;
 				tick().then(() => {
 					if (editorElement && !editor) {
-						createEditor(content);
+						createEditor(restoreTitleH1(content));
 						restoreRichCaret();
 					}
 				});
@@ -5967,7 +5935,7 @@
 							const oldPath = $activeNotePath;
 							$activeNote.meta.title = newTitle;
 							// Update stripped title so restoreTitleH1 uses the new title
-							if (titleWasStripped) strippedTitle = newTitle;
+							if (hiddenTitleHeading) hiddenTitleHeading = { ...hiddenTitleHeading, title: newTitle };
 							$editorDirty = true;
 							// Force save current editor content before renaming so disk is up-to-date
 							await forceSave();
