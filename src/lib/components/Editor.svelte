@@ -4996,13 +4996,25 @@
 	}
 
 	async function ctxPaste() {
-		if (!editor) return;
+		// insertClipboardImage() saves the attachment before inserting it, so an
+		// unguarded paste here would leave an orphan file behind when the editor
+		// cannot accept the insertion.
+		if (!editor || $readOnly || $viewerNote) { closeTextContextMenu(); return; }
 		try {
 			const text = await navigator.clipboard.readText();
-			if (text) editor.chain().focus().insertContent(text).run();
+			if (text) {
+				editor.chain().focus().insertContent(text).run();
+				closeTextContextMenu();
+				return;
+			}
 		} catch (e) {
 			console.error('Paste failed:', e);
 		}
+		// readText() only reads text/plain. An image copied from a browser has none,
+		// so pasting an image from this menu used to do nothing at all. Fall back to
+		// the same native clipboard reader the paste handler uses; it is a no-op when
+		// the clipboard holds no image.
+		await insertClipboardImage();
 		closeTextContextMenu();
 	}
 
