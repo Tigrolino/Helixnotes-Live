@@ -700,7 +700,7 @@
 
 <svelte:window onclick={handleWindowClick} onkeydown={(e) => { if (e.key === 'Escape') iconPickerNotebook = null; }} />
 
-<aside class="sidebar" class:collapsed={$sidebarCollapsed} class:mobile={isMobile} class:nav-empty={!anyNavItem}>
+<aside class="sidebar" class:collapsed={!isMobile && $sidebarCollapsed} class:mobile={isMobile} class:nav-empty={!anyNavItem}>
 	{#if !isMobile}
 	<div class="sidebar-header">
 		<button class="collapse-btn" onclick={() => ($sidebarCollapsed = !$sidebarCollapsed)} title="Toggle sidebar">
@@ -721,7 +721,7 @@
 	</div>
 	{/if}
 
-	{#if !$sidebarCollapsed}
+	{#if isMobile || !$sidebarCollapsed}
 		{#if anyNavItem}
 		<nav class="sidebar-nav">
 			{#if $appConfig?.show_all_notes !== false}
