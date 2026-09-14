@@ -521,6 +521,17 @@
 		{ id: 'one-dark', label: 'One Dark', bg: '#282c34', sidebar: '#21252b', accent: '#61afef' },
 	];
 
+	// Keep the default themes pinned at the top and sort the rest alphabetically.
+	const priorityThemeIds = ['system', 'light', 'dark'];
+	themePresets.sort((a, b) => {
+		const pa = priorityThemeIds.indexOf(a.id);
+		const pb = priorityThemeIds.indexOf(b.id);
+		if (pa !== -1 && pb !== -1) return pa - pb;
+		if (pa !== -1) return -1;
+		if (pb !== -1) return 1;
+		return a.label.localeCompare(b.label);
+	});
+
 	const accentPresets = [
 		{ name: 'Indigo', light: '#5b6abf', dark: '#7b9bd4' },
 		{ name: 'Rose', light: '#e11d48', dark: '#d4768a' },
