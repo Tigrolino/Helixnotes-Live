@@ -11,6 +11,7 @@ import type {
   TrashContents,
   VaultState,
   VaultStats,
+  TagStyle,
   ImportResult,
   BackupEntry,
   VersionEntry,
@@ -267,6 +268,17 @@ export async function setNotebookIcon(
   iconRelative: string | null,
 ): Promise<void> {
   return invoke("set_notebook_icon", { notebookRelative, iconRelative });
+}
+
+export async function getTagStyles(): Promise<Record<string, TagStyle>> {
+  return invoke("get_tag_styles");
+}
+
+export async function setTagStyle(
+  tag: string,
+  style: TagStyle | null,
+): Promise<void> {
+  return invoke("set_tag_style", { tag, style });
 }
 
 export async function setGeneralSettings(

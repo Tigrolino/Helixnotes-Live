@@ -6,9 +6,9 @@
 // vs manifest) and resolve each file as upload/download/delete, with keep-both
 // conflict copies so nothing is ever lost.
 //
-// Synced set: every `*.md` in the vault tree, `.helixnotes/attachments/`, and
-// `.helixnotes/notebook_icons.json`. Search indexes, trash, history, other metadata,
-// and the manifest itself remain local-only.
+// Synced set: every `*.md` in the vault tree, `.helixnotes/attachments/`,
+// `.helixnotes/notebook_icons.json`, and `.helixnotes/tag_styles.json`. Search indexes,
+// trash, history, other metadata, and the manifest itself remain local-only.
 
 use crate::state::AppState;
 use crate::vault::operations::helixnotes_dir;
@@ -123,11 +123,13 @@ struct LocalFile {
 }
 
 /// The synced set: `*.md` anywhere outside `.helixnotes/`, everything under
-/// `.helixnotes/attachments/`, and the notebook icon mapping. Applied to BOTH local
+/// `.helixnotes/attachments/`, plus notebook icon and tag style mappings. Applied to BOTH local
 /// and remote so pointing at a folder with unrelated files never imports them.
 fn is_synced_relpath(rel: &str) -> bool {
     if rel.starts_with(".helixnotes/") {
-        rel.starts_with(".helixnotes/attachments/") || rel == ".helixnotes/notebook_icons.json"
+        rel.starts_with(".helixnotes/attachments/")
+            || rel == ".helixnotes/notebook_icons.json"
+            || rel == ".helixnotes/tag_styles.json"
     } else {
         rel.ends_with(".md")
     }
@@ -758,6 +760,7 @@ mod tests {
             "Notes/plan.md",
             ".helixnotes/attachments/notebook-icon.png",
             ".helixnotes/notebook_icons.json",
+            ".helixnotes/tag_styles.json",
         ] {
             assert!(is_synced_relpath(path), "expected {path} to be synced");
         }
@@ -766,6 +769,7 @@ mod tests {
             "Notes/image.png",
             ".helixnotes/sync_state.json",
             ".helixnotes/notebook_icons.json.bak",
+            ".helixnotes/tag_styles.json.bak",
             ".helixnotes/attachments-old/icon.png",
         ] {
             assert!(!is_synced_relpath(path), "expected {path} to stay local");
