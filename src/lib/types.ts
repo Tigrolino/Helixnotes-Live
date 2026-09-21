@@ -34,6 +34,11 @@ export interface NotebookEntry {
   note_count: number;
 }
 
+export interface TagStyle {
+  icon?: string | null;
+  color?: string | null;
+}
+
 export interface NoteContent {
   path: string;
   meta: NoteMeta;

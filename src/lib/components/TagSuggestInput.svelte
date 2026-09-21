@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { tags } from '$lib/stores/app';
+	import TagLabel from './TagLabel.svelte';
 
 	let { existing = [], placeholder = 'Add tag...', onsubmit, oncancel }: {
 		existing?: string[];
@@ -69,14 +70,14 @@
 	/>
 	{#if suggestions.length}
 		<div class="tag-suggest-list">
-			{#each suggestions as s, i}
+			{#each suggestions as s, i (s)}
 				<button
 					type="button"
 					class="tag-suggest-item"
 					class:selected={i === selIndex}
 					onmouseenter={() => (selIndex = i)}
 					onmousedown={(e) => { e.preventDefault(); submit(s); }}
-				>#{s}</button>
+				><TagLabel name={s} size={12} /></button>
 			{/each}
 		</div>
 	{/if}
@@ -110,6 +111,8 @@
 		gap: 1px;
 	}
 	.tag-suggest-item {
+		display: flex;
+		align-items: center;
 		text-align: left;
 		padding: 5px 8px;
 		border: none;

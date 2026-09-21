@@ -42,6 +42,28 @@ pub struct NotebookEntry {
     pub note_count: usize,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TagStyle {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+}
+
+impl TagStyle {
+    pub fn is_empty(&self) -> bool {
+        self.icon
+            .as_ref()
+            .map(|value| value.trim().is_empty())
+            .unwrap_or(true)
+            && self
+                .color
+                .as_ref()
+                .map(|value| value.trim().is_empty())
+                .unwrap_or(true)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NoteContent {
     pub path: String,

@@ -55,10 +55,12 @@
 	import { clearFormatting } from '$lib/editor/clearFormatting';
 	import { serializeInlineMarkdown } from '$lib/editor/markdown';
 	import { restoreTitleHeading, stripTitleHeading, type HiddenTitleHeading } from '$lib/editor/titleVisibility';
+	import { tagIterationKey } from '$lib/utils/tag-styles';
 	import { replaceWithWikiLink } from '$lib/editor/wikiLinks';
 	import { assetSourceToMarkdown, assetUrlToLocalPath, normalizeLocalAssetPath, resolveVaultFilePath } from '$lib/utils/paths';
 	import GraphView from './GraphView.svelte';
 	import TagSuggestInput from './TagSuggestInput.svelte';
+	import TagLabel from './TagLabel.svelte';
 	import ImageViewer from './ImageViewer.svelte';
 	import { isMobile, isAndroid } from '$lib/platform';
 	import ResizeHandle from './ResizeHandle.svelte';
@@ -6136,7 +6138,7 @@
 			<span class="meta-divider">·</span>
 			<button class="note-tags-trigger" onclick={toggleTagMenu} title="Edit tags">
 				{#if $activeNote.meta.tags?.length > 0}
-					{#each $activeNote.meta.tags as tag}<span class="note-tag">#{tag}</span>{/each}
+					{#each $activeNote.meta.tags as tag, i (tagIterationKey(tag, i))}<TagLabel name={tag} size={11} tone="muted" />{/each}
 				{:else}
 					<span class="note-tags-add">+ Tags</span>
 				{/if}
@@ -6461,8 +6463,8 @@
 						<div class="info-row info-row-tags">
 							<span class="info-key">Tags</span>
 							<span class="info-value info-tags">
-								{#each $activeNote.meta.tags as tag}
-									<span class="info-tag">#{tag}</span>
+								{#each $activeNote.meta.tags as tag, i (tagIterationKey(tag, i))}
+									<TagLabel name={tag} size={11} tone="muted" />
 								{/each}
 							</span>
 						</div>
@@ -7459,9 +7461,9 @@
 		<div class="tag-menu" style="left: {tagMenu.x}px; top: {tagMenu.y}px">
 			{#if $activeNote.meta.tags.length > 0}
 				<div class="tag-menu-list">
-					{#each $activeNote.meta.tags as tag}
+					{#each $activeNote.meta.tags as tag, i (tagIterationKey(tag, i))}
 						<span class="tag-menu-chip">
-							#{tag}
+							<TagLabel name={tag} size={12} />
 							<button class="tag-menu-remove" onclick={() => removeActiveNoteTag(tag)} title="Remove tag" aria-label="Remove tag">
 								<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
 							</button>
@@ -8016,15 +8018,6 @@
 		font: inherit;
 		color: inherit;
 		cursor: pointer;
-	}
-
-	.note-tag {
-		font-size: 11px;
-		color: var(--text-tertiary);
-		background: var(--bg-tertiary);
-		padding: 1px 7px;
-		border-radius: 10px;
-		letter-spacing: 0.01em;
 	}
 
 	.note-tags-add {
@@ -11691,14 +11684,6 @@
 		flex-wrap: wrap;
 		gap: 4px;
 		justify-content: flex-end;
-	}
-
-	.info-tag {
-		font-size: 11px;
-		color: var(--text-secondary);
-		background: var(--bg-tertiary);
-		border-radius: 3px;
-		padding: 1px 5px;
 	}
 
 	.editor-container.mobile .editor-body-row:has(.info-panel) > .editor-body {

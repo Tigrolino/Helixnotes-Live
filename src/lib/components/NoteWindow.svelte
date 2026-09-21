@@ -10,9 +10,10 @@
 		activeNotePath,
 		editorDirty,
 		readOnly,
-		sourceMode
+		sourceMode,
+		tagStyles
 	} from '$lib/stores/app';
-	import { readNote } from '$lib/api';
+	import { getTagStyles, readNote } from '$lib/api';
 	import { keybindings, matchAction } from '$lib/keybindings';
 	import type { FileEvent } from '$lib/types';
 
@@ -84,6 +85,12 @@
 			void applyUiScale(event.payload);
 		});
 		await applyUiScale($appConfig?.ui_scale ?? 1);
+
+		try {
+			$tagStyles = await getTagStyles();
+		} catch (e) {
+			console.error('Failed to load tag styles:', e);
+		}
 
 		try {
 			const content = await readNote(notePath);

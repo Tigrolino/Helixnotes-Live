@@ -1588,6 +1588,28 @@ pub fn set_notebook_icon(
     operations::set_notebook_icon(vault_path, &notebook_relative, icon_relative.as_deref())
 }
 
+// ── Tag Styles ──
+
+#[tauri::command]
+pub fn get_tag_styles(
+    state: State<'_, AppState>,
+) -> Result<std::collections::HashMap<String, crate::types::TagStyle>, String> {
+    let config = state.config.lock().map_err(|e| e.to_string())?;
+    let vault_path = config.active_vault.as_ref().ok_or("No active vault")?;
+    operations::load_tag_styles(vault_path)
+}
+
+#[tauri::command]
+pub fn set_tag_style(
+    state: State<'_, AppState>,
+    tag: String,
+    style: Option<crate::types::TagStyle>,
+) -> Result<(), String> {
+    let config = state.config.lock().map_err(|e| e.to_string())?;
+    let vault_path = config.active_vault.as_ref().ok_or("No active vault")?;
+    operations::set_tag_style(vault_path, &tag, style)
+}
+
 // ── General Settings ──
 
 #[tauri::command]
@@ -1803,7 +1825,7 @@ pub struct OrphanAttachment {
 
 // Conservatively find files in .helixnotes/attachments not referenced by ANY note. Scans every
 // .md in the vault (including .helixnotes/trash, so a restorable trashed note keeps its files)
-// plus notebook_icons.json, and matches each filename against both the raw text and a
+// plus notebook_icons.json and tag_styles.json, and matches each filename against both the raw text and a
 // percent-decoded copy (so a URL-encoded path like `my%20file.png` still counts as a reference).
 // When in doubt a file is KEPT: a leftover orphan is harmless, a wrong deletion is not.
 fn scan_orphaned_attachments(vault: &str) -> Result<Vec<(String, u64)>, String> {
@@ -1841,11 +1863,13 @@ fn scan_orphaned_attachments(vault: &str) -> Result<Vec<(String, u64)>, String> 
             }
         }
     }
-    // Folder icons live in attachments but are referenced here, not in notes. (#157)
-    let icons_path = operations::helixnotes_dir(vault).join("notebook_icons.json");
-    if let Ok(content) = std::fs::read_to_string(&icons_path) {
-        haystack.push_str(&content);
-        haystack.push('\n');
+    // Folder and tag icons live in attachments but are referenced here, not in notes. (#157)
+    for mapping in ["notebook_icons.json", "tag_styles.json"] {
+        let mapping_path = operations::helixnotes_dir(vault).join(mapping);
+        if let Ok(content) = std::fs::read_to_string(&mapping_path) {
+            haystack.push_str(&content);
+            haystack.push('\n');
+        }
     }
     let decoded = percent_decode(&haystack);
     let orphans = files

@@ -14,6 +14,7 @@
 		showSettings,
 		showInfo,
 		notebookIcons,
+		tagStyles,
 		appConfig,
 		quickAccessPaths,
 		collapsedNotebooks,
@@ -21,7 +22,7 @@
 		notebookSortMode,
 		notebookOrder
 	} from '$lib/stores/app';
-	import { getNotebooks, getAllTags, createNotebook, deleteNotebook, renameNotebook, moveNotebook, getNotebookIcons, setNotebookIcon, saveAttachment, getQuickAccess, addQuickAccess, removeQuickAccess, emptyTrash, moveNote, readNote, countRootNotes } from '$lib/api';
+	import { getNotebooks, getAllTags, createNotebook, deleteNotebook, renameNotebook, moveNotebook, getNotebookIcons, setNotebookIcon, getTagStyles, saveAttachment, getQuickAccess, addQuickAccess, removeQuickAccess, emptyTrash, moveNote, readNote, countRootNotes } from '$lib/api';
 	import { open as openDialog } from '@tauri-apps/plugin-dialog';
 	import { readFile } from '@tauri-apps/plugin-fs';
 	import { convertFileSrc } from '@tauri-apps/api/core';
@@ -29,6 +30,8 @@
 	import { isMobile } from '$lib/platform';
 	import { decodeNoteDragPaths } from '$lib/utils/note-drag';
 	import NotebookGlyph from './NotebookGlyph.svelte';
+	import TagLabel from './TagLabel.svelte';
+	import TagStylePicker from './TagStylePicker.svelte';
 	import {
 		NOTEBOOK_ICON_OPTIONS,
 		decodeBuiltinNotebookIcon,
@@ -91,6 +94,8 @@
 	let iconPickerElement = $state<HTMLDivElement | null>(null);
 	let trashContextMenu = $state<{ x: number; y: number } | null>(null);
 	let tagsCollapsed = $state(true);
+	let tagContextMenu = $state<{ x: number; y: number; tag: string } | null>(null);
+	let stylePickerTag = $state<string | null>(null);
 	let deleteConfirm = $state<NotebookEntry | null>(null);
 	function toggleCollapse(nb: NotebookEntry, e: Event) {
 		e.stopPropagation();
@@ -122,14 +127,16 @@
 		try {
 			if (isMobile) {
 				// On mobile, parallelize and skip getAllTags (derive from $notes instead)
-				const [nbs, icons, qaNotes, rootCount] = await Promise.all([
+				const [nbs, icons, styles, qaNotes, rootCount] = await Promise.all([
 					getNotebooks(),
 					getNotebookIcons(),
+					getTagStyles(),
 					getQuickAccess(),
 					countRootNotes(),
 				]);
 				$notebooks = nbs;
 				$notebookIcons = icons;
+				$tagStyles = styles;
 				$quickAccessPaths = qaNotes.map(n => n.relative_path);
 				$rootNoteCount = rootCount;
 			} else {
@@ -138,6 +145,7 @@
 				$rootNoteCount = rootCount;
 				$tags = await getAllTags();
 				$notebookIcons = await getNotebookIcons();
+				$tagStyles = await getTagStyles();
 				const qaNotes = await getQuickAccess();
 				$quickAccessPaths = qaNotes.map(n => n.relative_path);
 			}
@@ -670,6 +678,26 @@
 		contextMenu = null;
 	}
 
+	function onTagContextMenu(e: MouseEvent, tag: string) {
+		e.preventDefault();
+		e.stopPropagation();
+		const { x, y } = clampMenu(e.clientX, e.clientY, 200, 80);
+		tagContextMenu = { x, y, tag };
+	}
+
+	function openTagMenu(e: Event, tag: string) {
+		e.preventDefault();
+		e.stopPropagation();
+		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		const { x, y } = clampMenu(rect.right - 200, rect.bottom + 4, 200, 80);
+		tagContextMenu = { x, y, tag };
+	}
+
+	function openTagStylePicker(tag: string) {
+		tagContextMenu = null;
+		stylePickerTag = tag;
+	}
+
 	function onTrashContextMenu(e: MouseEvent) {
 		e.preventDefault();
 		e.stopPropagation();
@@ -695,10 +723,11 @@
 	function handleWindowClick() {
 		if (contextMenu) contextMenu = null;
 		if (trashContextMenu) trashContextMenu = null;
+		if (tagContextMenu) tagContextMenu = null;
 	}
 </script>
 
-<svelte:window onclick={handleWindowClick} onkeydown={(e) => { if (e.key === 'Escape') iconPickerNotebook = null; }} />
+<svelte:window onclick={handleWindowClick} onkeydown={(e) => { if (e.key === 'Escape') { iconPickerNotebook = null; tagContextMenu = null; } }} />
 
 <aside class="sidebar" class:collapsed={!isMobile && $sidebarCollapsed} class:mobile={isMobile} class:nav-empty={!anyNavItem}>
 	{#if !isMobile}
@@ -885,16 +914,8 @@
 					</button>
 					{#if !tagsCollapsed}
 						<div class="tag-list">
-							{#each $tags as [tag, count]}
-								<button
-									class="tag-item"
-									class:active={$viewMode === 'tag' && $activeTag === tag}
-									onclick={() => selectTag(tag)}
-								>
-									<span class="tag-hash">#</span>
-									<span class="tag-name">{tag}</span>
-									<span class="tag-count">{count}</span>
-								</button>
+							{#each $tags as [tag, count] (tag)}
+								{@render tagRow(tag, count)}
 							{/each}
 						</div>
 					{/if}
@@ -910,16 +931,8 @@
 				</button>
 				{#if !tagsCollapsed}
 					<div class="tag-list">
-						{#each $tags as [tag, count]}
-							<button
-								class="tag-item"
-								class:active={$viewMode === 'tag' && $activeTag === tag}
-								onclick={() => selectTag(tag)}
-							>
-								<span class="tag-hash">#</span>
-								<span class="tag-name">{tag}</span>
-								<span class="tag-count">{count}</span>
-							</button>
+						{#each $tags as [tag, count] (tag)}
+							{@render tagRow(tag, count)}
 						{/each}
 					</div>
 				{/if}
@@ -1016,6 +1029,23 @@
 	</div>
 {/if}
 
+{#if tagContextMenu}
+	{#if isMobile}
+		<button type="button" class="context-menu-backdrop" aria-label="Close tag actions" onclick={() => tagContextMenu = null}></button>
+	{/if}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="context-menu" class:mobile={isMobile} style="left: {tagContextMenu.x}px; top: {tagContextMenu.y}px" onmousedown={(e) => e.stopPropagation()}>
+		<button onclick={() => openTagStylePicker(tagContextMenu!.tag)}>
+			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><line x1="9" y1="9" x2="9.01" y2="9" /><line x1="15" y1="9" x2="15.01" y2="9" /></svg>
+			Customize...
+		</button>
+	</div>
+{/if}
+
+{#if stylePickerTag}
+	<TagStylePicker tag={stylePickerTag} onclose={() => stylePickerTag = null} />
+{/if}
+
 {#if trashContextMenu}
 	{#if isMobile}
 		<button type="button" class="context-menu-backdrop" aria-label="Close trash actions" onclick={() => trashContextMenu = null}></button>
@@ -1044,6 +1074,32 @@
 		</div>
 	</div>
 {/if}
+
+{#snippet tagRow(tag: string, count: number)}
+	<div class="tag-row">
+		<button
+			class="tag-item"
+			class:active={$viewMode === 'tag' && $activeTag === tag}
+			onclick={() => selectTag(tag)}
+			oncontextmenu={(e) => onTagContextMenu(e, tag)}
+		>
+			<span class="tag-label-slot">
+				<TagLabel name={tag} size={isMobile ? 16 : 14} />
+			</span>
+			<span class="tag-count">{count}</span>
+		</button>
+		{#if isMobile}
+			<button
+				type="button"
+				class="notebook-actions-btn"
+				aria-label={`Customize ${tag}`}
+				onclick={(e) => openTagMenu(e, tag)}
+			>
+				<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+			</button>
+		{/if}
+	</div>
+{/snippet}
 
 {#snippet notebookItem(nb: NotebookEntry, depth: number)}
 	{@const hasChildren = nb.children.length > 0}
@@ -1567,6 +1623,10 @@
 		padding: 0 4px;
 	}
 
+	.tag-row {
+		position: relative;
+	}
+
 	.tag-item {
 		display: flex;
 		align-items: center;
@@ -1582,6 +1642,12 @@
 		transition: all 0.1s;
 	}
 
+	.tag-label-slot {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+	}
+
 	.tag-item:hover {
 		background: var(--bg-hover);
 	}
@@ -1589,16 +1655,6 @@
 	.tag-item.active {
 		background: var(--accent-light);
 		color: var(--text-accent);
-	}
-
-	.tag-hash {
-		color: var(--text-tertiary);
-		font-weight: 600;
-	}
-
-	.tag-name {
-		flex: 1;
-		text-align: left;
 	}
 
 	.tag-count {
@@ -2019,7 +2075,7 @@
 	}
 
 	.sidebar.mobile .tag-item {
-		padding: 10px 16px;
+		padding: 10px 52px 10px 16px;
 		min-height: 44px;
 		font-size: 14px;
 	}

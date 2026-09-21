@@ -216,6 +216,8 @@ pub fn run() {
             commands::save_attachment,
             commands::get_notebook_icons,
             commands::set_notebook_icon,
+            commands::get_tag_styles,
+            commands::set_tag_style,
             commands::set_general_settings,
             commands::get_quick_access,
             commands::add_quick_access,
