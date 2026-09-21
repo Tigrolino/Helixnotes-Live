@@ -11,6 +11,7 @@ import type {
   VaultState,
   ViewMode,
   SortMode,
+  TagStyle,
 } from "$lib/types";
 
 // App state
@@ -47,6 +48,7 @@ export const showSettings = writable(false);
 export const settingsTab = writable<string | null>(null);
 export const showInfo = writable(false);
 export const notebookIcons = writable<Record<string, string>>({});
+export const tagStyles = writable<Record<string, TagStyle>>({});
 export const quickAccessPaths = writable<string[]>([]);
 export const collapsedNotebooks = writable<string[]>([]);
 

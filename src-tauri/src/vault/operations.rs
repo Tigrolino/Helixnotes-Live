@@ -1,5 +1,5 @@
 use crate::types::{
-    NoteContent, NoteEntry, NoteMeta, NoteTitleEntry, NotebookEntry, TrashContents,
+    NoteContent, NoteEntry, NoteMeta, NoteTitleEntry, NotebookEntry, TagStyle, TrashContents,
     TrashNotebookEntry, VaultState,
 };
 use crate::vault::frontmatter;
@@ -1448,6 +1448,100 @@ pub fn set_notebook_icon(
     Ok(())
 }
 
+fn tag_styles_path(vault_path: &str) -> PathBuf {
+    helixnotes_dir(vault_path).join("tag_styles.json")
+}
+
+fn normalize_tag_style_key(tag: &str) -> String {
+    tag.trim().to_string()
+}
+
+fn tag_style_key_fold(tag: &str) -> String {
+    tag.to_ascii_lowercase()
+}
+
+fn remove_matching_tag_styles(styles: &mut std::collections::HashMap<String, TagStyle>, tag: &str) {
+    let fold = tag_style_key_fold(tag);
+    styles.retain(|existing, _| tag_style_key_fold(existing) != fold);
+}
+
+fn normalize_tag_color(color: Option<&str>) -> Result<Option<String>, String> {
+    let Some(color) = color.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let hex = color
+        .strip_prefix('#')
+        .ok_or_else(|| "Tag color must be a #hex value".to_string())?;
+    if !matches!(hex.len(), 3 | 6) || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("Tag color must be #RGB or #RRGGBB".to_string());
+    }
+    Ok(Some(format!("#{}", hex.to_ascii_lowercase())))
+}
+
+fn normalize_tag_icon(icon: Option<&str>) -> Option<String> {
+    icon.map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.replace('\\', "/"))
+}
+
+pub fn load_tag_styles(
+    vault_path: &str,
+) -> Result<std::collections::HashMap<String, TagStyle>, String> {
+    let styles_path = tag_styles_path(vault_path);
+    if !styles_path.exists() {
+        return Ok(std::collections::HashMap::new());
+    }
+
+    let data = fs::read_to_string(&styles_path).map_err(|e| e.to_string())?;
+    let styles: std::collections::HashMap<String, TagStyle> =
+        serde_json::from_str(&data).map_err(|e| e.to_string())?;
+    let mut collapsed = std::collections::HashMap::new();
+    for (tag, style) in styles {
+        let key = normalize_tag_style_key(&tag);
+        if key.is_empty() || style.is_empty() {
+            continue;
+        }
+        remove_matching_tag_styles(&mut collapsed, &key);
+        collapsed.insert(key, style);
+    }
+    Ok(collapsed)
+}
+
+pub fn set_tag_style(vault_path: &str, tag: &str, style: Option<TagStyle>) -> Result<(), String> {
+    let key = normalize_tag_style_key(tag);
+    if key.is_empty() {
+        return Err("Tag name is required".to_string());
+    }
+
+    let mut styles = load_tag_styles(vault_path)?;
+    let stored_key = styles
+        .keys()
+        .find(|existing| tag_style_key_fold(existing) == tag_style_key_fold(&key))
+        .cloned()
+        .unwrap_or_else(|| key.clone());
+    match style {
+        Some(style) => {
+            let next = TagStyle {
+                icon: normalize_tag_icon(style.icon.as_deref()),
+                color: normalize_tag_color(style.color.as_deref())?,
+            };
+            remove_matching_tag_styles(&mut styles, &key);
+            if !next.is_empty() {
+                styles.insert(stored_key, next);
+            }
+        }
+        None => {
+            remove_matching_tag_styles(&mut styles, &key);
+        }
+    }
+
+    let dir = helixnotes_dir(vault_path);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let data = serde_json::to_string_pretty(&styles).map_err(|e| e.to_string())?;
+    fs::write(tag_styles_path(vault_path), data).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn load_quick_access(vault_path: &str) -> Result<Vec<String>, String> {
     let qa_path = helixnotes_dir(vault_path).join("quick_access.json");
     if qa_path.exists() {
@@ -1566,9 +1660,10 @@ pub fn sanitize_filename(name: &str) -> String {
 mod tests {
     use super::{
         compare_natural_names, create_notebook, duplicate_note, get_note_switcher_titles,
-        helixnotes_dir, load_notebook_icons, permanent_delete, read_note, restore_notebook,
-        scan_notebooks, set_notebook_icon,
+        helixnotes_dir, load_notebook_icons, load_tag_styles, permanent_delete, read_note,
+        restore_notebook, scan_notebooks, set_notebook_icon, set_tag_style,
     };
+    use crate::types::TagStyle;
     use std::fs;
     use uuid::Uuid;
 
@@ -1656,6 +1751,144 @@ mod tests {
             icons.get("Projects/Client").map(String::as_str),
             Some("builtin:folder")
         );
+
+        fs::remove_dir_all(vault).unwrap();
+    }
+
+    #[test]
+    fn persists_and_removes_tag_styles() {
+        let vault =
+            std::env::temp_dir().join(format!("helixnotes-tag-style-test-{}", Uuid::new_v4()));
+        let vault_path = vault.to_string_lossy();
+
+        set_tag_style(
+            &vault_path,
+            " Work ",
+            Some(TagStyle {
+                icon: Some("builtin:briefcase".into()),
+                color: Some("#E11D48".into()),
+            }),
+        )
+        .unwrap();
+
+        let stored: std::collections::HashMap<String, TagStyle> = serde_json::from_str(
+            &fs::read_to_string(helixnotes_dir(&vault_path).join("tag_styles.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(stored.contains_key("Work"));
+        assert!(!stored.contains_key(" Work "));
+
+        let styles = load_tag_styles(&vault_path).unwrap();
+        let work = styles.get("Work").expect("work tag style");
+        assert_eq!(work.icon.as_deref(), Some("builtin:briefcase"));
+        assert_eq!(work.color.as_deref(), Some("#e11d48"));
+
+        set_tag_style(&vault_path, "Work", None).unwrap();
+        assert!(load_tag_styles(&vault_path).unwrap().is_empty());
+
+        fs::remove_dir_all(vault).unwrap();
+    }
+
+    #[test]
+    fn resetting_tag_style_is_case_insensitive() {
+        let vault =
+            std::env::temp_dir().join(format!("helixnotes-tag-style-case-test-{}", Uuid::new_v4()));
+        let vault_path = vault.to_string_lossy();
+
+        set_tag_style(
+            &vault_path,
+            "Work",
+            Some(TagStyle {
+                icon: Some("builtin:briefcase".into()),
+                color: Some("#e11d48".into()),
+            }),
+        )
+        .unwrap();
+
+        set_tag_style(&vault_path, "work", None).unwrap();
+
+        let stored: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(helixnotes_dir(&vault_path).join("tag_styles.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(stored, serde_json::json!({}));
+        assert!(load_tag_styles(&vault_path).unwrap().is_empty());
+
+        fs::remove_dir_all(vault).unwrap();
+    }
+
+    #[test]
+    fn load_collapses_case_variant_tag_style_keys() {
+        let vault = std::env::temp_dir().join(format!(
+            "helixnotes-tag-style-collapse-test-{}",
+            Uuid::new_v4()
+        ));
+        let vault_path = vault.to_string_lossy();
+        fs::create_dir_all(helixnotes_dir(&vault_path)).unwrap();
+        fs::write(
+            helixnotes_dir(&vault_path).join("tag_styles.json"),
+            r##"{"Work":{"icon":"builtin:briefcase"},"work":{"color":"#e11d48"}}"##,
+        )
+        .unwrap();
+
+        let styles = load_tag_styles(&vault_path).unwrap();
+        assert_eq!(styles.len(), 1);
+        let (key, style) = styles.iter().next().unwrap();
+        assert_eq!(key.to_ascii_lowercase(), "work");
+        assert!(style.icon.is_some() || style.color.is_some());
+
+        fs::remove_dir_all(vault).unwrap();
+    }
+
+    #[test]
+    fn rejects_invalid_tag_color() {
+        let vault = std::env::temp_dir().join(format!(
+            "helixnotes-tag-style-color-test-{}",
+            Uuid::new_v4()
+        ));
+        let vault_path = vault.to_string_lossy();
+
+        let err = set_tag_style(
+            &vault_path,
+            "daily",
+            Some(TagStyle {
+                icon: None,
+                color: Some("red".into()),
+            }),
+        )
+        .unwrap_err();
+        assert!(err.contains("hex"));
+
+        fs::remove_dir_all(&vault).ok();
+    }
+
+    #[test]
+    fn clearing_empty_tag_style_removes_entry() {
+        let vault = std::env::temp_dir().join(format!(
+            "helixnotes-tag-style-clear-test-{}",
+            Uuid::new_v4()
+        ));
+        let vault_path = vault.to_string_lossy();
+
+        set_tag_style(
+            &vault_path,
+            "daily",
+            Some(TagStyle {
+                icon: Some("builtin:calendar".into()),
+                color: None,
+            }),
+        )
+        .unwrap();
+        set_tag_style(
+            &vault_path,
+            "daily",
+            Some(TagStyle {
+                icon: None,
+                color: None,
+            }),
+        )
+        .unwrap();
+        assert!(load_tag_styles(&vault_path).unwrap().is_empty());
 
         fs::remove_dir_all(vault).unwrap();
     }

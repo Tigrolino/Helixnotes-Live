@@ -43,9 +43,11 @@
 	import { formatRelativeTime, formatDate, dateBucketLabel } from '$lib/utils/time';
 	import { openNoteWindow } from '$lib/utils/window';
 	import { encodeNoteDragPaths } from '$lib/utils/note-drag';
+	import { tagIterationKey } from '$lib/utils/tag-styles';
 	import type { NoteEntry, TrashNotebookEntry, SortMode, TaskItem } from '$lib/types';
 	import TasksView from './TasksView.svelte';
 	import TagSuggestInput from './TagSuggestInput.svelte';
+	import TagLabel from './TagLabel.svelte';
 	import { isMobile, isAndroid } from '$lib/platform';
 
 	let { onNoteSelected = (_path: string, _content: string, _task?: TaskItem) => {}, onNoteMoved = () => {}, onBeforeNoteSwitch = () => {}, onBeforeNoteDuplicate = async () => true, onNoteCreated = () => {}, onToggleTask = async (_t: TaskItem) => {}, onSetTaskPriority = async (_t: TaskItem, _p: string | null) => {}, onSetTaskDue = async (_t: TaskItem, _d: string | null) => {} }: {
@@ -1016,7 +1018,13 @@
 
 <div class="note-list" class:mobile={isMobile}>
 	<div class="list-header">
-		<span class="list-title">{viewTitle}</span>
+		<span class="list-title">
+			{#if $viewMode === 'tag' && $activeTag}
+				<TagLabel name={$activeTag} size={16} />
+			{:else}
+				{viewTitle}
+			{/if}
+		</span>
 		<div class="list-actions">
 			{#if !isMobile}
 				<button class="icon-btn" onclick={() => ($notelistCollapsed = true)} title={`Hide notes list (${modKey}+Shift+\\)`} aria-label="Hide notes list">
@@ -1133,9 +1141,9 @@
 					</div>
 					{#if tagEditTags.length > 0}
 						<div class="tag-edit-list">
-							{#each tagEditTags as tag}
+							{#each tagEditTags as tag, i (tagIterationKey(tag, i))}
 								<div class="tag-edit-item">
-									<span class="tag-edit-name">#{tag}</span>
+									<span class="tag-edit-name"><TagLabel name={tag} size={12} /></span>
 									<button class="tag-edit-remove" onclick={() => removeTagFromBatch(tag)} title="Remove from all">
 										<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
 									</button>
@@ -1377,8 +1385,8 @@
 							{#if showDates}<span class="note-date" title={`Created ${formatDate(note.meta.created)}\nModified ${formatDate(note.meta.modified)}`}>{formatRelativeTime($sortMode === 'created' ? note.meta.created : note.meta.modified)}</span>{/if}
 							{#if note.meta.tags.length > 0}
 								<span class="note-tags">
-									{#each note.meta.tags.slice(0, 3) as tag}
-										<span class="mini-tag">#{tag}</span>
+									{#each note.meta.tags.slice(0, 3) as tag, i (tagIterationKey(tag, i))}
+										<TagLabel name={tag} size={10} tone="accent" />
 									{/each}
 								</span>
 							{/if}
@@ -1445,9 +1453,9 @@
 					</div>
 					{#if tagEditTags.length > 0}
 						<div class="tag-edit-list">
-							{#each tagEditTags as tag}
+							{#each tagEditTags as tag, i (tagIterationKey(tag, i))}
 								<div class="tag-edit-item">
-									<span class="tag-edit-name">#{tag}</span>
+									<span class="tag-edit-name"><TagLabel name={tag} size={12} /></span>
 									<button class="tag-edit-remove" onclick={() => removeTagFromBatch(tag)} title="Remove from all">
 										<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
 									</button>
@@ -1497,9 +1505,9 @@
 				</div>
 				{#if tagEditTags.length > 0}
 					<div class="tag-edit-list">
-						{#each tagEditTags as tag}
+						{#each tagEditTags as tag, i (tagIterationKey(tag, i))}
 							<div class="tag-edit-item">
-								<span class="tag-edit-name">#{tag}</span>
+								<span class="tag-edit-name"><TagLabel name={tag} size={12} /></span>
 								<button class="tag-edit-remove" onclick={() => removeTagFromNote(tag)} title="Remove tag">
 									<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
 								</button>
@@ -1683,6 +1691,10 @@
 	}
 
 	.list-title {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		min-width: 0;
 		font-weight: 600;
 		font-size: 14px;
 		color: var(--text-primary);
@@ -2018,14 +2030,6 @@
 		gap: 4px;
 	}
 
-	.mini-tag {
-		font-size: 10px;
-		color: var(--text-accent);
-		background: var(--accent-light);
-		padding: 1px 5px;
-		border-radius: 3px;
-	}
-
 	.rename-input {
 		width: 100%;
 		padding: 4px 8px;
@@ -2290,7 +2294,7 @@
 		font-size: 12px;
 	}
 
-	.note-list.mobile .mini-tag {
+	.note-list.mobile :global(.tag-label.tone-accent) {
 		font-size: 11px;
 		padding: 2px 6px;
 	}
