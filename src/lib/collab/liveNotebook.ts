@@ -41,6 +41,8 @@ export interface LiveTreeEntry {
   /** Absent/undefined means "not pinned" - kept optional rather than defaulted to `false` so
    * entries created before this field existed don't need a migration. */
   pinned?: boolean;
+  /** Absent/undefined means "no tags" - same optional-field migration-free pattern as `pinned`. */
+  tags?: string[];
 }
 
 export interface LivePresenceEntry {
@@ -363,13 +365,28 @@ function liveEntryId(path: string): string | null {
   return path.slice(LIVE_NOTEBOOK_PATH.length + 1);
 }
 
+/** The live path of an entry's CURRENT parent notebook, read from the real Yjs tree structure.
+ * Unlike a plain string parentOf(path), this is necessary for live paths specifically: they're
+ * flat and id-based (see the path-scheme note above), so a note two folders deep has the exact
+ * same path shape as one at the root - you can't tell where it currently lives by looking at the
+ * path string, only by looking up its tree entry's parentId. Returns null if path isn't a live
+ * path or the entry can't be found. */
+export function liveParentPath(path: string): string | null {
+  const id = liveEntryId(path);
+  if (!id) return null;
+  const { tree } = getLiveNotebook();
+  const entry = tree.get(id);
+  if (!entry) return null;
+  return entry.parentId ? `${LIVE_NOTEBOOK_PATH}/${entry.parentId}` : LIVE_NOTEBOOK_PATH;
+}
+
 function entryToNoteMeta(entry: LiveTreeEntry): NoteMeta {
   // `order` doubles as the entry's creation timestamp (see createLiveFile/createLiveFolder) -
   // there's no separate "last modified" tracked yet (content changes happen straight in the
   // Yjs fragment, with no save event to hook), so both fields use it for now rather than
   // leaving them blank, which rendered as "Invalid Date" in the note list.
   const created = new Date(entry.order).toISOString();
-  return { id: entry.id, title: entry.name, tags: [], pinned: !!entry.pinned, created, modified: created };
+  return { id: entry.id, title: entry.name, tags: entry.tags ?? [], pinned: !!entry.pinned, created, modified: created };
 }
 
 function entryToNoteEntry(entry: LiveTreeEntry): NoteEntry {
@@ -416,10 +433,50 @@ export function getLiveNotes(notebookPath: string): NoteEntry[] {
  * TipTap Collaboration extension directly to the file's Y.XmlFragment instead of using this
  * content string, the same way it would ignore stale content for any note it's about to bind
  * live updates to. */
-export function readLiveNote(path: string): NoteContent {
+// How long to wait for a live entry to show up in the tree before giving up and falling back to
+// the "Untitled" placeholder. Covers a freshly opened window (see below) whose join handshake is
+// still in flight - past this, either the entry genuinely doesn't exist or the connection is
+// stuck, and either way waiting longer just leaves the window looking frozen.
+const READ_LIVE_NOTE_TIMEOUT_MS = 8000;
+
+/** Wait for `id` to appear in the live tree, up to READ_LIVE_NOTE_TIMEOUT_MS. Resolves with the
+ * entry as soon as it's found (immediately, if it's already there), or null on timeout. */
+function waitForLiveEntry(id: string): Promise<LiveTreeEntry | null> {
   const { tree } = getLiveNotebook();
+  const existing = tree.get(id);
+  if (existing) return Promise.resolve(existing);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (entry: LiveTreeEntry | null) => {
+      if (settled) return;
+      settled = true;
+      tree.unobserve(onChange);
+      clearTimeout(timer);
+      resolve(entry);
+    };
+    const onChange = () => {
+      const found = tree.get(id);
+      if (found) finish(found);
+    };
+    tree.observe(onChange);
+    const timer = setTimeout(() => finish(null), READ_LIVE_NOTE_TIMEOUT_MS);
+  });
+}
+
+/** Mirrors api.ts's readNote. The body itself isn't meaningful here - Editor.svelte binds the
+ * TipTap Collaboration extension directly to the file's Y.XmlFragment instead of using this
+ * content string, the same way it would ignore stale content for any note it's about to bind
+ * live updates to.
+ *
+ * Async (unlike the rest of this module's sync API) because a brand-new window - "Open in New
+ * Window", for instance - starts with an empty tree and an in-flight join handshake: reading
+ * synchronously right after getLiveNotebook() would almost always see "not found yet" and report
+ * "Untitled" even for a note that exists, just because the sync frames hadn't arrived. Waiting
+ * briefly for the real entry fixes that without slowing down the common case (already-synced
+ * tree), which resolves immediately. */
+export async function readLiveNote(path: string): Promise<NoteContent> {
   const id = liveEntryId(path);
-  const entry = id ? tree.get(id) : undefined;
+  const entry = id ? await waitForLiveEntry(id) : null;
   const meta = entry
     ? entryToNoteMeta(entry)
     : { id: id ?? "", title: "Untitled", tags: [], pinned: false, created: new Date().toISOString(), modified: new Date().toISOString() };
@@ -427,17 +484,15 @@ export function readLiveNote(path: string): NoteContent {
 }
 
 /** Mirrors api.ts's saveNote. Body content is already live via the Yjs binding, so the only
- * things a "save" can mean here are the title and pinned state changing (both are plain
- * tree-entry fields, written through the same field-merge pattern as a rename). Tags aren't
- * supported on live notes yet - entryToNoteMeta always reports an empty list - so meta.tags is
- * intentionally not persisted here. */
+ * things a "save" can mean here are the title, pinned state, and tags changing (all plain
+ * tree-entry fields, written through the same field-merge pattern as a rename). */
 export function saveLiveNote(path: string, meta: NoteMeta): void {
   const id = liveEntryId(path);
   if (!id) return;
   const { tree } = getLiveNotebook();
   const entry = tree.get(id);
   if (!entry) return;
-  tree.set(id, { ...entry, name: meta.title, pinned: meta.pinned });
+  tree.set(id, { ...entry, name: meta.title, pinned: meta.pinned, tags: meta.tags });
 }
 
 /** Mirrors api.ts's createNote. */
@@ -498,4 +553,59 @@ export function createLiveSubNotebook(parentRelative: string | null, name: strin
 export function liveFieldIdForPath(path: string | null | undefined): string | null {
   if (!path || !path.startsWith(LIVE_NOTEBOOK_PATH + "/")) return null;
   return path.slice(LIVE_NOTEBOOK_PATH.length + 1);
+}
+
+// ── Quick Access for live notes ──
+//
+// Quick Access is a personal, per-device preference (unlike pinned/tags, which are shared CRDT
+// tree-entry fields everyone sees) - the Rust backend's get/add/remove_quick_access commands are
+// vault-path-based and have no notion of a live note, and giving them one would mean quick access
+// becomes a shared, synced list, which isn't what it's for. So this mirrors keybindings.ts's
+// localStorage pattern instead: a small per-browser list of live note paths, kept separate from
+// the vault-backed list in api.ts and merged with it at the getQuickAccess() call site.
+const LIVE_QUICK_ACCESS_KEY = "helixnotes-live-quick-access";
+
+function readLiveQuickAccessPaths(): string[] {
+  try {
+    if (typeof localStorage === "undefined") return [];
+    const raw = localStorage.getItem(LIVE_QUICK_ACCESS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((p) => typeof p === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLiveQuickAccessPaths(paths: string[]): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(LIVE_QUICK_ACCESS_KEY, JSON.stringify(paths));
+  } catch {
+    // Silent fail - e.g. storage disabled/full. Quick access is a convenience, not core data.
+  }
+}
+
+/** Mirrors api.ts's getQuickAccess, for the live half of the list only. Drops any path whose
+ * entry no longer exists (deleted since being added). */
+export function getLiveQuickAccessEntries(): NoteEntry[] {
+  const { tree } = getLiveNotebook();
+  const stillValid = readLiveQuickAccessPaths().filter((path) => {
+    const id = liveEntryId(path);
+    return !!id && tree.has(id);
+  });
+  if (stillValid.length !== readLiveQuickAccessPaths().length) writeLiveQuickAccessPaths(stillValid);
+  return stillValid.map((path) => entryToNoteEntry(tree.get(liveEntryId(path)!)!));
+}
+
+/** Mirrors api.ts's addQuickAccess for a live note path. */
+export function addLiveQuickAccess(path: string): void {
+  const current = readLiveQuickAccessPaths();
+  if (current.includes(path)) return;
+  writeLiveQuickAccessPaths([...current, path]);
+}
+
+/** Mirrors api.ts's removeQuickAccess for a live note path. */
+export function removeLiveQuickAccess(path: string): void {
+  writeLiveQuickAccessPaths(readLiveQuickAccessPaths().filter((p) => p !== path));
 }

@@ -11,6 +11,9 @@ import {
   deleteLiveNoteOrNotebook,
   moveLiveNoteOrNotebook,
   createLiveSubNotebook,
+  getLiveQuickAccessEntries,
+  addLiveQuickAccess,
+  removeLiveQuickAccess,
 } from "$lib/collab/liveNotebook";
 import type {
   AppConfig,
@@ -367,14 +370,20 @@ export async function setGeneralSettings(
 }
 
 export async function getQuickAccess(): Promise<NoteEntry[]> {
-  return invoke("get_quick_access");
+  // Live notes' quick access list lives in localStorage (see liveNotebook.ts) rather than the
+  // vault, since it's a personal per-device preference, not something to sync to every peer - so
+  // it's merged in here rather than being one more thing every call site has to know about.
+  const local = await invoke<NoteEntry[]>("get_quick_access");
+  return [...local, ...getLiveQuickAccessEntries()];
 }
 
 export async function addQuickAccess(noteRelative: string): Promise<void> {
+  if (isLiveNotePath(noteRelative)) return addLiveQuickAccess(noteRelative);
   return invoke("add_quick_access", { noteRelative });
 }
 
 export async function removeQuickAccess(noteRelative: string): Promise<void> {
+  if (isLiveNotePath(noteRelative)) return removeLiveQuickAccess(noteRelative);
   return invoke("remove_quick_access", { noteRelative });
 }
 
