@@ -24,9 +24,9 @@
 		collabState,
 		activeVaultConfig
 	} from '$lib/stores/app';
-	import { getNotebooks, getAllTags, createNotebook, deleteNotebook, renameNotebook, moveNotebook, getNotebookIcons, setNotebookIcon, getTagStyles, saveAttachment, getQuickAccess, addQuickAccess, removeQuickAccess, emptyTrash, moveNote, readNote, countRootNotes } from '$lib/api';
+	import { getNotebooks, getAllTags, createNotebook, deleteNotebook, renameNotebook, moveNotebook, getNotebookIcons, setNotebookIcon, getTagStyles, saveAttachment, getQuickAccess, addQuickAccess, removeQuickAccess, emptyTrash, moveNote, readNote, countRootNotes, createNote, saveNote } from '$lib/api';
 	import { connectCollabConnection } from '$lib/collab/connection';
-	import { liveTreeEntries, buildLiveNotebookEntry, LIVE_NOTEBOOK_PATH, isLiveNotebookPath, liveParentPath } from '$lib/collab/liveNotebook';
+	import { liveTreeEntries, buildLiveNotebookEntry, LIVE_NOTEBOOK_PATH, isLiveNotebookPath, liveParentPath, liveFieldIdForPath, exportLiveNoteMarkdown } from '$lib/collab/liveNotebook';
 	import { open as openDialog } from '@tauri-apps/plugin-dialog';
 	import { readFile } from '@tauri-apps/plugin-fs';
 	import { convertFileSrc } from '@tauri-apps/api/core';
@@ -386,6 +386,21 @@
 		}
 	}
 
+	/** Copy a live note's real content into a new local note in destNotebookPath, leaving the
+	 * live original untouched - see the comment in handleNoteDrop() for why this is a copy and
+	 * not a move. The actual content comes from exportLiveNoteMarkdown(), which asks Editor.svelte
+	 * (the one place with the full TipTap schema this content needs) to render it, since this
+	 * module has no way to read a live document's real content itself. */
+	async function copyLiveNoteToLocal(livePath: string, destNotebookPath: string): Promise<void> {
+		const fieldId = liveFieldIdForPath(livePath);
+		if (!fieldId) return;
+		const entry = $liveTreeEntries.find((e) => e.id === fieldId);
+		const title = entry?.name ?? 'Untitled';
+		const markdown = await exportLiveNoteMarkdown(fieldId);
+		const created = await createNote(destNotebookPath, title);
+		await saveNote(created.path, { ...created.meta, tags: entry?.tags ?? [] }, markdown);
+	}
+
 	async function handleNoteDrop(e: DragEvent, nb: NotebookEntry) {
 		e.preventDefault();
 		dropTargetPath = null;
@@ -403,15 +418,28 @@
 		if (notePaths.length === 0) return;
 
 		// Crossing the live/local boundary is a COPY, not a move (see moveLiveNoteOrNotebook's
-		// doc comment) - that's not built yet, so guard it here rather than letting moveNote()
-		// silently fall through to "no destination = live root" for a live note dragged onto a
-		// local notebook, which looked like the note teleporting to the wrong place instead of
-		// visibly failing.
+		// doc comment) - a live note dragged into a local notebook gets copied there with its
+		// real content, and the live original stays put. The other direction (a local note
+		// dragged into the Live Notebook) isn't built yet - it needs the opposite content
+		// transform, markdown into a fresh Yjs fragment, which is a different piece of work and
+		// wasn't asked for - so those paths are still just a no-op with a console warning, same
+		// as cross-domain drops used to be entirely.
 		const destIsLive = isLiveNotebookPath(nb.path);
 		const crossDomainPaths = notePaths.filter((path) => isLiveNotebookPath(path) !== destIsLive);
-		if (crossDomainPaths.length > 0) {
-			console.warn('Copying notes between the Live Notebook and local notebooks by drag-and-drop is not supported yet:', crossDomainPaths);
+		const liveToLocalPaths = crossDomainPaths.filter((path) => isLiveNotebookPath(path) && !destIsLive);
+		const unsupportedCrossDomainPaths = crossDomainPaths.filter((path) => !liveToLocalPaths.includes(path));
+		if (unsupportedCrossDomainPaths.length > 0) {
+			console.warn('Copying a local note into the Live Notebook by drag-and-drop is not supported yet:', unsupportedCrossDomainPaths);
 		}
+		for (const notePath of liveToLocalPaths) {
+			try {
+				await copyLiveNoteToLocal(notePath, nb.path);
+			} catch (e) {
+				console.error('Failed to copy live note into local notebook:', notePath, e);
+			}
+		}
+		if (liveToLocalPaths.length > 0) await refresh();
+
 		const sameDomainPaths = notePaths.filter((path) => isLiveNotebookPath(path) === destIsLive);
 		if (sameDomainPaths.length === 0) return;
 

@@ -609,3 +609,37 @@ export function addLiveQuickAccess(path: string): void {
 export function removeLiveQuickAccess(path: string): void {
   writeLiveQuickAccessPaths(readLiveQuickAccessPaths().filter((p) => p !== path));
 }
+
+// ── Exporting a live note's real content ──
+//
+// A live note's actual rich-text content only exists as ProseMirror state inside a mounted
+// TipTap editor bound to its Y.XmlFragment via the Collaboration extension - this module has no
+// access to that (readLiveNote()'s `content`/`raw` fields are intentionally empty, see its doc
+// comment). Copying a live note into a local notebook needs the real thing, though, so this is a
+// small request/response bridge: Sidebar.svelte (or anywhere else) calls exportLiveNoteMarkdown(),
+// which parks a request here; Editor.svelte - the one place in the app that already has the full
+// TipTap extension/schema set needed to read a live document correctly - watches for it and
+// spins up a temporary, invisible editor to do the conversion, exactly as it would if the user
+// had opened that note themselves.
+export interface LiveNoteExportRequest {
+  liveFieldId: string;
+  resolve: (markdown: string) => void;
+  reject: (err: unknown) => void;
+}
+
+export const liveNoteExportRequest = writable<LiveNoteExportRequest | null>(null);
+
+/** Resolves with the live note's content as markdown, using the same serialization the app uses
+ * when saving a note normally. Rejects if no Editor.svelte instance is mounted to service the
+ * request (there's always one while the app's main window is open), or after a timeout if
+ * something goes wrong inside it. */
+export function exportLiveNoteMarkdown(liveFieldId: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Timed out waiting for the editor to export this note's content")), 10000);
+    liveNoteExportRequest.set({
+      liveFieldId,
+      resolve: (md) => { clearTimeout(timer); resolve(md); },
+      reject: (err) => { clearTimeout(timer); reject(err); },
+    });
+  });
+}
