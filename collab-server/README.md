@@ -120,17 +120,27 @@ design (see the panel's own "Not saved to any note" hint).
 
 ## Deploying to Render
 
-1. Push this `collab-server/` directory to a Git repository (it can live in the same repo as
-   HelixNotes or its own — Render just needs a root directory to build from).
-2. Create a new **Web Service** on Render pointing at that repo/directory.
-3. Build command: `npm install && npm run build`
-4. Start command: `npm start`
-5. Environment variables (Render dashboard → Environment):
+This directory lives inside the same repo as the rest of HelixNotes
+(`github.com/Tigrolino/Helixnotes-Live`), so there's nothing extra to push — Render just needs to
+be pointed at this subdirectory of that one repo.
+
+1. On [render.com](https://render.com), create a new **Web Service** and connect the
+   `Tigrolino/Helixnotes-Live` GitHub repo (Render will ask to install its GitHub App and pick
+   which repos it can see, if this is the first service you've connected).
+2. **Root Directory**: `collab-server` — this is what tells Render to build/run only this
+   subdirectory instead of the whole monorepo.
+3. **Build Command**: `npm install && npm run build`
+4. **Start Command**: `npm start`
+5. Environment variables (Render dashboard → Environment, after the service is created — or the
+   "Advanced" section while creating it):
    - `COLLAB_PASSWORD` — the shared workspace secret. Generate one, don't reuse a real password:
      `openssl rand -base64 24`
    - `PORT` — Render sets this automatically; don't override it.
    - `GITHUB_TOKEN` / `GITHUB_REPO` (optional, both together) — see "GitHub backup for uploads"
-     above. Without these, uploads work but don't survive a redeploy.
+     above. `GITHUB_REPO` can be this same `Tigrolino/Helixnotes-Live` repo (uploads land under
+     `attachments/<workspace>/...`, well clear of the source tree) or a separate one — either
+     works, since the Contents API push doesn't care whether it's also where the code lives.
+     Without these, uploads work but don't survive a redeploy.
 6. Render terminates TLS at its edge, so the public URL is `wss://<your-service>.onrender.com` —
    that's what goes in HelixNotes's Settings → Collaboration → Server URL. The same host, with
    `https://` instead of `wss://`, is what the client uses for uploads - it derives that itself
@@ -140,6 +150,11 @@ design (see the panel's own "Not saved to any note" hint).
    GitHub backup, attach a paid Render Disk mounted at `UPLOADS_DIR`'s path instead (or in
    addition) - GitHub backup and a persistent disk aren't mutually exclusive, either is enough on
    its own.
+8. Every `git push` to `main` auto-deploys this service by default (Render watches the whole
+   repo, not just `collab-server/`, so a HelixNotes-app-only commit will also trigger a redeploy
+   of this service even though nothing here changed) - that's harmless, just a few seconds of
+   unnecessary rebuild. Render's dashboard has a per-service "Auto-Deploy" toggle if you'd rather
+   deploy manually instead.
 
 Render's free/starter web services spin down after a period of no HTTP traffic and cold-start on
 the next request; the first WebSocket connect after an idle period may take a few seconds longer
