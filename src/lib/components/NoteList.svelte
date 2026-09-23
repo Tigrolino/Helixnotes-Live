@@ -49,7 +49,7 @@
 	import TagSuggestInput from './TagSuggestInput.svelte';
 	import TagLabel from './TagLabel.svelte';
 	import { isMobile, isAndroid } from '$lib/platform';
-	import { liveTreeEntries, isLiveNotebookPath } from '$lib/collab/liveNotebook';
+	import { liveTreeEntries, isLiveNotebookPath, livePresence, liveFieldIdForPath } from '$lib/collab/liveNotebook';
 
 	let { onNoteSelected = (_path: string, _content: string, _task?: TaskItem) => {}, onNoteMoved = () => {}, onBeforeNoteSwitch = () => {}, onBeforeNoteDuplicate = async () => true, onNoteCreated = () => {}, onToggleTask = async (_t: TaskItem) => {}, onSetTaskPriority = async (_t: TaskItem, _p: string | null) => {}, onSetTaskDue = async (_t: TaskItem, _d: string | null) => {} }: {
 		onNoteSelected?: (path: string, content: string, task?: TaskItem) => void;
@@ -877,6 +877,16 @@
 		return parts.length > 1 ? parts.slice(0, -1).join('/') : '';
 	}
 
+	// Who else is currently looking at this note - live notes only (see Editor.svelte's matching
+	// fileViewers, which shows the same thing once you're actually inside the note; this is the
+	// "before you open it" version in the sidebar list).
+	function noteViewers(note: NoteEntry) {
+		if (!isLiveNotebookPath(note.path)) return [];
+		const fieldId = liveFieldIdForPath(note.path);
+		if (!fieldId) return [];
+		return $livePresence.filter((p) => p.openFile === fieldId);
+	}
+
 	function handleNoteClick(e: MouseEvent, note: NoteEntry) {
 		// Mobile: if long-press just fired, ignore the click
 		if (isMobile && longPressTriggered) {
@@ -1375,6 +1385,13 @@
 							{#if getNotebookPath(note)}
 								<span class="note-notebook">{getNotebookPath(note)}</span>
 							{/if}
+							{#if noteViewers(note).length > 0}
+								<span class="note-viewers-stack" title={`Also viewing: ${noteViewers(note).map((p) => p.name).join(', ')}`}>
+									{#each noteViewers(note).slice(0, 3) as person (person.clientId)}
+										<span class="note-viewer-avatar" style="--avatar-color: {person.color}">{person.name.slice(0, 1).toUpperCase()}</span>
+									{/each}
+								</span>
+							{/if}
 							{#if showDates}<span class="note-date-compact" title={`Created ${formatDate(note.meta.created)}\nModified ${formatDate(note.meta.modified)}`}>{formatRelativeTime($sortMode === 'created' ? note.meta.created : note.meta.modified)}</span>{/if}
 						</div>
 					{:else}
@@ -1396,6 +1413,13 @@
 							{#if getNotebookPath(note)}
 								<span class="note-notebook">{getNotebookPath(note)}</span>
 								{#if showDates}<span class="note-meta-sep">&middot;</span>{/if}
+							{/if}
+							{#if noteViewers(note).length > 0}
+								<span class="note-viewers-stack" title={`Also viewing: ${noteViewers(note).map((p) => p.name).join(', ')}`}>
+									{#each noteViewers(note).slice(0, 3) as person (person.clientId)}
+										<span class="note-viewer-avatar" style="--avatar-color: {person.color}">{person.name.slice(0, 1).toUpperCase()}</span>
+									{/each}
+								</span>
 							{/if}
 							{#if showDates}<span class="note-date" title={`Created ${formatDate(note.meta.created)}\nModified ${formatDate(note.meta.modified)}`}>{formatRelativeTime($sortMode === 'created' ? note.meta.created : note.meta.modified)}</span>{/if}
 							{#if note.meta.tags.length > 0}
@@ -1589,7 +1613,7 @@
 				</svg>
 				Open in New Window
 			</button>
-			{#if !isMobile}
+			{#if !isMobile && !isLiveNotebookPath(contextMenu.note.path)}
 			<button onclick={async () => { const n = contextMenu!.note; contextMenu = null; try { await revealFile(n.path); } catch (e) { console.error('Failed to reveal in file manager:', e); } }}>
 				<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 					<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
@@ -1615,7 +1639,7 @@
 				</svg>
 				Move to...
 			</button>
-			{#if isFiled(contextMenu.note)}
+			{#if isFiled(contextMenu.note) && !isLiveNotebookPath(contextMenu.note.path)}
 			<button onclick={() => unfileNote(contextMenu!.note)}>
 				<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 					<path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/><path d="M9 13h6"/>
@@ -1997,6 +2021,31 @@
 	.quickaccess-icon {
 		color: var(--text-accent);
 		flex-shrink: 0;
+	}
+
+	.note-viewers-stack {
+		display: inline-flex;
+		align-items: center;
+		flex-shrink: 0;
+	}
+
+	.note-viewer-avatar {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 15px;
+		height: 15px;
+		border-radius: 50%;
+		background: var(--avatar-color, var(--accent));
+		color: white;
+		font-size: 8px;
+		font-weight: 700;
+		border: 1px solid var(--bg-primary);
+		margin-left: -5px;
+	}
+
+	.note-viewer-avatar:first-child {
+		margin-left: 0;
 	}
 
 	.note-preview {

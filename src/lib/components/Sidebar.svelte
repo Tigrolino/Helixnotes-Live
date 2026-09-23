@@ -26,7 +26,7 @@
 	} from '$lib/stores/app';
 	import { getNotebooks, getAllTags, createNotebook, deleteNotebook, renameNotebook, moveNotebook, getNotebookIcons, setNotebookIcon, getTagStyles, saveAttachment, getQuickAccess, addQuickAccess, removeQuickAccess, emptyTrash, moveNote, readNote, countRootNotes } from '$lib/api';
 	import { connectCollabConnection } from '$lib/collab/connection';
-	import { liveTreeEntries, buildLiveNotebookEntry, LIVE_NOTEBOOK_PATH } from '$lib/collab/liveNotebook';
+	import { liveTreeEntries, buildLiveNotebookEntry, LIVE_NOTEBOOK_PATH, isLiveNotebookPath, liveParentPath } from '$lib/collab/liveNotebook';
 	import { open as openDialog } from '@tauri-apps/plugin-dialog';
 	import { readFile } from '@tauri-apps/plugin-fs';
 	import { convertFileSrc } from '@tauri-apps/api/core';
@@ -390,12 +390,33 @@
 		e.preventDefault();
 		dropTargetPath = null;
 		const payload = e.dataTransfer?.getData('text/plain') ?? '';
+		// A live note's path is flat (id-based) and doesn't encode which sub-notebook it's
+		// currently in the way a local path's directory prefix does, so the "is it already here?"
+		// check has to ask the live tree for the note's real current parent instead of just
+		// string-splitting the path - otherwise a note dragged out of a sub-notebook onto the
+		// Live Notebook root always looks like a same-parent no-op and silently gets skipped.
 		const notePaths = [...new Set(decodeNoteDragPaths(payload))]
-			.filter((path) => norm(parentOf(path)) !== norm(nb.path));
+			.filter((path) => {
+				const currentParent = isLiveNotebookPath(path) ? liveParentPath(path) : parentOf(path);
+				return norm(currentParent ?? '') !== norm(nb.path);
+			});
 		if (notePaths.length === 0) return;
 
+		// Crossing the live/local boundary is a COPY, not a move (see moveLiveNoteOrNotebook's
+		// doc comment) - that's not built yet, so guard it here rather than letting moveNote()
+		// silently fall through to "no destination = live root" for a live note dragged onto a
+		// local notebook, which looked like the note teleporting to the wrong place instead of
+		// visibly failing.
+		const destIsLive = isLiveNotebookPath(nb.path);
+		const crossDomainPaths = notePaths.filter((path) => isLiveNotebookPath(path) !== destIsLive);
+		if (crossDomainPaths.length > 0) {
+			console.warn('Copying notes between the Live Notebook and local notebooks by drag-and-drop is not supported yet:', crossDomainPaths);
+		}
+		const sameDomainPaths = notePaths.filter((path) => isLiveNotebookPath(path) === destIsLive);
+		if (sameDomainPaths.length === 0) return;
+
 		const movedPaths = new Map<string, string>();
-		for (const notePath of notePaths) {
+		for (const notePath of sameDomainPaths) {
 			try {
 				movedPaths.set(notePath, await moveNote(notePath, nb.path));
 			} catch (e) {
