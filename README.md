@@ -11,6 +11,18 @@ collaborative editing for shared notebooks, layered onto the same local-markdown
 Your notes are still stored as standard Markdown files on your local filesystem.
 No cloud, no lock-in - collaboration is opt-in and runs through a small, self-hosted relay server.
 
+## AI notice
+
+This fork was entirely coded with AI. I've reviewed every function and made sure I understand and
+approve of the changes, but there may still be issues I haven't discovered - if you come across
+anything that seems incorrect or broken, please report it to me.
+
+I also want to be transparent about my views on AI. I don't fully support its use in every
+context, and I believe there are areas where it shouldn't be used, such as the creation of images
+or videos. However, I created this project entirely as a side project to collaborate with a friend
+on another project of mine. This isn't meant to be an excuse for using AI, but I wanted to be
+upfront about the reasoning behind it and give some context from my side.
+
 ## Live Notebook (this fork's addition)
 
 A shared notebook shows up as a normal entry in the sidebar's notebook tree - same note list, same
