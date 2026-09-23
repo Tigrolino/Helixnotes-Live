@@ -1,45 +1,37 @@
----
-id: f9bf8eaf-31a2-4061-bda2-38b22f46800c
-title: README
-tags: []
-pinned: false
-created: 2026-09-23T08:35:38.220181400+00:00
-modified: 2026-09-23T17:29:23.967924200+00:00
----
-# README
-
 # HelixNotes Live
-![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)
-![Fork of HelixNotes](https://img.shields.io/badge/fork%20of-HelixNotes-orange)
-![Website](https://img.shields.io/badge/web-helixnotes.com-purple)
-![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS%20%7C%20Android-lightgrey)
 
-> [!note] AI Notice
-> This fork was entirely coded with AI. I have reviewed every function and made sure I understand and approve of the changes, but there may still be issues that I have not discovered. If you come across anything that seems incorrect or broken, please report it to me.
->
-> I also want to be transparent about my views on AI. I do not fully support its use in every context, and I believe there are areas where it should not be used, such as the creation of images or videos. However, I created this project entirely as a side project to collaborate with a friend on another project of mine. This is not meant to be an excuse for using AI, but I wanted to be transparent about the reasoning behind it and give some context from my side.
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://github.com/Tigrolino/Helixnotes-Live/blob/main/LICENSE)
+[![Fork of HelixNotes](https://img.shields.io/badge/fork%20of-HelixNotes-orange)](https://gitlab.com/ArkHost/HelixNotes)
+[![Website](https://img.shields.io/badge/web-helixnotes.com-purple)](https://helixnotes.com)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS%20%7C%20Android-lightgrey)]()
 
-<!-- -->
-A fork of [HelixNotes](https://gitlab.com/ArkHost/HelixNotes) adding **Live Notebook**: real-time collaborative editing for shared notebooks, layered onto the same local-markdown app.
+A fork of [HelixNotes](https://gitlab.com/ArkHost/HelixNotes) adding **Live Notebook**: real-time
+collaborative editing for shared notebooks, layered onto the same local-markdown app.
 
-Your notes are still stored as standard Markdown files on your local filesystem. No cloud, no lock-in - collaboration is opt-in and runs through a small, self-hosted relay server.
+Your notes are still stored as standard Markdown files on your local filesystem.
+No cloud, no lock-in - collaboration is opt-in and runs through a small, self-hosted relay server.
 
 ## Live Notebook (this fork's addition)
 
-A shared notebook shows up as a normal entry in the sidebar's notebook tree - same note list, same editor, nothing new to learn. On top of that:
+A shared notebook shows up as a normal entry in the sidebar's notebook tree - same note list, same
+editor, nothing new to learn. On top of that:
 
 - Real-time collaborative editing (Yjs CRDT), with live cursors and a connected-users indicator
 - Presence and connection-status indicators
 - Pinning notes within a shared notebook
-- Pasting or dropping images and files straight into a note - up to 95 MB, relayed through the collaboration server and optionally backed up to GitHub for durability
+- Pasting or dropping images and files straight into a note - up to 95 MB, relayed through the
+  collaboration server and optionally backed up to GitHub for durability
 
-It's all powered by `collab-server/`, a small, self-hostable Node.js/TypeScript WebSocket relay (Render works well - see `collab-server/README.md` for local dev and deployment instructions). It's gated by a single shared workspace password; there's no account system.
+It's all powered by `collab-server/`, a small, self-hostable Node.js/TypeScript WebSocket relay
+(Render works well - see [`collab-server/README.md`](collab-server/README.md) for local dev and
+deployment instructions). It's gated by a single shared workspace password; there's no account
+system.
 
 ## Features
 
 - Markdown editor with toolbar, slash commands, source mode, code highlighting
 - **Tasks view**: aggregate `- [ ]` checklists from across all notes, set priority and due dates, work in a list or a calendar (drag a task to reschedule)
-- `<span data-wiki-link data-path="" data-title="Wiki-links" class="wiki-link">Wiki-links</span>` and graph view
+- `[[Wiki-links]]` and graph view
 - Full-text search (Tantivy), CJK-aware for Chinese, Japanese, and Korean
 - Outline panel, daily notes with calendar view, tags with autocomplete, drag-and-drop
 - Live KaTeX math editor (`/math`, `/imath`) with modal preview, double-click to edit
@@ -55,7 +47,8 @@ It's all powered by `collab-server/`, a small, self-hostable Node.js/TypeScript 
 - Multi-window, file associations, focus mode, view mode
 - Themes (light, dark, and 14 palettes), accent colors, fonts, 80-200% interface scale
 - Local plain-text files, no company cloud
-- **Live Notebook**: real-time collaborative editing on shared notebooks - live cursors, presence, pinning, and image/file uploads (see above)
+- **Live Notebook**: real-time collaborative editing on shared notebooks - live cursors,
+  presence, pinning, and image/file uploads (see above)
 
 Full documentation: [helixnotes.com/docs](https://helixnotes.com/docs.html)
 
@@ -96,7 +89,8 @@ pnpm verify
 pnpm tauri build
 ```
 
-Live Notebook's relay server (`collab-server/`) is a separate Node project with its own setup and deployment steps - see `collab-server/README.md`.
+Live Notebook's relay server (`collab-server/`) is a separate Node project with its own setup and
+deployment steps - see [`collab-server/README.md`](collab-server/README.md).
 
 ## License
 
