@@ -1,139 +1,31 @@
-# HelixNotes
+# HelixNotes Live
 
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://gitlab.com/ArkHost/HelixNotes/-/blob/main/LICENSE)
-[![Latest Release](https://img.shields.io/badge/release-v1.3.5-green)](https://gitlab.com/ArkHost/HelixNotes/-/releases/v1.3.5)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://github.com/Tigrolino/Helixnotes-Live/blob/main/LICENSE)
+[![Fork of HelixNotes](https://img.shields.io/badge/fork%20of-HelixNotes-orange)](https://gitlab.com/ArkHost/HelixNotes)
 [![Website](https://img.shields.io/badge/web-helixnotes.com-purple)](https://helixnotes.com)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS%20%7C%20Android-lightgrey)]()
 
-A local markdown note-taking app built with Tauri, SvelteKit, and Rust.
+A fork of [HelixNotes](https://gitlab.com/ArkHost/HelixNotes) adding **Live Notebook**: real-time
+collaborative editing for shared notebooks, layered onto the same local-markdown app.
 
-Your notes are stored as standard Markdown files on your local filesystem.
-No cloud, no lock-in.
+Your notes are still stored as standard Markdown files on your local filesystem.
+No cloud, no lock-in - collaboration is opt-in and runs through a small, self-hosted relay server.
 
-## Download (v1.3.5)
+## Live Notebook (this fork's addition)
 
-### Linux
+A shared notebook shows up as a normal entry in the sidebar's notebook tree - same note list, same
+editor, nothing new to learn. On top of that:
 
-#### AppImage
+- Real-time collaborative editing (Yjs CRDT), with live cursors and a connected-users indicator
+- Presence and connection-status indicators
+- Pinning notes within a shared notebook
+- Pasting or dropping images and files straight into a note - up to 95 MB, relayed through the
+  collaboration server and optionally backed up to GitHub for durability
 
-The AppImage works only on Fedora 43+, Arch Linux, and openSUSE Tumbleweed (x86_64).
-
-[Download AppImage](https://download.helixnotes.com/releases/v1.3.5/HelixNotes_1.3.5_amd64.AppImage)
-
-#### Distro-specific packages
-
-##### Fedora 43+ (DNF)
-
-```bash
-sudo dnf config-manager addrepo \
-  --from-repofile=https://repo.arkhost.com/helixnotes.repo
-sudo dnf install helix-notes
-```
-
-##### Debian / Ubuntu / Mint (APT)
-
-```bash
-curl -fsSL https://repo.arkhost.com/gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/arkhost.gpg && echo "deb [signed-by=/usr/share/keyrings/arkhost.gpg arch=amd64] https://repo.arkhost.com stable main" | sudo tee /etc/apt/sources.list.d/helixnotes.list && sudo apt update && sudo apt install helix-notes
-```
-
-##### Arch / Manjaro (AUR)
-
-```bash
-yay -S helixnotes-appimage-bin
-```
-
-##### Solus (EOPKG)
-
-```bash
-sudo eopkg it helixnotes
-```
-
-##### NixOS
-
-<details>
-<summary>flake.nix</summary>
-
-```nix
-{
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    helix-notes = {
-      url = "git+https://gitlab.com/ArkHost/HelixNotes";
-      # inputs.nixpkgs.follows = "nixpkgs";
-    }
-  };
-
-  outputs = {
-    nixpkgs,
-    helix-notes,
-    ...
-  }: let
-    system = "x86_64-linux";
-    pkgs = nixpkgs.legacyPackages.${system};
-  in {
-    nixosConfigurations.default = nixpkgs.lib.nixosSystem {
-      system = system;
-      specialArgs = { inherit helix-notes; };
-
-      modules = [
-        /path/to/configuration.nix
-      ];
-    };
-  };
-}
-```
-</details>
-
-
-<details>
-<summary>configuration.nix</summary>
-
-```nix
-{
-  config,
-  lib,
-  pkgs,
-  helix-notes,
-  ...
-}:
-{
-  users.users.<USERNAME> = {
-    packages = with pkgs; [
-      (helix-notes.packages.${pkgs.stdenv.hostPlatform.system}.default)
-    ];
-  };
-}
-```
-</details>
-
-#### Manual package downloads
-
-- [.deb](https://download.helixnotes.com/releases/v1.3.5/HelixNotes_1.3.5_amd64.deb) (Ubuntu 22.04+)
-- [.rpm](https://download.helixnotes.com/releases/v1.3.5/HelixNotes-1.3.5-1.x86_64.rpm)
-
-### Windows
-
-[Download Installer](https://download.helixnotes.com/releases/v1.3.5/HelixNotes_1.3.5_x64-setup.exe) (Windows 10/11)
-
-### macOS
-
-[Download .dmg (Apple Silicon)](https://download.helixnotes.com/releases/v1.3.5/HelixNotes_1.3.5_aarch64.dmg) (M-series Macs)
-
-[Download .dmg (Intel)](https://download.helixnotes.com/releases/v1.3.5/HelixNotes_1.3.5_x64.dmg)
-
-The Apple Silicon build is signed and notarized by Apple. The Intel build may still trigger a Gatekeeper warning. If macOS reports that the Intel build is damaged, run this once after installing or updating it:
-
-```bash
-xattr -cr /Applications/HelixNotes.app
-```
-
-### Android
-
-[Download APK](https://download.helixnotes.com/releases/v1.3.5/HelixNotes_1.3.5_android.apk)
-
----
-
-All releases: [gitlab.com/ArkHost/HelixNotes/-/releases](https://gitlab.com/ArkHost/HelixNotes/-/releases)
+It's all powered by `collab-server/`, a small, self-hostable Node.js/TypeScript WebSocket relay
+(Render works well - see [`collab-server/README.md`](collab-server/README.md) for local dev and
+deployment instructions). It's gated by a single shared workspace password; there's no account
+system.
 
 ## Features
 
@@ -155,6 +47,8 @@ All releases: [gitlab.com/ArkHost/HelixNotes/-/releases](https://gitlab.com/ArkH
 - Multi-window, file associations, focus mode, view mode
 - Themes (light, dark, and 14 palettes), accent colors, fonts, 80-200% interface scale
 - Local plain-text files, no company cloud
+- **Live Notebook**: real-time collaborative editing on shared notebooks - live cursors,
+  presence, pinning, and image/file uploads (see above)
 
 Full documentation: [helixnotes.com/docs](https://helixnotes.com/docs.html)
 
@@ -162,6 +56,7 @@ Full documentation: [helixnotes.com/docs](https://helixnotes.com/docs.html)
 
 - **Frontend**: SvelteKit (Svelte 5) + TailwindCSS v4 + TipTap v3
 - **Backend**: Rust (Tauri 2.0) + Tantivy (search) + Notify (file watcher)
+- **Collaboration**: Node.js/TypeScript WebSocket relay (`collab-server/`) + Yjs CRDT
 - **Platforms**: Linux (AppImage), Windows, macOS, Android
 
 ## Building from Source
@@ -194,14 +89,9 @@ pnpm verify
 pnpm tauri build
 ```
 
-## Screenshots
-
-![Editor](https://cdn.helixnotes.com/assets/screenshots/screenshot-1.png)
-![Tasks calendar](https://cdn.helixnotes.com/assets/screenshots/screenshot-2.png)
-![Graph view](https://cdn.helixnotes.com/assets/screenshots/screenshot-7.png)
-![Daily notes](https://cdn.helixnotes.com/assets/screenshots/screenshot-4.png)
-![Themes](https://cdn.helixnotes.com/assets/screenshots/screenshot-6.png)
+Live Notebook's relay server (`collab-server/`) is a separate Node project with its own setup and
+deployment steps - see [`collab-server/README.md`](collab-server/README.md).
 
 ## License
 
-[AGPL-3.0](https://gitlab.com/ArkHost/HelixNotes/-/blob/main/LICENSE)
+[AGPL-3.0](https://github.com/Tigrolino/Helixnotes-Live/blob/main/LICENSE)
