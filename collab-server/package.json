@@ -2,7 +2,7 @@
   "name": "helixnotes-collab-server",
   "private": true,
   "version": "0.1.0",
-  "description": "Stages 2-4: authenticated WebSocket relay for HelixNotes real-time collaboration (transport, Yjs doc sync, and awareness/presence all ride the same opaque broadcast path). The GitHub bridge and persistence are added in a later stage.",
+  "description": "Stages 2-6: authenticated WebSocket relay for HelixNotes real-time collaboration (transport, Yjs doc sync, awareness/presence, file/image uploads, and live-document persistence, all riding the same opaque broadcast path, plus two plain HTTP routes for uploads).",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -15,7 +15,9 @@
   },
   "dependencies": {
     "dotenv": "^18.0.3",
-    "ws": "^8.18.0"
+    "lib0": "^0.2.99",
+    "ws": "^8.18.0",
+    "yjs": "^13.6.27"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

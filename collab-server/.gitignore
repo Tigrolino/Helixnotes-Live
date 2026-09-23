@@ -6,3 +6,7 @@ dist/
 # Local-disk copies of uploaded files (see UPLOADS_DIR in .env.example) - not meant to be
 # committed here; GITHUB_TOKEN/GITHUB_REPO is the actual backup mechanism for these.
 uploads/
+
+# Local-disk copies of live-document snapshots (see DOC_SNAPSHOTS_DIR in .env.example) - same
+# story: GITHUB_TOKEN/GITHUB_REPO is the durable backup, this is just the fast local cache.
+doc-snapshots/
