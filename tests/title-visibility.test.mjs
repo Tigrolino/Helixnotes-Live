@@ -33,7 +33,7 @@ test('source to rich transition preserves the hidden title on desktop and mobile
     transition,
     /editor\.commands\.setContent\(\s*markdownToHtml\(\s*restoreTitleH1\(\s*content\s*\)\s*\)\s*\)\s*;/
   );
-  assert.match(transition, /createEditor\(\s*restoreTitleH1\(\s*content\s*\)\s*\)\s*;/);
+  assert.match(transition, /createEditor\(\s*restoreTitleH1\(\s*content\s*\)\s*,\s*liveFieldId\s*\)\s*;/);
 });
 
 test('source to rich transition preserves an empty source body on desktop and mobile', () => {

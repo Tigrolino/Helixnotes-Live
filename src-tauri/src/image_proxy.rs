@@ -3,7 +3,12 @@ use std::io::Read;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::time::Duration;
 
-const MAX_IMAGE_BYTES: u64 = 20 * 1024 * 1024;
+// Was 20 MB; raised to match the Live Notebook's own upload limit (see collab.rs's
+// MAX_UPLOAD_BYTES and collab-server's UPLOAD_MAX_BYTES) so an image that was accepted on upload
+// doesn't then fail to display here - this proxy is also how a live note's uploaded images get
+// fetched back for display (any http(s):// image src is routed through it - see Editor.svelte's
+// resolveImageSrc()), not just arbitrary third-party image URLs pasted into a note.
+const MAX_IMAGE_BYTES: u64 = 95 * 1024 * 1024;
 
 pub struct ImageResponse {
     pub content_type: String,

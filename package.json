@@ -39,6 +39,9 @@
     "@tauri-apps/plugin-dialog": "^2.6.0",
     "@tauri-apps/plugin-fs": "^2.4.5",
     "@tauri-apps/plugin-updater": "^2.10.0",
+    "@tiptap/extension-collaboration": "3.19.0",
+    "@tiptap/extension-collaboration-caret": "3.19.0",
+    "@tiptap/y-tiptap": "^3.0.2",
     "@tiptap/core": "^3.19.0",
     "@tiptap/extension-code-block-lowlight": "^3.19.0",
     "@tiptap/extension-color": "^3.19.0",
@@ -65,12 +68,16 @@
     "@types/markdown-it": "^14.1.2",
     "highlight.js": "^11.11.1",
     "katex": "^0.16.28",
+    "lib0": "^0.2.114",
     "lowlight": "^3.3.0",
     "markdown-it": "^14.3.0",
     "markdown-it-mark": "^4.0.0",
     "markdown-it-sub": "^2.0.0",
     "markdown-it-sup": "^2.0.0",
     "markdown-it-task-lists": "^2.1.1",
-    "mermaid": "^11.16.1"
-  }
+    "mermaid": "^11.16.1",
+    "y-protocols": "^1.0.7",
+    "yjs": "^13.6.27"
+  },
+  "packageManager": "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e"
 }

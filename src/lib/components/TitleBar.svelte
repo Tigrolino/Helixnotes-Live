@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { getCurrentWindow } from '@tauri-apps/api/window';
-	import { vaultReady, focusMode, readOnly, updateAvailable, showSettings, settingsTab, appConfig, activeVaultConfig, syncState } from '$lib/stores/app';
+	import { vaultReady, focusMode, readOnly, updateAvailable, showSettings, settingsTab, appConfig, activeVaultConfig, syncState, collabState } from '$lib/stores/app';
 	import { syncNow } from '$lib/api';
+	import { livePresence } from '$lib/collab/liveNotebook';
 	import NoteSwitcher from './NoteSwitcher.svelte';
 
 	let {
@@ -103,6 +104,16 @@
 				<path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/>
 			</svg>
 		</button>
+		{#if activeVaultConfig($appConfig)?.collab_server_url && $collabState.status === 'connected' && $livePresence.length > 0}
+			<div class="presence-stack" title={$livePresence.map((p) => p.name).join(', ')}>
+				{#each $livePresence.slice(0, 4) as person (person.clientId)}
+					<span class="presence-avatar" style="--avatar-color: {person.color}">{person.name.slice(0, 1).toUpperCase()}</span>
+				{/each}
+				{#if $livePresence.length > 4}
+					<span class="presence-avatar presence-overflow">+{$livePresence.length - 4}</span>
+				{/if}
+			</div>
+		{/if}
 		<button class="switch-vault-btn" class:active={$readOnly} onclick={() => ($readOnly = !$readOnly)} title={$readOnly ? 'Switch to Edit Mode' : 'Switch to View Mode'}>
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 				{#if $readOnly}
@@ -250,6 +261,36 @@
 	.switch-vault-btn.active {
 		background: color-mix(in srgb, var(--accent) 18%, transparent);
 		color: var(--accent);
+	}
+
+	.presence-stack {
+		display: flex;
+		align-items: center;
+		margin-left: 2px;
+	}
+
+	.presence-avatar {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 22px;
+		height: 22px;
+		border-radius: 50%;
+		background: var(--avatar-color, var(--accent));
+		color: white;
+		font-size: 10px;
+		font-weight: 700;
+		border: 1.5px solid var(--bg-secondary);
+		margin-left: -6px;
+	}
+
+	.presence-avatar:first-child {
+		margin-left: 0;
+	}
+
+	.presence-overflow {
+		background: var(--bg-tertiary);
+		color: var(--text-secondary);
 	}
 
 	.new-note-btn {

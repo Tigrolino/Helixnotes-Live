@@ -59,6 +59,12 @@ export interface VaultConfig {
   sync_on_change?: boolean;
   sync_interval_minutes?: number;
   last_sync_time?: string | null;
+  // Per-vault real-time collaboration transport settings (see src-tauri/src/collab.rs).
+  collab_server_url?: string | null;
+  collab_workspace_id?: string | null;
+  collab_password?: string | null;
+  /** Shown to other connected users in presence/cursors/typing indicators (Stage 4). */
+  collab_display_name?: string | null;
 }
 
 export interface ExternalVaultResult {
@@ -249,3 +255,18 @@ export interface TaskItem {
   due: string | null;
   priority: string | null;
 }
+
+// ── Collaboration (Stage 2: transport only - no document sync yet) ──
+
+export type CollabStatus = "disconnected" | "connecting" | "connected" | "reconnecting" | "error";
+
+export interface CollabStatusSnapshot {
+  status: CollabStatus;
+  detail: string | null;
+}
+
+/** Events pushed from the Rust WebSocket client over the Channel passed to `connectCollab`. */
+export type CollabEvent =
+  | { type: "status"; status: CollabStatus; detail: string | null; attempt: number | null }
+  | { type: "message"; text: string }
+  | { type: "data"; bytes: number[] };

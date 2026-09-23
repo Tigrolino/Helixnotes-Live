@@ -1,4 +1,17 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, Channel } from "@tauri-apps/api/core";
+import {
+  isLiveNotebookPath,
+  isLiveNotePath,
+  getLiveNotes,
+  readLiveNote,
+  saveLiveNote,
+  createLiveNote,
+  duplicateLiveNote,
+  renameLiveNoteOrNotebook,
+  deleteLiveNoteOrNotebook,
+  moveLiveNoteOrNotebook,
+  createLiveSubNotebook,
+} from "$lib/collab/liveNotebook";
 import type {
   AppConfig,
   CustomTheme,
@@ -18,6 +31,8 @@ import type {
   TaskItem,
   ExternalVaultResult,
   StartupView,
+  CollabEvent,
+  CollabStatusSnapshot,
 } from "./types";
 
 export async function openVault(path: string): Promise<void> {
@@ -104,6 +119,7 @@ export async function createNotebook(
   parentRelative: string | null,
   name: string,
 ): Promise<NotebookEntry> {
+  if (isLiveNotebookPath(parentRelative)) return createLiveSubNotebook(parentRelative, name);
   return invoke("create_notebook", { parentRelative, name });
 }
 
@@ -111,10 +127,12 @@ export async function renameNotebook(
   path: string,
   newName: string,
 ): Promise<string> {
+  if (isLiveNotebookPath(path)) return renameLiveNoteOrNotebook(path, newName);
   return invoke("rename_notebook", { path, newName });
 }
 
 export async function deleteNotebook(path: string): Promise<void> {
+  if (isLiveNotebookPath(path)) return deleteLiveNoteOrNotebook(path);
   return invoke("delete_notebook", { path });
 }
 
@@ -122,16 +140,19 @@ export async function moveNotebook(
   notebookPath: string,
   destParent: string,
 ): Promise<string> {
+  if (isLiveNotebookPath(notebookPath)) return moveLiveNoteOrNotebook(notebookPath, destParent);
   return invoke("move_notebook", { notebookPath, destParent });
 }
 
 export async function getNotes(
   notebookPath: string | null,
 ): Promise<NoteEntry[]> {
+  if (isLiveNotebookPath(notebookPath)) return getLiveNotes(notebookPath as string);
   return invoke("get_notes", { notebookPath });
 }
 
 export async function readNote(path: string): Promise<NoteContent> {
+  if (isLiveNotePath(path)) return readLiveNote(path);
   return invoke("read_note", { path });
 }
 
@@ -140,6 +161,7 @@ export async function saveNote(
   meta: NoteMeta,
   body: string,
 ): Promise<void> {
+  if (isLiveNotePath(path)) return saveLiveNote(path, meta);
   return invoke("save_note", { path, meta, body });
 }
 
@@ -147,10 +169,12 @@ export async function createNote(
   notebookRelative: string | null,
   title: string,
 ): Promise<NoteEntry> {
+  if (isLiveNotebookPath(notebookRelative)) return createLiveNote(notebookRelative, title);
   return invoke("create_note", { notebookRelative, title });
 }
 
 export async function duplicateNote(path: string): Promise<NoteEntry> {
+  if (isLiveNotePath(path)) return duplicateLiveNote(path);
   return invoke("duplicate_note", { path });
 }
 
@@ -162,10 +186,12 @@ export async function renameNote(
   path: string,
   newTitle: string,
 ): Promise<string> {
+  if (isLiveNotePath(path)) return renameLiveNoteOrNotebook(path, newTitle);
   return invoke("rename_note", { path, newTitle });
 }
 
 export async function deleteNote(path: string): Promise<void> {
+  if (isLiveNotePath(path)) return deleteLiveNoteOrNotebook(path);
   return invoke("delete_note", { path });
 }
 
@@ -173,6 +199,7 @@ export async function moveNote(
   notePath: string,
   destNotebook: string,
 ): Promise<string> {
+  if (isLiveNotePath(notePath)) return moveLiveNoteOrNotebook(notePath, destNotebook);
   return invoke("move_note", { notePath, destNotebook });
 }
 
@@ -557,3 +584,75 @@ export async function isMobilePlatform(): Promise<boolean> {
 export async function getPendingOpenFile(): Promise<string | null> {
   return invoke("get_pending_open_file");
 }
+
+// ── Collaboration (Stage 2: transport only - no document sync yet) ──
+
+export async function setCollabSettings(
+  serverUrl: string | null,
+  workspaceId: string | null,
+  password: string | null,
+  displayName: string | null,
+): Promise<void> {
+  return invoke("set_collab_settings", { serverUrl, workspaceId, password, displayName });
+}
+
+/**
+ * Opens the collaboration WebSocket (owned by the Rust core, not the webview - see
+ * src-tauri/src/collab.rs). `onEvent` is called for every status change, echoed message, and
+ * (in a later stage) Yjs update frame. Returns once the connection attempt has been kicked off,
+ * not once it succeeds - watch `onEvent`'s "connected"/"error" statuses for the outcome.
+ */
+export async function connectCollab(
+  url: string,
+  workspace: string,
+  password: string,
+  onEvent: (event: CollabEvent) => void,
+): Promise<void> {
+  const channel = new Channel<CollabEvent>();
+  channel.onmessage = onEvent;
+  return invoke("connect_collab", { url, workspace, password, onEvent: channel });
+}
+
+export async function disconnectCollab(): Promise<void> {
+  return invoke("disconnect_collab");
+}
+
+export async function getCollabStatus(): Promise<CollabStatusSnapshot> {
+  return invoke("get_collab_status");
+}
+
+/**
+ * Sends a raw binary frame (a Yjs sync/update message, see src/lib/collab/syncProtocol.ts) to
+ * the server over the already-open collaboration WebSocket. Queued in the Rust core and written
+ * as a binary frame; throws if there is no active connection.
+ */
+export async function sendCollabData(data: Uint8Array): Promise<void> {
+  return invoke("send_collab_data", { data: Array.from(data) });
+}
+
+/**
+ * Uploads one file/image pasted or dropped into a Live Notebook note to the collaboration
+ * server's HTTP upload endpoint (collab-server's `POST /upload/<workspace>` - see its README),
+ * capped there at 95 MB. Unlike saveImage/saveAttachment, this doesn't touch the local vault at
+ * all - the caller passes the workspace connection details directly (same values used for
+ * connectCollab), and gets back a ready-to-use, fully-qualified URL with the workspace password
+ * already included as a query parameter - the same shape a local note's saveImage/saveAttachment
+ * result is NOT (those return a vault-relative path that still needs resolveImageSrc()). This
+ * result IS already resolveImageSrc()-compatible for images: it starts with `https://` (or
+ * `http://` for a local test server), which resolveImageSrc() already knows to route through the
+ * imgproxy protocol, same as any other externally-hosted image. For a plain file attachment
+ * (inserted as `<a href>`, not through resolveImageSrc()), the URL is used as the href directly -
+ * the editor's existing link-click handling already opens an absolute http(s) href externally
+ * rather than treating it as a local vault path.
+ */
+export async function uploadLiveFile(
+  serverUrl: string,
+  workspace: string,
+  password: string,
+  name: string,
+  mimeType: string,
+  data: number[],
+): Promise<string> {
+  return invoke("upload_live_file", { serverUrl, workspace, password, name, mimeType, data });
+}
+

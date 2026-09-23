@@ -1,6 +1,11 @@
 <script lang="ts">
-	import { showSettings, theme, resolvedTheme, appConfig, platformIsMobile, activeVaultConfig, updateAvailable as globalUpdateAvailable, updateObj as globalUpdateObj, installType, settingsTab, vaultReady, androidApkUrl, checkForUpdateMobile, notebookSortMode, isManagedInstall, customThemes } from '$lib/stores/app';
-	import { setTheme, setSystemThemes, setAccentColor, setFontSize, setScrollToChangeFontSize, setFontFamily, setLineHeight, setUiScale, setContentWidth, setGeneralSettings, importObsidian, createBackup, listBackups, restoreBackup, deleteBackup, setBackupSettings, setAiSettings, testAiConnection, setSyncSettings, testSyncConnection, syncNow, getAppConfig, saveCustomTheme, deleteCustomTheme, exportCustomTheme, importCustomThemes, getVaultStats, findOrphanedAttachments, trashOrphanedAttachments } from '$lib/api';
+	import { showSettings, theme, resolvedTheme, appConfig, platformIsMobile, activeVaultConfig, updateAvailable as globalUpdateAvailable, updateObj as globalUpdateObj, installType, settingsTab, vaultReady, androidApkUrl, checkForUpdateMobile, notebookSortMode, isManagedInstall, customThemes, collabState } from '$lib/stores/app';
+	import { setTheme, setSystemThemes, setAccentColor, setFontSize, setScrollToChangeFontSize, setFontFamily, setLineHeight, setUiScale, setContentWidth, setGeneralSettings, importObsidian, createBackup, listBackups, restoreBackup, deleteBackup, setBackupSettings, setAiSettings, testAiConnection, setSyncSettings, testSyncConnection, syncNow, getAppConfig, saveCustomTheme, deleteCustomTheme, exportCustomTheme, importCustomThemes, getVaultStats, findOrphanedAttachments, trashOrphanedAttachments, setCollabSettings } from '$lib/api';
+	import {
+		connectCollabConnection,
+		disconnectCollabConnection as handleDisconnectCollab,
+		refreshCollabStatus,
+	} from '$lib/collab/connection';
 	import { darkThemes, isMobile, isAndroid } from '$lib/platform';
 	import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 	import { listen } from '@tauri-apps/api/event';
@@ -13,7 +18,7 @@
 
 	const modKey = navigator.platform.startsWith('Mac') ? '⌘' : 'Ctrl';
 
-	type Tab = 'general' | 'editor' | 'styling' | 'import' | 'backup' | 'maintenance' | 'ai' | 'sync' | 'updates';
+	type Tab = 'general' | 'editor' | 'styling' | 'import' | 'backup' | 'maintenance' | 'ai' | 'sync' | 'collaboration' | 'updates';
 	let activeTab = $state<Tab>('styling');
 
 	// Updates state
@@ -476,6 +481,62 @@
 			syncMessage = { type: 'error', text: String(e) };
 			syncRunning = false;
 			cleanup();
+		}
+	}
+
+	// ── Collaboration (Stage 2: transport only - no Yjs/document sync yet) ──
+	// The WebSocket connection itself is owned by the Rust core (see src-tauri/src/collab.rs), so
+	// it keeps running even if this panel closes; collabState just mirrors the last status event.
+	let collabServerUrl = $state(activeVaultConfig($appConfig)?.collab_server_url ?? '');
+	let collabWorkspaceId = $state(activeVaultConfig($appConfig)?.collab_workspace_id ?? '');
+	let collabPassword = $state(activeVaultConfig($appConfig)?.collab_password ?? '');
+	let collabDisplayName = $state(activeVaultConfig($appConfig)?.collab_display_name ?? '');
+	let collabShowPassword = $state(false);
+
+	let lastCollabVault: string | null = null;
+	$effect(() => {
+		const identity = $appConfig?.active_bookmark_id
+			? `bookmark:${$appConfig.active_bookmark_id}`
+			: $appConfig?.active_vault
+				? `path:${$appConfig.active_vault}`
+				: null;
+		if (identity === lastCollabVault) return;
+		lastCollabVault = identity;
+		const vc = activeVaultConfig($appConfig);
+		collabServerUrl = vc?.collab_server_url ?? '';
+		collabWorkspaceId = vc?.collab_workspace_id ?? '';
+		collabPassword = vc?.collab_password ?? '';
+		collabDisplayName = vc?.collab_display_name ?? '';
+	});
+
+	async function saveCollabSettings() {
+		await setCollabSettings(collabServerUrl || null, collabWorkspaceId || null, collabPassword || null, collabDisplayName || null);
+		if ($appConfig) {
+			const cur = $appConfig;
+			const active = activeVaultConfig(cur);
+			$appConfig = {
+				...cur,
+				vaults: cur.vaults.map((vault) => vault === active ? {
+					...vault,
+					collab_server_url: collabServerUrl || null,
+					collab_workspace_id: collabWorkspaceId || null,
+					collab_password: collabPassword || null,
+					collab_display_name: collabDisplayName || null,
+				} : vault),
+			};
+		}
+	}
+
+	// refreshCollabStatus / handleDisconnectCollab are imported directly from
+	// $lib/collab/connection above - that module now owns the one Channel/event handler shared
+	// with CollabTestDoc (Stage 3), so this panel no longer wires connectCollab's onEvent itself.
+	async function handleConnectCollab() {
+		if (!collabServerUrl || !collabWorkspaceId || !collabPassword) return;
+		try {
+			await saveCollabSettings();
+			await connectCollabConnection(collabServerUrl, collabWorkspaceId, collabPassword);
+		} catch (e) {
+			$collabState = { status: 'error', detail: String(e) };
 		}
 	}
 
@@ -1233,6 +1294,12 @@
 							<path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0115-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 01-15 6.7L3 16"/>
 						</svg>
 						Sync
+					</button>
+					<button class="tab-btn" class:active={activeTab === 'collaboration'} onclick={() => { activeTab = 'collaboration'; refreshCollabStatus(); }}>
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/>
+						</svg>
+						Collaboration
 					</button>
 					{#if !isAndroid}
 					<button class="tab-btn" class:active={activeTab === 'updates'} onclick={() => activeTab = 'updates'}>
@@ -2503,6 +2570,86 @@
 									</label>
 								</div>
 							{/if}
+						</div>
+
+					{:else if activeTab === 'collaboration'}
+						<div class="tab-content">
+							<div class="settings-section">
+								<h3>Server URL</h3>
+								<div class="ai-key-row">
+									<input type="text" class="ai-key-input" placeholder="wss://your-app.onrender.com" value={collabServerUrl} oninput={(e) => { collabServerUrl = (e.target as HTMLInputElement).value; }} onblur={saveCollabSettings} />
+								</div>
+								<p class="setting-hint">The collaboration server's address. The connection itself runs in HelixNotes's Rust core, not the browser view.</p>
+							</div>
+
+							<div class="settings-section">
+								<h3>Workspace / Repository</h3>
+								<div class="ai-key-row">
+									<input type="text" class="ai-key-input" placeholder="team-notes" value={collabWorkspaceId} oninput={(e) => { collabWorkspaceId = (e.target as HTMLInputElement).value; }} onblur={saveCollabSettings} />
+								</div>
+								<p class="setting-hint">Identifies which shared workspace on the server this vault collaborates through.</p>
+							</div>
+
+							<div class="settings-section">
+								<h3>Display Name</h3>
+								<div class="ai-key-row">
+									<input type="text" class="ai-key-input" placeholder="Anonymous" value={collabDisplayName} oninput={(e) => { collabDisplayName = (e.target as HTMLInputElement).value; }} onblur={saveCollabSettings} />
+								</div>
+								<p class="setting-hint">Shown to other connected users next to your cursor, selection, and in the presence list.</p>
+							</div>
+
+							<div class="settings-section">
+								<h3>Password</h3>
+								<div class="ai-key-row">
+									<input type={collabShowPassword ? 'text' : 'password'} class="ai-key-input" placeholder="workspace password" value={collabPassword} oninput={(e) => { collabPassword = (e.target as HTMLInputElement).value; }} onblur={saveCollabSettings} />
+									<button class="ai-key-toggle" onclick={() => collabShowPassword = !collabShowPassword} title={collabShowPassword ? 'Hide' : 'Show'}>
+										{#if collabShowPassword}
+											<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+										{:else}
+											<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+										{/if}
+									</button>
+								</div>
+								<p class="setting-hint">A shared workspace secret, checked by the server. Stored locally on this device, never sent to GitHub.</p>
+							</div>
+
+							<div class="settings-section">
+								<h3>Connection</h3>
+								{#if $collabState.status === 'connected'}
+									<button class="import-btn" onclick={handleDisconnectCollab}>
+										<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+										Disconnect
+									</button>
+								{:else}
+									<button class="import-btn" onclick={handleConnectCollab} disabled={$collabState.status === 'connecting' || $collabState.status === 'reconnecting' || !collabServerUrl || !collabWorkspaceId || !collabPassword}>
+										{#if $collabState.status === 'connecting' || $collabState.status === 'reconnecting'}
+											<svg class="spinner-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" opacity="0.25" /><path d="M12 2a10 10 0 019.95 9" /></svg>
+											{$collabState.status === 'reconnecting' ? 'Reconnecting…' : 'Connecting…'}
+										{:else}
+											<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 11-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
+											Connect
+										{/if}
+									</button>
+								{/if}
+								{#if $collabState.status === 'connected' || $collabState.status === 'error'}
+									<div class="import-result {$collabState.status === 'connected' ? 'success' : 'error'}">
+										{#if $collabState.status === 'connected'}
+											<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 11-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
+											<span>Connected</span>
+										{:else}
+											<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
+											<span>{$collabState.detail ?? 'Connection error'}</span>
+										{/if}
+									</div>
+								{:else}
+									<p class="setting-hint">{$collabState.status === 'connecting' ? 'Connecting…' : $collabState.status === 'reconnecting' ? 'Reconnecting…' : 'Not connected.'}</p>
+								{/if}
+							</div>
+
+							<div class="settings-section">
+								<h3>Live Notebook</h3>
+								<p class="setting-hint">Once connected, a "Live Notebook" entry appears in the sidebar - open it there to create and edit files together in real time.</p>
+							</div>
 						</div>
 
 					{:else if activeTab === 'updates'}

@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+*.log
+
+# Local-disk copies of uploaded files (see UPLOADS_DIR in .env.example) - not meant to be
+# committed here; GITHUB_TOKEN/GITHUB_REPO is the actual backup mechanism for these.
+uploads/

@@ -12,6 +12,7 @@ import type {
   ViewMode,
   SortMode,
   TagStyle,
+  CollabStatus,
 } from "$lib/types";
 
 // App state
@@ -120,6 +121,15 @@ export const resolvedTheme = derived(
 export const syncState = writable<{ running: boolean; error: string | null }>({
   running: false,
   error: null,
+});
+
+// Collaboration (Stage 2: transport only) - mirrors syncState's shape. The Rust core owns the
+// actual WebSocket connection and keeps running across a Settings panel close/reopen; this store
+// is just the frontend's live view of the last CollabEvent::Status it received, seeded from
+// getCollabStatus() so a freshly mounted Settings panel shows the current state immediately.
+export const collabState = writable<{ status: CollabStatus; detail: string | null }>({
+  status: "disconnected",
+  detail: null,
 });
 
 // Update state
