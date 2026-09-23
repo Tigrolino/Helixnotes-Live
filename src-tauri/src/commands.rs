@@ -1,10 +1,12 @@
 use crate::asset_scope;
+use crate::collab;
 use crate::search::SearchIndex;
 use crate::state::AppState;
 use crate::types::*;
 use crate::vault::{operations, watcher};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager, Runtime, State};
+use tauri::ipc::Channel;
 use tauri_plugin_fs::FsExt;
 
 fn index_note_bg(state: &State<'_, AppState>, path: &str) {
@@ -326,6 +328,78 @@ pub fn get_app_config(state: State<'_, AppState>) -> Result<AppConfig, String> {
 pub fn get_pending_open_file(state: State<'_, AppState>) -> Result<Option<String>, String> {
     let mut pending = state.pending_open_file.lock().map_err(|e| e.to_string())?;
     Ok(pending.take())
+}
+
+// ── Collaboration ──
+//
+// The WebSocket connection itself lives in `collab.rs` and runs on a detached thread, matching
+// the pattern `ai_ask`/`ai::ai_request` use for long-lived streaming network I/O. These commands
+// are thin wrappers: persist settings, start/stop the connection, and read back the last known
+// status.
+
+#[tauri::command]
+pub fn set_collab_settings(
+    state: State<'_, AppState>,
+    server_url: Option<String>,
+    workspace_id: Option<String>,
+    password: Option<String>,
+    display_name: Option<String>,
+) -> Result<(), String> {
+    let mut config = state.config.lock().map_err(|e| e.to_string())?;
+    let active_index = active_vault_index(&config)?;
+    let v = &mut config.vaults[active_index];
+    v.collab_server_url = server_url.filter(|s| !s.trim().is_empty());
+    v.collab_workspace_id = workspace_id.filter(|s| !s.trim().is_empty());
+    v.collab_password = password.filter(|s| !s.is_empty());
+    v.collab_display_name = display_name.filter(|s| !s.trim().is_empty());
+    save_app_config(&config)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn connect_collab(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    url: String,
+    workspace: String,
+    password: String,
+    on_event: Channel<collab::CollabEvent>,
+) -> Result<(), String> {
+    collab::connect(app, &state, url, workspace, password, on_event)
+}
+
+#[tauri::command]
+pub fn disconnect_collab(state: State<'_, AppState>) -> Result<(), String> {
+    collab::disconnect(&state)
+}
+
+#[tauri::command]
+pub fn get_collab_status(state: State<'_, AppState>) -> Result<collab::CollabStatusSnapshot, String> {
+    collab::status(&state)
+}
+
+/// Send a raw binary frame (a Yjs sync/update message, see src/lib/collab/syncProtocol.ts) over
+/// the active collaboration WebSocket. `data` crosses the IPC boundary as a JSON number array,
+/// matching the existing `write_bytes_to`/`copy_png_to_clipboard` convention for byte payloads.
+#[tauri::command]
+pub fn send_collab_data(state: State<'_, AppState>, data: Vec<u8>) -> Result<(), String> {
+    collab::send_data(&state, data)
+}
+
+/// Upload one file/image from a live note (paste/drop in Editor.svelte) to the collaboration
+/// server's HTTP upload endpoint. Unlike the commands above, stateless - `server_url`/`workspace`/
+/// `password` are passed straight through from the caller's already-loaded vault config rather
+/// than read from `AppState`, same as `connect_collab`'s own arguments.
+#[tauri::command]
+pub fn upload_live_file(
+    server_url: String,
+    workspace: String,
+    password: String,
+    name: String,
+    mime_type: String,
+    data: Vec<u8>,
+) -> Result<String, String> {
+    collab::upload_live_file(server_url, workspace, password, name, mime_type, data)
 }
 
 #[tauri::command]

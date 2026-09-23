@@ -22,6 +22,8 @@
 	import { CodeBlockLowlight } from '@tiptap/extension-code-block-lowlight';
 	import { Details, DetailsSummary, DetailsContent } from '@tiptap/extension-details';
 	import TextAlign from '@tiptap/extension-text-align';
+	import Collaboration from '@tiptap/extension-collaboration';
+	import CollaborationCaret from '@tiptap/extension-collaboration-caret';
 	import { common, createLowlight } from 'lowlight';
 	import powershell from 'highlight.js/lib/languages/powershell';
 	import hljs from 'highlight.js/lib/core';
@@ -39,9 +41,10 @@
 	import { convertFileSrc } from '@tauri-apps/api/core';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { readFile } from '@tauri-apps/plugin-fs';
-	import { openFile, openUrl, copyFileTo, copyImageToClipboard as copyImageToClipboardCmd, writeBytesTo, copyPngToClipboard, copyTextToClipboard } from '$lib/api';
+	import { openFile, openUrl, copyFileTo, copyImageToClipboard as copyImageToClipboardCmd, writeBytesTo, copyPngToClipboard, copyTextToClipboard, uploadLiveFile } from '$lib/api';
+	import { getLiveNotebook, liveFieldIdForPath, setLocalOpenFile, livePresence } from '$lib/collab/liveNotebook';
 	import { save as saveDialog } from '@tauri-apps/plugin-dialog';
-	import { activeNote, activeNotePath, appConfig, editorDirty, sourceMode, focusMode, readOnly, quickAccessPaths, notes, navHistory, canGoBack, canGoForward, viewerNote, viewMode, notebooks, outlineWidth } from '$lib/stores/app';
+	import { activeNote, activeNotePath, appConfig, activeVaultConfig, editorDirty, sourceMode, focusMode, readOnly, quickAccessPaths, notes, navHistory, canGoBack, canGoForward, viewerNote, viewMode, notebooks, outlineWidth } from '$lib/stores/app';
 	import { saveNote, saveImage, saveAttachment, readClipboardImage, addQuickAccess, removeQuickAccess, getQuickAccess, getNoteVersions, getNoteVersionContent, createVersion, aiAsk, getAllNoteTitles, readNote, renameNote } from '$lib/api';
 	import type { VersionEntry, AiStreamEvent, NoteTitleEntry, TaskItem as TaskRecord } from '$lib/types';
 	import { listen } from '@tauri-apps/api/event';
@@ -89,6 +92,17 @@
 	const LARGE_DOC_CHARS = 100_000;
 	let isLargeDoc = $state(false);
 	let editor: Editor | null = null;
+	// The Live Notebook file (its Yjs fragment id) the current editor instance is bound to via the
+	// Collaboration extension, or null when editing a normal local note. TipTap's Collaboration
+	// extension binds to a specific Y.XmlFragment at construction time, so switching to a
+	// different field (a different live file, or in/out of live mode entirely) needs a fresh
+	// editor instance rather than the usual swap-content-in-place note switch - see loadNote().
+	let boundLiveFieldId = $state<string | null>(null);
+	let pendingLiveFieldId: string | null = null;
+	// Everyone else currently looking at this exact live file (not just connected to the
+	// workspace) - see liveNotebook.ts's setLocalOpenFile()/LivePresenceEntry.openFile.
+	const fileViewers = $derived(boundLiveFieldId ? $livePresence.filter((p) => p.openFile === boundLiveFieldId) : []);
+
 	const MixedListShortcuts = Extension.create({
 		name: 'mixedListShortcuts',
 		priority: 1000,
@@ -3020,6 +3034,11 @@
 	}
 
 	const autoSave = debounce(async () => {
+		// Live notes save nothing to disk - content is already live via Yjs. Still clear the dirty
+		// flag: some call sites (e.g. the title input's onchange) set it unconditionally before
+		// calling forceSave()/autoSave(), and without this a live note's "Unsaved" indicator would
+		// stick forever since nothing else ever clears it for live notes.
+		if (boundLiveFieldId) { $editorDirty = false; return; }
 		if (get(viewerNote) || trashingNote) return; // never autosave external viewer files or a note being trashed
 		if (!$activeNote || !$activeNotePath || !$editorDirty) return;
 		// Only fix blob images if a paste occurred (avoids full doc scan on every save)
@@ -3049,6 +3068,7 @@
 	}, isMobile ? 1500 : 500);
 
 	export async function forceSave(allowWhileTrashing = false): Promise<boolean> {
+		if (boundLiveFieldId) { $editorDirty = false; return true; } // nothing to force-save; trivially "succeeded"
 		if (get(viewerNote) || (trashingNote && !allowWhileTrashing)) return false;
 		if (!$activeNote || !$activeNotePath) return false;
 		await fixingBlobsPromise;
@@ -3300,6 +3320,7 @@
 	/** Flush unsaved editor content to disk (synchronous serialize + fire-and-forget save).
 	 *  Call BEFORE updating $activeNote/$activeNotePath stores when switching notes. */
 	export function flushSave() {
+		if (boundLiveFieldId) { $editorDirty = false; return; } // nothing to flush for a live note
 		if (!$editorDirty || !$activeNote || !$activeNotePath) return;
 		try {
 			const body = $sourceMode
@@ -3349,11 +3370,17 @@
 		loadedPath = path;
 		isLoadingNote = true;
 		isLargeDoc = content.length > LARGE_DOC_CHARS;
+		// Live Notebook files bind the TipTap Collaboration extension straight to their Yjs
+		// fragment instead of loading this (unused/empty) markdown string - see createEditor().
+		const liveFieldId = liveFieldIdForPath(path);
 		// Viewer mode (external file) always forces read-only. New notes stay editable and
 		// can opt into source mode without changing how existing notes choose their mode.
 		const isViewer = !!get(viewerNote);
 		const isNewNote = $activeNote?.meta.title === 'Untitled' && !content.replace(/^---[\s\S]*?---\s*/, '').trim();
-		if (isNewNote && ($appConfig?.new_notes_in_source_mode ?? false)) {
+		// A live note always opens in the rich editor - source mode edits a plain-text snapshot
+		// that isn't synced back to the shared Yjs fragment, which would look like silently lost
+		// input the moment you switched back.
+		if (isNewNote && !liveFieldId && ($appConfig?.new_notes_in_source_mode ?? false)) {
 			$sourceMode = true;
 		}
 		lastSourceMode = $sourceMode;
@@ -3361,26 +3388,12 @@
 		$readOnly = shouldBeReadOnly;
 		if (editor) editor.setEditable(!shouldBeReadOnly);
 		const editorBody = editorElement?.closest('.editor-body') as HTMLElement | null;
-		if ($sourceMode) {
-			sourceContent = stripTitleH1(content);
-			resetSourceHistory(sourceContent);
-			if (editorBody) editorBody.scrollTop = 0;
-			tick().then(() => {
-				if (sourceElement) restoreNoteScroll(sourceElement, scrollPosition?.source ?? 0, path);
-			});
-			isLoadingNote = false;
-			updateCounts();
-		} else if (editorElement && editor) {
-			// Editor already exists, just swap content
-			const html = markdownToHtml(content);
-			ignoreNextUpdate = true;
-			editor.commands.setContent(html);
-			// Clear undo/redo history so it doesn't bleed across notes
-			clearEditorHistory();
-			const text = editor.state.doc.textContent;
+		// Restore scroll and reset the cursor after all ProseMirror/Svelte DOM updates settle -
+		// shared by both the swap-in-place and recreate-editor paths below.
+		function settleRichEditor() {
+			const text = editor ? editor.state.doc.textContent : '';
 			wordCount = countWords(text);
 			charCount = text.replace(/\s/g, '').length;
-			// Restore scroll and reset the cursor after all ProseMirror/Svelte DOM updates settle.
 			tick().then(() => {
 				if (path !== loadedPath) return;
 				if (editorBody) restoreNoteScroll(editorBody, scrollPosition?.rich ?? 0, path);
@@ -3393,10 +3406,40 @@
 				}
 				isLoadingNote = false;
 			});
+		}
+		if ($sourceMode) {
+			sourceContent = stripTitleH1(content);
+			resetSourceHistory(sourceContent);
+			if (editorBody) editorBody.scrollTop = 0;
+			tick().then(() => {
+				if (sourceElement) restoreNoteScroll(sourceElement, scrollPosition?.source ?? 0, path);
+			});
+			isLoadingNote = false;
+			updateCounts();
+		} else if (editorElement && editor && liveFieldId === boundLiveFieldId) {
+			// Editor already exists and is bound the same way (both local, or the same live file
+			// reopened without navigating away) - just swap content in place.
+			if (!liveFieldId) {
+				const html = markdownToHtml(content);
+				ignoreNextUpdate = true;
+				editor.commands.setContent(html);
+				// Clear undo/redo history so it doesn't bleed across notes
+				clearEditorHistory();
+			}
+			// A live note's content is already there via the existing Yjs binding - nothing to set.
+			settleRichEditor();
+		} else if (editorElement) {
+			// Switching into/out of the Live Notebook, or between two different live files: the
+			// Collaboration extension binds to one Yjs fragment at construction time, so (unlike a
+			// same-mode note switch) the editor has to be destroyed and recreated bound to the right
+			// field, rather than having its content swapped in place.
+			createEditor(content, liveFieldId);
+			settleRichEditor();
 		} else {
 			// Editor element not in DOM yet (first note load).
 			// Store content and let the $effect on editorElement handle init.
 			pendingContent = content;
+			pendingLiveFieldId = liveFieldId;
 			isLoadingNote = false;
 		}
 		if (!isMobile && showOutline) scheduleOutline();
@@ -4250,8 +4293,9 @@
 	$effect(() => {
 		if (editorElement && !editor) {
 			if (pendingContent !== null) {
-				createEditor(pendingContent);
+				createEditor(pendingContent, pendingLiveFieldId);
 				pendingContent = null;
+				pendingLiveFieldId = null;
 				if (editor) {
 					const text = (editor as any).state.doc.textContent;
 					wordCount = countWords(text);
@@ -4315,13 +4359,15 @@
 			editor.destroy();
 			editor = null;
 		}
+		boundLiveFieldId = null;
+		setLocalOpenFile(null);
 		mathObserver?.disconnect();
 		mathObserver = null;
 		editorReady = false;
 		closeSlashMenu();
 	}
 
-	function createEditor(content: string) {
+	function createEditor(content: string, liveFieldId: string | null = null) {
 		if (!editorElement) return;
 		if (editor) {
 			editor.destroy();
@@ -4329,16 +4375,22 @@
 		}
 		mathObserver?.disconnect();
 		mathObserver = null;
+		boundLiveFieldId = liveFieldId;
+		setLocalOpenFile(liveFieldId);
 
 		isLargeDoc = content.length > LARGE_DOC_CHARS;
-		const html = markdownToHtml(content);
+		// A live note's content comes from its Yjs fragment via the Collaboration extension below,
+		// not from this markdown string (which is unused/empty for live notes) - see loadNote().
+		const html = liveFieldId ? '' : markdownToHtml(content);
 
 		editor = new Editor({
 			element: editorElement,
 			editable: !$readOnly,
 			extensions: [
 				MixedListShortcuts,
-				StarterKit.configure({ codeBlock: false }),
+				// Collaboration ships its own undo/redo (via y-tiptap's yUndoPlugin); StarterKit's
+				// history must be disabled for a live note so the two don't fight over Mod-Z/Mod-Y.
+				StarterKit.configure({ codeBlock: false, ...(liveFieldId ? { history: false } : {}) }),
 				Placeholder.configure({
 					includeChildren: true,
 					placeholder: ({ node }) => {
@@ -4487,10 +4539,28 @@
 					ColorSwatch,
 				TaskMetaDim,
 				...($appConfig?.enable_wiki_links ? [WikiLink, WikiLinkAutocomplete] : []),
+				...(liveFieldId ? (() => {
+					const live = getLiveNotebook();
+					return [
+						Collaboration.configure({ document: live.doc, field: liveFieldId }),
+						CollaborationCaret.configure({
+							provider: { awareness: live.awareness },
+							user: { name: live.localName, color: live.localColor },
+						}),
+					];
+				})() : []),
 			],
-			content: html,
+			// Omitted (rather than an empty string) for a live note: passing `content` alongside the
+			// Collaboration extension fights it for who owns the initial document state.
+			...(liveFieldId ? {} : { content: html }),
 			editorProps: {
-				attributes: { class: 'editor-content', spellcheck: 'false' },
+				attributes: {
+					// `editor-content-live` marks this as a live/collaborative editor so the
+					// `.tiptap.editor-content-live` rule below can give the first line room for a
+					// collaboration caret's name label to render without being clipped.
+					class: liveFieldId ? 'editor-content editor-content-live' : 'editor-content',
+					spellcheck: 'false',
+				},
 				handleDOMEvents: {
 					// Prevent focus-caused scroll jumps when clicking details toggle buttons.
 					// Pre-focusing with preventScroll means TipTap's focus() call sees
@@ -4626,8 +4696,13 @@
 					ignoreNextUpdate = false;
 					return;
 				}
-				$editorDirty = true;
-				autoSave();
+				// A live note's content is already durable the moment it's written (the Collaboration
+				// extension applies it straight to the shared Yjs fragment) - there's nothing to mark
+				// dirty or debounce-save to disk for it.
+				if (!boundLiveFieldId) {
+					$editorDirty = true;
+					autoSave();
+				}
 				if (!isMobile && showOutline) scheduleOutline();
 				if (showInfo) scheduleCounts();
 			},
@@ -5629,10 +5704,58 @@
 		return false;
 	}
 
+	function guessMimeFromName(name: string): string {
+		const ext = name.split('.').pop()?.toLowerCase() ?? '';
+		const map: Record<string, string> = {
+			png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+			webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon',
+			pdf: 'application/pdf',
+		};
+		return map[ext] ?? 'application/octet-stream';
+	}
+
+	/** Uploads to the Live Notebook's relay server instead of the local vault when the current
+	 * note is live - a vault-relative path from saveImage/saveAttachment would be meaningless
+	 * there (no shared vault exists between peers) and would silently write into whichever LOCAL
+	 * vault happens to be open on this one machine, invisible to every other collaborator. */
+	async function uploadForLiveNote(name: string, data: number[], mimeType?: string): Promise<string> {
+		const vc = activeVaultConfig($appConfig);
+		if (!vc?.collab_server_url || !vc?.collab_workspace_id) {
+			throw new Error('Not connected to the Live Notebook');
+		}
+		return uploadLiveFile(
+			vc.collab_server_url,
+			vc.collab_workspace_id,
+			vc.collab_password ?? '',
+			name,
+			mimeType || guessMimeFromName(name),
+			data,
+		);
+	}
+
+	/** saveImage, but routed to the Live Notebook upload when boundLiveFieldId is set. The result
+	 * is correct for its caller either way: a vault-relative path locally (still needs
+	 * resolveImageSrc()), or a ready-to-use https:// URL for a live note - which resolveImageSrc()
+	 * also already knows how to handle (its http(s):// branch already routes any externally-hosted
+	 * image through the imgproxy protocol, live-uploaded ones included). */
+	async function saveImageAny(name: string, data: number[], mimeType?: string): Promise<string> {
+		if (boundLiveFieldId) return uploadForLiveNote(name, data, mimeType);
+		return saveImage(name, data);
+	}
+
+	/** saveAttachment, but routed to the Live Notebook upload when boundLiveFieldId is set. A live
+	 * result is used as a plain <a href> exactly like a local one is - the editor's existing
+	 * link-click handling already opens an absolute http(s) href externally rather than treating
+	 * it as a local vault path, so no extra plumbing is needed on the display side. */
+	async function saveAttachmentAny(name: string, data: number[], mimeType?: string): Promise<string> {
+		if (boundLiveFieldId) return uploadForLiveNote(name, data, mimeType);
+		return saveAttachment(name, data);
+	}
+
 	async function insertClipboardImage() {
 		try {
 			const data = await readClipboardImage();
-			const relativePath = await saveImage('pasted-image.png', data);
+			const relativePath = await saveImageAny('pasted-image.png', data, 'image/png');
 			if (editor) {
 				const displaySrc = resolveImageSrc(relativePath);
 				editor.chain().focus().setImage({ src: displaySrc }).run();
@@ -5646,7 +5769,7 @@
 		try {
 			const buffer = await file.arrayBuffer();
 			const data = Array.from(new Uint8Array(buffer));
-			const relativePath = await saveImage(file.name, data);
+			const relativePath = await saveImageAny(file.name, data, file.type);
 			if (editor) {
 				const displaySrc = resolveImageSrc(relativePath);
 				editor.chain().focus().setImage({ src: displaySrc }).run();
@@ -5667,7 +5790,7 @@
 		try {
 			const buffer = await file.arrayBuffer();
 			const data = Array.from(new Uint8Array(buffer));
-			const relativePath = await saveAttachment(file.name, data);
+			const relativePath = await saveAttachmentAny(file.name, data, file.type);
 			if (!editor) return;
 			const usePdfPreview = !isMobile && ($appConfig?.pdf_preview ?? false);
 			if (usePdfPreview) {
@@ -5695,7 +5818,7 @@
 			const name = `pasted-image.${ext}`;
 			const buffer = await blob.arrayBuffer();
 			const data = Array.from(new Uint8Array(buffer));
-			const relativePath = await saveImage(name, data);
+			const relativePath = await saveImageAny(name, data, blob.type);
 			return resolveImageSrc(relativePath);
 		} catch (e) {
 			console.error('Failed to save blob image:', e);
@@ -5739,7 +5862,7 @@
 		try {
 			const buffer = await file.arrayBuffer();
 			const data = Array.from(new Uint8Array(buffer));
-			const relativePath = await saveAttachment(file.name, data);
+			const relativePath = await saveAttachmentAny(file.name, data, file.type);
 			if (editor) {
 				const sizeKB = Math.round(file.size / 1024);
 				const label = `${file.name} (${sizeKB} kB)`;
@@ -5800,11 +5923,12 @@
 			} else {
 				// Desktop: destroy old editor (its DOM element is gone),
 				// wait for DOM to swap textarea→div, then create editor on new element.
+				const liveFieldId = boundLiveFieldId; // destroyEditor() below clears this
 				destroyEditor();
 				const content = srcText;
 				tick().then(() => {
 					if (editorElement && !editor) {
-						createEditor(restoreTitleH1(content));
+						createEditor(restoreTitleH1(content), liveFieldId);
 						restoreRichCaret();
 					}
 				});
@@ -5824,7 +5948,7 @@
 				const ext = name.split('.').pop()?.toLowerCase() || '';
 				if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext)) {
 					readFile(filePath).then((data) => {
-						saveImage(name, Array.from(data)).then((relativePath) => {
+						saveImageAny(name, Array.from(data)).then((relativePath) => {
 							if (editor) {
 								editor.chain().focus().setImage({ src: resolveImageSrc(relativePath) }).run();
 							}
@@ -5832,7 +5956,7 @@
 					}).catch((e) => console.error('Failed to drop image:', e));
 				} else if (ext === 'pdf') {
 					readFile(filePath).then((data) => {
-						saveAttachment(name, Array.from(data)).then((relativePath) => {
+						saveAttachmentAny(name, Array.from(data)).then((relativePath) => {
 							if (!editor) return;
 							const usePdfPreview = !isMobile && ($appConfig?.pdf_preview ?? false);
 							if (usePdfPreview) {
@@ -5847,7 +5971,7 @@
 					}).catch((e) => console.error('Failed to drop PDF:', e));
 				} else {
 					readFile(filePath).then((data) => {
-						saveAttachment(name, Array.from(data)).then((relativePath) => {
+						saveAttachmentAny(name, Array.from(data)).then((relativePath) => {
 							if (editor) {
 								editor.chain().focus().insertContent(`<a href="${relativePath}">${name}</a> `).run();
 							}
@@ -5983,6 +6107,16 @@
 					</button>
 				</div>
 				{/if}
+				{#if fileViewers.length > 0}
+					<div class="file-viewers-stack" title={`Also viewing this file: ${fileViewers.map((p) => p.name).join(', ')}`}>
+						{#each fileViewers.slice(0, 4) as person (person.clientId)}
+							<span class="file-viewer-avatar" style="--avatar-color: {person.color}">{person.name.slice(0, 1).toUpperCase()}</span>
+						{/each}
+						{#if fileViewers.length > 4}
+							<span class="file-viewer-avatar file-viewer-overflow">+{fileViewers.length - 4}</span>
+						{/if}
+					</div>
+				{/if}
 				{#if $editorDirty}
 					<span class="save-indicator">Unsaved</span>
 				{/if}
@@ -6108,6 +6242,7 @@
 					</svg>
 				</button>
 				{/if}
+				{#if !boundLiveFieldId}
 				<button
 					class="icon-btn"
 					class:active={$sourceMode}
@@ -6118,6 +6253,7 @@
 						<path d="M5.854 4.854a.5.5 0 10-.708-.708l-3.5 3.5a.5.5 0 000 .708l3.5 3.5a.5.5 0 00.708-.708L2.707 8l3.147-3.146zm4.292 0a.5.5 0 01.708-.708l3.5 3.5a.5.5 0 010 .708l-3.5 3.5a.5.5 0 01-.708-.708L13.293 8l-3.147-3.146z" />
 					</svg>
 				</button>
+				{/if}
 			</div>
 			{/if}
 		</div>
@@ -8037,6 +8173,36 @@
 		gap: 8px;
 	}
 
+	.file-viewers-stack {
+		display: flex;
+		align-items: center;
+		margin-right: 2px;
+	}
+
+	.file-viewer-avatar {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 20px;
+		height: 20px;
+		border-radius: 50%;
+		background: var(--avatar-color, var(--accent));
+		color: white;
+		font-size: 9px;
+		font-weight: 700;
+		border: 1.5px solid var(--bg-primary);
+		margin-left: -6px;
+	}
+
+	.file-viewer-avatar:first-child {
+		margin-left: 0;
+	}
+
+	.file-viewer-overflow {
+		background: var(--bg-tertiary);
+		color: var(--text-secondary);
+	}
+
 	.save-indicator {
 		font-size: 11px;
 		color: var(--text-tertiary);
@@ -8669,6 +8835,18 @@
 		font-size: var(--editor-font-size, 14px);
 		font-family: var(--editor-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
 		overflow: hidden;
+	}
+
+	/* A collaboration caret's name label (.collaboration-carets__label in app.css) renders
+	   1.35em *above* its own line. This element is the caret's actual clipping ancestor - it's
+	   the same node TipTap mounts as (`.tiptap`/`.ProseMirror` are both on it), and it's the one
+	   with `overflow: hidden` above, not .editor-body two levels up (padding there doesn't help -
+	   this nearer ancestor clips first, at its own top edge, regardless of what padding an
+	   ancestor further out has). For a cursor on line 1 there's nothing above this element's own
+	   top edge for the label to render into, so it gets clipped to nothing. Give this element
+	   itself enough top padding that line 1 always has room above it. */
+	:global(.tiptap-wrapper .tiptap.editor-content-live) {
+		padding-top: 1.6em;
 	}
 
 	.editor-container:not(.mobile) :global(.tiptap-wrapper .tiptap) {

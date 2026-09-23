@@ -1,3 +1,4 @@
+use crate::collab::{CollabHandle, CollabStatusSnapshot};
 use crate::search::SearchIndex;
 use crate::types::AppConfig;
 use crate::vault::watcher::VaultWatcher;
@@ -13,6 +14,8 @@ pub struct AppState {
     pub importing: AtomicBool,
     pub syncing: AtomicBool,
     pub pending_open_file: Mutex<Option<String>>,
+    pub collab: Mutex<Option<CollabHandle>>,
+    pub collab_status: Mutex<CollabStatusSnapshot>,
 }
 
 impl AppState {
@@ -25,6 +28,8 @@ impl AppState {
             importing: AtomicBool::new(false),
             syncing: AtomicBool::new(false),
             pending_open_file: Mutex::new(None),
+            collab: Mutex::new(None),
+            collab_status: Mutex::new(CollabStatusSnapshot::default()),
         }
     }
 }

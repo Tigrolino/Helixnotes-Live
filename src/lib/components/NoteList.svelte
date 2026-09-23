@@ -49,6 +49,7 @@
 	import TagSuggestInput from './TagSuggestInput.svelte';
 	import TagLabel from './TagLabel.svelte';
 	import { isMobile, isAndroid } from '$lib/platform';
+	import { liveTreeEntries, isLiveNotebookPath } from '$lib/collab/liveNotebook';
 
 	let { onNoteSelected = (_path: string, _content: string, _task?: TaskItem) => {}, onNoteMoved = () => {}, onBeforeNoteSwitch = () => {}, onBeforeNoteDuplicate = async () => true, onNoteCreated = () => {}, onToggleTask = async (_t: TaskItem) => {}, onSetTaskPriority = async (_t: TaskItem, _p: string | null) => {}, onSetTaskDue = async (_t: TaskItem, _d: string | null) => {} }: {
 		onNoteSelected?: (path: string, content: string, task?: TaskItem) => void;
@@ -268,6 +269,20 @@
 		clearSelection();
 		scrollTop = 0;
 		if (listContainer) listContainer.scrollTop = 0;
+	});
+
+	// The live notebook's file list is normally served from noteCache like any other notebook -
+	// fine for local notebooks, where the cache is only ever invalidated by an action this window
+	// took itself. But the live tree also changes from *remote* edits (someone else creates,
+	// renames, moves, or deletes something) that this window never asked for, so without this the
+	// list here would only catch up the next time something local happened to invalidate the
+	// cache - which is exactly the "creating a file only syncs some of the time" symptom. Refetch
+	// (bypassing the cache) whenever the shared tree changes while a live notebook is showing.
+	$effect(() => {
+		$liveTreeEntries;
+		if ($viewMode === 'notebook' && isLiveNotebookPath($activeNotebook?.path)) {
+			refresh(true);
+		}
 	});
 
 	// Notes can also be removed from this list by a drop handled in the sidebar.

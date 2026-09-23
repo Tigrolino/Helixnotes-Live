@@ -5,6 +5,10 @@ package-lock.json
 yarn.lock
 bun.lockb
 
+# ...except collab-server/, a separate standalone Node project that genuinely uses npm - its
+# own lockfile should be committed for reproducible Render deploys.
+!collab-server/package-lock.json
+
 # Output
 .output
 .vercel

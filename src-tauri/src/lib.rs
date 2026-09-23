@@ -1,6 +1,7 @@
 mod ai;
 mod asset_scope;
 mod backup;
+mod collab;
 mod commands;
 mod history;
 mod image_proxy;
@@ -250,6 +251,12 @@ pub fn run() {
             commands::get_install_type,
             commands::is_mobile_platform,
             commands::get_pending_open_file,
+            commands::set_collab_settings,
+            commands::connect_collab,
+            commands::disconnect_collab,
+            commands::get_collab_status,
+            commands::send_collab_data,
+            commands::upload_live_file,
         ])
         .register_asynchronous_uri_scheme_protocol("imgproxy", |_ctx, request, responder| {
             let path = request.uri().path().to_string();
@@ -276,38 +283,55 @@ pub fn run() {
 
     #[cfg(desktop)]
     {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
-            // Always show/focus the main window
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-            }
+        // In a debug build only, a developer can opt out of the single-instance lock to run a
+        // second local instance side by side - e.g. to test real-time collaboration with two
+        // simultaneous "users" on one machine (each instance is its own process with its own
+        // AppState/collaboration connection anyway - see collab.rs's doc comment - so two
+        // instances behave like two independent collaborators). This check is compiled out
+        // entirely in a release build (`#[cfg(debug_assertions)]`), not merely skipped at
+        // runtime, so normal users are never affected and the single-instance protection for
+        // real usage (avoiding two instances writing the same vault files) is untouched.
+        #[cfg(debug_assertions)]
+        let allow_second_instance = std::env::var("HELIXNOTES_ALLOW_SECOND_INSTANCE")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        #[cfg(not(debug_assertions))]
+        let allow_second_instance = false;
 
-            // Extract .md file path from args (args[0] is the binary)
-            let file_path = args.iter().skip(1).find(|arg| {
-                let a = arg.trim();
-                !a.starts_with('-') && a.ends_with(".md")
-            });
-
-            if let Some(path) = file_path {
-                let resolved = if std::path::Path::new(path.as_str()).is_absolute() {
-                    std::path::PathBuf::from(path)
-                } else {
-                    std::path::Path::new(&cwd).join(path)
-                };
-                if let Some(resolved_str) = resolved.to_str() {
-                    if resolved.is_file() {
-                        let _ = app.fs_scope().allow_file(&resolved);
-                        if let Some(parent) = resolved.parent() {
-                            let _ = app.fs_scope().allow_directory(parent, true);
-                        }
-                        let _ = asset_scope::allow_external_note_assets(app, &resolved);
-                    }
-                    let _ = app.emit("open-file", resolved_str.to_string());
+        if !allow_second_instance {
+            builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+                // Always show/focus the main window
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
                 }
-            }
-        }));
+
+                // Extract .md file path from args (args[0] is the binary)
+                let file_path = args.iter().skip(1).find(|arg| {
+                    let a = arg.trim();
+                    !a.starts_with('-') && a.ends_with(".md")
+                });
+
+                if let Some(path) = file_path {
+                    let resolved = if std::path::Path::new(path.as_str()).is_absolute() {
+                        std::path::PathBuf::from(path)
+                    } else {
+                        std::path::Path::new(&cwd).join(path)
+                    };
+                    if let Some(resolved_str) = resolved.to_str() {
+                        if resolved.is_file() {
+                            let _ = app.fs_scope().allow_file(&resolved);
+                            if let Some(parent) = resolved.parent() {
+                                let _ = app.fs_scope().allow_directory(parent, true);
+                            }
+                            let _ = asset_scope::allow_external_note_assets(app, &resolved);
+                        }
+                        let _ = app.emit("open-file", resolved_str.to_string());
+                    }
+                }
+            }));
+        }
 
         builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
         let window_state_builder = tauri_plugin_window_state::Builder::default();

@@ -95,6 +95,20 @@ pub struct VaultConfig {
     pub sync_interval_minutes: u32,
     #[serde(default)]
     pub last_sync_time: Option<String>,
+    // Per-vault real-time collaboration transport settings (see src-tauri/src/collab.rs). The
+    // server URL, workspace/repo identifier, and display name are not secret; the password is a
+    // shared workspace secret, never sent to GitHub and never held by any GitHub-facing code.
+    #[serde(default)]
+    pub collab_server_url: Option<String>,
+    #[serde(default)]
+    pub collab_workspace_id: Option<String>,
+    #[serde(default)]
+    pub collab_password: Option<String>,
+    /// Shown to other connected users in presence/cursors/typing indicators (Stage 4). Purely a
+    /// display label - unrelated to authentication, and never used to identify a client to the
+    /// server itself.
+    #[serde(default)]
+    pub collab_display_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

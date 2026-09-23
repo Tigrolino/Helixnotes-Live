@@ -20,9 +20,13 @@
 		collapsedNotebooks,
 		rootNoteCount,
 		notebookSortMode,
-		notebookOrder
+		notebookOrder,
+		collabState,
+		activeVaultConfig
 	} from '$lib/stores/app';
 	import { getNotebooks, getAllTags, createNotebook, deleteNotebook, renameNotebook, moveNotebook, getNotebookIcons, setNotebookIcon, getTagStyles, saveAttachment, getQuickAccess, addQuickAccess, removeQuickAccess, emptyTrash, moveNote, readNote, countRootNotes } from '$lib/api';
+	import { connectCollabConnection } from '$lib/collab/connection';
+	import { liveTreeEntries, buildLiveNotebookEntry, LIVE_NOTEBOOK_PATH } from '$lib/collab/liveNotebook';
 	import { open as openDialog } from '@tauri-apps/plugin-dialog';
 	import { readFile } from '@tauri-apps/plugin-fs';
 	import { convertFileSrc } from '@tauri-apps/api/core';
@@ -118,6 +122,12 @@
 	}
 	const allParentPaths = $derived(collectParentPaths($notebooks));
 	const allCollapsed = $derived(allParentPaths.length > 0 && allParentPaths.every((p) => $collapsedNotebooks.includes(p)));
+	// The Live Notebook: presented as an ordinary NotebookEntry (see liveNotebook.ts) so it can be
+	// rendered by the exact same tree row/selection code as a real local notebook, right next to
+	// them - only shown once a vault has collaboration configured, same gating the old top-nav
+	// entry used.
+	const liveNotebookConfigured = $derived(!!activeVaultConfig($appConfig)?.collab_server_url);
+	const liveNotebookEntry = $derived(buildLiveNotebookEntry($liveTreeEntries));
 	function toggleAllCollapse() {
 		$collapsedNotebooks = allCollapsed ? [] : [...allParentPaths];
 	}
@@ -187,6 +197,22 @@
 			}
 			selectAllNotes();
 			return;
+		}
+		if (nb.path === LIVE_NOTEBOOK_PATH) {
+			const vc = activeVaultConfig($appConfig);
+			if (
+				vc?.collab_server_url &&
+				vc?.collab_workspace_id &&
+				$collabState.status !== 'connected' &&
+				$collabState.status !== 'connecting' &&
+				$collabState.status !== 'reconnecting'
+			) {
+				try {
+					await connectCollabConnection(vc.collab_server_url, vc.collab_workspace_id, vc.collab_password ?? '');
+				} catch (e) {
+					console.error('Failed to connect to the Live Notebook:', e);
+				}
+			}
 		}
 		$viewMode = 'notebook';
 		$activeNotebook = nb;
@@ -440,6 +466,7 @@
 	}
 
 	function nbHandleDown(e: PointerEvent, nb: NotebookEntry) {
+		if (nb.path === LIVE_NOTEBOOK_PATH) return;
 		if (e.pointerType === 'mouse' && e.button !== 0) return;
 		e.stopPropagation();
 		e.preventDefault();
@@ -583,6 +610,7 @@
 	}
 
 	async function startRename(nb: NotebookEntry) {
+		if (nb.path === LIVE_NOTEBOOK_PATH) return;
 		contextMenu = null;
 		editingNotebook = nb.path;
 		editValue = nb.name;
@@ -823,6 +851,7 @@
 				<span>Trash</span>
 			</button>
 			{/if}
+
 		</nav>
 		{/if}
 
@@ -887,6 +916,9 @@
 			{/if}
 
 			<div class="notebook-list">
+				{#if liveNotebookConfigured}
+					{@render notebookItem(liveNotebookEntry, 0)}
+				{/if}
 				{#if $rootNoteCount > 0}
 					<button
 						class="notebook-item"
@@ -941,6 +973,12 @@
 	{/if}
 
 		<div class="sidebar-footer">
+			{#if activeVaultConfig($appConfig)?.collab_server_url}
+				<span class="collab-status-chip status-{$collabState.status}" title={$collabState.detail ?? $collabState.status}>
+					<span class="collab-status-dot"></span>
+					{#if $collabState.status === 'connected'}Live{:else if $collabState.status === 'connecting' || $collabState.status === 'reconnecting'}Connecting…{:else if $collabState.status === 'error'}Can't connect{:else}Not connected{/if}
+				</span>
+			{/if}
 			<button class="icon-btn" onclick={() => ($showInfo = true)} title="Info">
 				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 					<circle cx="12" cy="12" r="10" />
@@ -970,6 +1008,7 @@
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" /><line x1="12" y1="11" x2="12" y2="17" /><line x1="9" y1="14" x2="15" y2="14" /></svg>
 			New Sub-notebook
 		</button>
+		{#if contextMenu.notebook.path !== LIVE_NOTEBOOK_PATH}
 		<button onclick={() => startRename(contextMenu!.notebook)}>
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
 			Rename
@@ -982,6 +1021,7 @@
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" /></svg>
 			Delete
 		</button>
+		{/if}
 	</div>
 {/if}
 
@@ -1196,7 +1236,12 @@
 			{:else}
 				<span class="chevron-spacer"></span>
 			{/if}
-		{#if builtinIcon}
+		{#if nb.path === LIVE_NOTEBOOK_PATH}
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.7;flex-shrink:0">
+				<circle cx="12" cy="12" r="2" />
+				<path d="M12 2a10 10 0 00-7.07 17.07M12 2a10 10 0 017.07 17.07M12 6a6 6 0 00-4.24 10.24M12 6a6 6 0 014.24 10.24" />
+			</svg>
+		{:else if builtinIcon}
 			<span class="notebook-builtin-icon"><NotebookGlyph icon={builtinIcon} size={18} /></span>
 		{:else if iconSrc}
 			<img class="notebook-icon" src={iconSrc} alt="" />
@@ -1213,7 +1258,7 @@
 			</svg>
 		{/if}
 			<span class="notebook-name">{nb.name} <span class="notebook-count">{nb.note_count}</span></span>
-			{#if $notebookSortMode === 'manual'}
+			{#if $notebookSortMode === 'manual' && nb.path !== LIVE_NOTEBOOK_PATH}
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<span
 					class="nb-drag-handle"
@@ -1322,6 +1367,7 @@
 		background: var(--accent-light);
 		color: var(--text-accent);
 	}
+
 
 	.section {
 		flex: 1;
@@ -1674,6 +1720,36 @@
 	.sidebar-footer-right {
 		display: flex;
 		gap: 4px;
+	}
+
+	.collab-status-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 11px;
+		color: var(--text-tertiary);
+		padding: 2px 4px;
+	}
+
+	.collab-status-dot {
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		background: var(--text-tertiary);
+		flex-shrink: 0;
+	}
+
+	.collab-status-chip.status-connected .collab-status-dot {
+		background: #22c55e;
+	}
+
+	.collab-status-chip.status-error .collab-status-dot {
+		background: #ef4444;
+	}
+
+	.collab-status-chip.status-connecting .collab-status-dot,
+	.collab-status-chip.status-reconnecting .collab-status-dot {
+		background: var(--accent);
 	}
 
 	.context-menu {
