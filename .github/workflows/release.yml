@@ -1,0 +1,61 @@
+# Builds a Windows installer and attaches it to a GitHub Release.
+#
+# Triggered only by pushing a version tag (e.g. `v1.4.0`) - not on every commit - so this
+# doesn't burn CI minutes on regular pushes. To cut a release:
+#   git tag v1.4.0
+#   git push origin v1.4.0
+#
+# The release is created as a draft so you can review/edit the notes before publishing it.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "HelixNotes Live ${{ github.ref_name }}"
+          releaseBody: "Automated Windows build. See commit history for what changed."
+          releaseDraft: true
+          prerelease: false
+          # tauri.conf.json's updater is still configured with upstream HelixNotes's own
+          # signing pubkey and update endpoint (helixnotes.com), which this fork doesn't
+          # control - we have no matching private key to sign updater artifacts with, and
+          # signing against a key nobody checks would be pointless. This flag skips
+          # generating those artifacts so the build doesn't fail for lack of a key; it only
+          # affects this CI build, not `pnpm tauri:build` locally.
+          args: '--config {"bundle":{"createUpdaterArtifacts":false}}'
