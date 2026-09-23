@@ -42,7 +42,7 @@
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { readFile } from '@tauri-apps/plugin-fs';
 	import { openFile, openUrl, copyFileTo, copyImageToClipboard as copyImageToClipboardCmd, writeBytesTo, copyPngToClipboard, copyTextToClipboard, uploadLiveFile } from '$lib/api';
-	import { getLiveNotebook, liveFieldIdForPath, setLocalOpenFile, livePresence } from '$lib/collab/liveNotebook';
+	import { getLiveNotebook, liveFieldIdForPath, setLocalOpenFile, livePresence, liveNoteExportRequest } from '$lib/collab/liveNotebook';
 	import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 	import { activeNote, activeNotePath, appConfig, activeVaultConfig, editorDirty, sourceMode, focusMode, readOnly, quickAccessPaths, notes, navHistory, canGoBack, canGoForward, viewerNote, viewMode, notebooks, outlineWidth } from '$lib/stores/app';
 	import { saveNote, saveImage, saveAttachment, readClipboardImage, addQuickAccess, removeQuickAccess, getQuickAccess, getNoteVersions, getNoteVersionContent, createVersion, aiAsk, getAllNoteTitles, readNote, renameNote } from '$lib/api';
@@ -3458,7 +3458,7 @@
 
 	function editorToMarkdown(): string {
 		if (!editor) return '';
-		const md = prosemirrorToMarkdown(editor.state.doc);
+		const md = prosemirrorToMarkdown(editor.state.doc, editor.schema);
 		return restoreTitleH1(md);
 	}
 
@@ -3474,7 +3474,7 @@
 		return hasImage && !hasOther;
 	}
 
-	function prosemirrorToMarkdown(doc: any): string {
+	function prosemirrorToMarkdown(doc: any, schema: any): string {
 		const entries: { text: string; isImage: boolean }[] = [];
 		doc.forEach((node: any) => {
 			const isEmpty = node.type.name === 'paragraph' && node.childCount === 0;
@@ -3484,7 +3484,7 @@
 				entries.push({ text: '<!-- -->', isImage: false });
 				return;
 			}
-			entries.push({ text: serializeNode(node), isImage: isImageNode(node) });
+			entries.push({ text: serializeNode(node, schema), isImage: isImageNode(node) });
 		});
 		while (entries.length > 0 && entries[entries.length - 1].text === '<!-- -->') {
 			entries.pop();
@@ -3558,7 +3558,7 @@
 		closeTableContextMenu();
 	}
 
-	function serializeNode(node: any): string {
+	function serializeNode(node: any, schema: any): string {
 		switch (node.type.name) {
 			case 'paragraph': {
 				const align = node.attrs.textAlign;
@@ -3582,35 +3582,35 @@
 			case 'blockquote': {
 				const blocks: string[] = [];
 				node.forEach((child: any) => {
-					const lines = serializeNode(child).replace(/\n$/, '').split('\n');
+					const lines = serializeNode(child, schema).replace(/\n$/, '').split('\n');
 					blocks.push(lines.map((l: string) => '> ' + l).join('\n'));
 				});
 				return blocks.join('\n>\n') + '\n';
 			}
 			case 'callout':
-				return serializeCallout(node, serializeNode);
+				return serializeCallout(node, (n: any) => serializeNode(n, schema));
 			case 'bulletList': {
 				const items: string[] = [];
-				node.forEach((child: any) => items.push('- ' + serializeListItem(child)));
+				node.forEach((child: any) => items.push('- ' + serializeListItem(child, schema)));
 				return items.join('') + '\n';
 			}
 			case 'orderedList': {
 				const items: string[] = [];
 				let i = node.attrs.start || 1;
-				node.forEach((child: any) => { items.push(`${i++}. ` + serializeListItem(child)); });
+				node.forEach((child: any) => { items.push(`${i++}. ` + serializeListItem(child, schema)); });
 				return items.join('') + '\n';
 			}
 			case 'taskList': {
 				const items: string[] = [];
 				node.forEach((child: any) => {
 					const checked = child.attrs.checked ? 'x' : ' ';
-					items.push(`- [${checked}] ` + serializeListItem(child));
+					items.push(`- [${checked}] ` + serializeListItem(child, schema));
 				});
 				return items.join('') + '\n';
 			}
 			case 'listItem':
 			case 'taskItem':
-				return serializeListItem(node);
+				return serializeListItem(node, schema);
 			case 'horizontalRule':
 				return '---\n';
 			case 'pageBreak':
@@ -3633,7 +3633,7 @@
 				});
 				if (hasStyling || !hasHeaderRow) {
 					const tempDiv = document.createElement('div');
-					const frag = DOMSerializer.fromSchema(editor!.schema).serializeNode(node);
+					const frag = DOMSerializer.fromSchema(schema).serializeNode(node);
 					tempDiv.appendChild(frag);
 					return tempDiv.innerHTML + '\n';
 				}
@@ -3656,7 +3656,7 @@
 				// Markdown HTML blocks end at a blank line, including one inside <pre><code>.
 				// Keep the details element on one source line; HTML parsing restores each encoded newline.
 				const detDiv = document.createElement('div');
-				const detFrag = DOMSerializer.fromSchema(editor!.schema).serializeNode(node);
+				const detFrag = DOMSerializer.fromSchema(schema).serializeNode(node);
 				detDiv.appendChild(detFrag);
 				return detDiv.innerHTML.replace(/\n/g, '&#10;') + '\n';
 			}
@@ -3673,7 +3673,7 @@
 		}
 	}
 
-	function serializeListItem(node: any): string {
+	function serializeListItem(node: any, schema: any): string {
 		const parts: string[] = [];
 		node.forEach((child: any) => {
 			if (child.type.name === 'paragraph') {
@@ -3681,11 +3681,11 @@
 			} else if (child.type.name === 'bulletList' || child.type.name === 'orderedList' || child.type.name === 'taskList') {
 				// Indent nested lists so markdown parsers recognize nesting
 				// Use 4 spaces - works for both bullet (- ) and ordered (1. ) parent markers
-				const nested = serializeNode(child).replace(/\n$/, '');
+				const nested = serializeNode(child, schema).replace(/\n$/, '');
 				const indented = nested.split('\n').map((line: string) => '    ' + line).join('\n');
 				parts.push(indented);
 			} else {
-				parts.push(serializeNode(child));
+				parts.push(serializeNode(child, schema));
 			}
 		});
 		return parts.join('\n') + '\n';
@@ -4307,6 +4307,39 @@
 		}
 	});
 
+	// Service liveNoteExportRequest (see liveNotebook.ts's doc comment on it) - spin up a
+	// throwaway, invisible editor bound to the requested live note's fragment, using the exact
+	// same extension/schema set the real editor uses, and hand back its markdown. This is how a
+	// live note's actual content gets pulled out for the "copy into a local notebook" drag - the
+	// live notebook module itself never has access to real ProseMirror content, only this
+	// component does.
+	$effect(() => {
+		const req = $liveNoteExportRequest;
+		if (!req) return;
+		liveNoteExportRequest.set(null);
+		(async () => {
+			let tempEditor: Editor | null = null;
+			try {
+				tempEditor = new Editor({
+					editable: false,
+					extensions: buildExtensions(req.liveFieldId),
+				});
+				// Let the Collaboration extension's y-sync binding settle onto the fragment's
+				// current content. The workspace's Y.Doc is already fully loaded client-side by
+				// the time a drag-and-drop between notebooks is even possible (you can't drag a
+				// note you can't see in the tree), so this is just letting TipTap/ProseMirror
+				// finish its own init tick, not waiting on the network.
+				await tick();
+				const md = prosemirrorToMarkdown(tempEditor.state.doc, tempEditor.schema);
+				req.resolve(md);
+			} catch (e) {
+				req.reject(e);
+			} finally {
+				tempEditor?.destroy();
+			}
+		})();
+	});
+
 	// Close formatting dropdowns when clicking outside the formatting bar
 	$effect(() => {
 		if (!anyDropdownOpen) return;
@@ -4367,26 +4400,13 @@
 		closeSlashMenu();
 	}
 
-	function createEditor(content: string, liveFieldId: string | null = null) {
-		if (!editorElement) return;
-		if (editor) {
-			editor.destroy();
-			editor = null;
-		}
-		mathObserver?.disconnect();
-		mathObserver = null;
-		boundLiveFieldId = liveFieldId;
-		setLocalOpenFile(liveFieldId);
-
-		isLargeDoc = content.length > LARGE_DOC_CHARS;
-		// A live note's content comes from its Yjs fragment via the Collaboration extension below,
-		// not from this markdown string (which is unused/empty for live notes) - see loadNote().
-		const html = liveFieldId ? '' : markdownToHtml(content);
-
-		editor = new Editor({
-			element: editorElement,
-			editable: !$readOnly,
-			extensions: [
+	// The full extension list a live-note-bound editor needs - shared between the real,
+	// visible editor (createEditor() below) and exportLiveNoteMarkdown()'s temporary, headless
+	// one, so a copied live note is serialized with the exact same schema it was written with
+	// (all the same custom node/mark types), not a hand-picked subset that might not recognize
+	// something the note actually uses.
+	function buildExtensions(liveFieldId: string | null) {
+		return [
 				MixedListShortcuts,
 				// Collaboration ships its own undo/redo (via y-tiptap's yUndoPlugin); StarterKit's
 				// history must be disabled for a live note so the two don't fight over Mod-Z/Mod-Y.
@@ -4549,7 +4569,29 @@
 						}),
 					];
 				})() : []),
-			],
+		];
+	}
+
+	function createEditor(content: string, liveFieldId: string | null = null) {
+		if (!editorElement) return;
+		if (editor) {
+			editor.destroy();
+			editor = null;
+		}
+		mathObserver?.disconnect();
+		mathObserver = null;
+		boundLiveFieldId = liveFieldId;
+		setLocalOpenFile(liveFieldId);
+
+		isLargeDoc = content.length > LARGE_DOC_CHARS;
+		// A live note's content comes from its Yjs fragment via the Collaboration extension below,
+		// not from this markdown string (which is unused/empty for live notes) - see loadNote().
+		const html = liveFieldId ? '' : markdownToHtml(content);
+
+		editor = new Editor({
+			element: editorElement,
+			editable: !$readOnly,
+			extensions: buildExtensions(liveFieldId),
 			// Omitted (rather than an empty string) for a live note: passing `content` alongside the
 			// Collaboration extension fights it for who owns the initial document state.
 			...(liveFieldId ? {} : { content: html }),
