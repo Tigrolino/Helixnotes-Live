@@ -152,48 +152,18 @@ export function isManagedInstall(type: string): boolean {
   return !SELF_UPDATING_INSTALL_TYPES.includes(type);
 }
 
+// This fork doesn't ship its own update server, and checking HelixNotes's upstream
+// server here would offer users the wrong build. See the "Updates" tab in Settings
+// for how users actually get told about new fork releases (a link to GitHub Releases).
+// Kept as a no-op (rather than removed) so existing call sites and imports don't churn.
 export async function checkForUpdate() {
-  try {
-    const { check } = await import("@tauri-apps/plugin-updater");
-    const update = await check();
-    if (update) {
-      updateAvailable.set({ version: update.version, body: update.body });
-      updateObj.set(update);
-    }
-  } catch {
-    // Silent fail - don't disrupt app startup
-  }
+  return;
 }
 
-function isNewerVersion(remote: string, local: string): boolean {
-  const r = remote.split(".").map(Number);
-  const l = local.split(".").map(Number);
-  for (let i = 0; i < Math.max(r.length, l.length); i++) {
-    const rv = r[i] || 0;
-    const lv = l[i] || 0;
-    if (rv > lv) return true;
-    if (rv < lv) return false;
-  }
-  return false;
-}
-
+// See checkForUpdate() above - same reasoning, mobile just used a different check
+// (a static JSON manifest instead of the Tauri updater plugin). No-op for this fork.
 export async function checkForUpdateMobile() {
-  try {
-    const { getVersion } = await import("@tauri-apps/api/app");
-    const currentVersion = await getVersion();
-    const res = await fetch("https://helixnotes.com/latest.json");
-    if (!res.ok) return;
-    const data = await res.json();
-    if (data.version && isNewerVersion(data.version, currentVersion)) {
-      updateAvailable.set({ version: data.version, body: data.notes });
-      const android = data.platforms?.["android-universal"];
-      if (android?.url) {
-        androidApkUrl.set(android.url);
-      }
-    }
-  } catch {
-    // Silent fail
-  }
+  return;
 }
 
 // Note navigation history

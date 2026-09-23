@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { showSettings, theme, resolvedTheme, appConfig, platformIsMobile, activeVaultConfig, updateAvailable as globalUpdateAvailable, updateObj as globalUpdateObj, installType, settingsTab, vaultReady, androidApkUrl, checkForUpdateMobile, notebookSortMode, isManagedInstall, customThemes, collabState } from '$lib/stores/app';
+	import { showSettings, theme, resolvedTheme, appConfig, platformIsMobile, activeVaultConfig, settingsTab, vaultReady, notebookSortMode, customThemes, collabState } from '$lib/stores/app';
 	import { setTheme, setSystemThemes, setAccentColor, setFontSize, setScrollToChangeFontSize, setFontFamily, setLineHeight, setUiScale, setContentWidth, setGeneralSettings, importObsidian, createBackup, listBackups, restoreBackup, deleteBackup, setBackupSettings, setAiSettings, testAiConnection, setSyncSettings, testSyncConnection, syncNow, getAppConfig, saveCustomTheme, deleteCustomTheme, exportCustomTheme, importCustomThemes, getVaultStats, findOrphanedAttachments, trashOrphanedAttachments, setCollabSettings } from '$lib/api';
 	import {
 		connectCollabConnection,
@@ -21,13 +21,6 @@
 	type Tab = 'general' | 'editor' | 'styling' | 'import' | 'backup' | 'maintenance' | 'ai' | 'sync' | 'collaboration' | 'updates';
 	let activeTab = $state<Tab>('styling');
 
-	// Updates state
-	let updateChecking = $state(false);
-	let updateAvailable = $state<{ version: string; body?: string; date?: string } | null>(null);
-	let updateDownloading = $state(false);
-	let updateProgress = $state(0);
-	let updateMessage = $state<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
-	let updateObj = $state<any>(null);
 	let appVersion = $state('...');
 
 	async function loadAppVersion() {
@@ -43,84 +36,6 @@
 			$settingsTab = null;
 		}
 	});
-
-	// Pre-populate from global store if update was already detected at startup
-	$effect(() => {
-		const global = $globalUpdateAvailable;
-		if (global && !updateAvailable) {
-			updateAvailable = { version: global.version, body: global.body };
-		}
-	});
-
-	// Pre-populate updater object from global store so Download & Install works without manual check
-	$effect(() => {
-		const obj = $globalUpdateObj;
-		if (obj && !updateObj) {
-			updateObj = obj;
-		}
-	});
-
-	async function handleCheckUpdate() {
-		updateChecking = true;
-		updateMessage = null;
-		updateAvailable = null;
-		try {
-			if (isMobile) {
-				await checkForUpdateMobile();
-				const global = $globalUpdateAvailable;
-				if (global) {
-					updateAvailable = { version: global.version, body: global.body };
-					updateMessage = { type: 'info', text: `Version ${global.version} is available!` };
-				} else {
-					updateMessage = { type: 'success', text: 'You are on the latest version.' };
-				}
-			} else {
-				const { check: checkUpdate } = await import('@tauri-apps/plugin-updater');
-				const update = await checkUpdate();
-				if (update) {
-					updateObj = update;
-					$globalUpdateObj = update;
-					updateAvailable = { version: update.version, body: update.body, date: update.date };
-					globalUpdateAvailable.set({ version: update.version, body: update.body });
-					updateMessage = { type: 'info', text: `Version ${update.version} is available!` };
-				} else {
-					updateMessage = { type: 'success', text: 'You are on the latest version.' };
-				}
-			}
-		} catch (e) {
-			updateMessage = { type: 'error', text: `Failed to check: ${e}` };
-		} finally {
-			updateChecking = false;
-		}
-	}
-
-	async function handleDownloadAndInstall() {
-		if (!updateObj) return;
-		updateDownloading = true;
-		updateProgress = 0;
-		updateMessage = { type: 'info', text: 'Downloading update...' };
-		try {
-			let totalBytes = 0;
-			let downloadedBytes = 0;
-			await updateObj.downloadAndInstall((event: any) => {
-				if (event.event === 'Started' && event.data.contentLength) {
-					totalBytes = event.data.contentLength;
-				} else if (event.event === 'Progress') {
-					downloadedBytes += event.data.chunkLength;
-					if (totalBytes > 0) {
-						updateProgress = Math.round((downloadedBytes / totalBytes) * 100);
-					}
-				} else if (event.event === 'Finished') {
-					updateProgress = 100;
-				}
-			});
-			updateMessage = { type: 'success', text: 'Update installed! Restart the app to apply.' };
-		} catch (e) {
-			updateMessage = { type: 'error', text: `Update failed: ${e}` };
-		} finally {
-			updateDownloading = false;
-		}
-	}
 
 	// Vault maintenance state
 	let vaultStats = $state<VaultStats | null>(null);
@@ -2656,100 +2571,19 @@
 						<div class="tab-content">
 							<div class="settings-section">
 								<h3>Current Version</h3>
-								<p class="update-version">HelixNotes <strong>v{appVersion}</strong></p>
+								<p class="update-version">HelixNotes Live <strong>v{appVersion}</strong></p>
 							</div>
 
-							{#if isManagedInstall($installType)}
 							<div class="settings-section">
 								<h3>Updates</h3>
-								<p class="setting-hint">HelixNotes was installed through your system package manager, which delivers updates. The app does not check for or install updates on its own.</p>
+								<p class="setting-hint">This is a fork of HelixNotes, so it doesn't check HelixNotes's own update server - that would offer you the wrong build. To get a newer version, check the fork's GitHub releases.</p>
+								<a class="import-btn" href="https://github.com/Tigrolino/Helixnotes-Live/releases" target="_blank" rel="noopener">
+									<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+										<path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+									</svg>
+									View Releases on GitHub
+								</a>
 							</div>
-							{:else}
-							<div class="settings-section">
-								<h3>Check for Updates</h3>
-								<button class="import-btn" onclick={handleCheckUpdate} disabled={updateChecking || updateDownloading}>
-									{#if updateChecking}
-										<svg class="spinner-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" opacity="0.25" /><path d="M12 2a10 10 0 019.95 9" /></svg>
-										Checking...
-									{:else}
-										<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-											<path d="M21 12a9 9 0 00-9-9 9.75 9.75 0 00-6.74 2.74L3 8"/><path d="M3 3v5h5"/>
-										</svg>
-										Check for Updates
-									{/if}
-								</button>
-							</div>
-							{/if}
-
-							{#if updateAvailable}
-								<div class="settings-section">
-									<h3>Update Available</h3>
-									<div class="update-info">
-										<p class="update-new-version">Version <strong>{updateAvailable.version}</strong></p>
-										{#if updateAvailable.date}
-											<p class="update-date">{new Date(updateAvailable.date).toLocaleDateString()}</p>
-										{/if}
-										{#if updateAvailable.body}
-											<div class="update-notes">{updateAvailable.body}</div>
-										{/if}
-									</div>
-									{#if $installType === 'appimage' || $installType === 'windows' || $installType === 'macos'}
-									<button class="update-install-btn" onclick={handleDownloadAndInstall} disabled={updateDownloading}>
-										{#if updateDownloading}
-											<svg class="spinner-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" opacity="0.25" /><path d="M12 2a10 10 0 019.95 9" /></svg>
-											{updateProgress > 0 ? `Downloading ${updateProgress}%` : 'Downloading...'}
-										{:else}
-											<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-												<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-											</svg>
-											Download & Install
-										{/if}
-									</button>
-									{#if updateDownloading && updateProgress > 0}
-										<div class="update-progress-bar">
-											<div class="update-progress-fill" style="width: {updateProgress}%"></div>
-										</div>
-									{/if}
-								{:else if $installType === 'deb'}
-									<div class="update-apt-info">
-										<p>Update via your package manager:</p>
-										<code>sudo apt update && sudo apt upgrade helix-notes</code>
-									</div>
-								{:else if $installType === 'aur'}
-									<div class="update-apt-info">
-										<p>Update via your AUR helper:</p>
-										<code>yay -Syu helixnotes</code>
-									</div>
-								{:else if $installType === 'android'}
-									<button class="update-install-btn" onclick={() => { openUrl('https://helixnotes.com/#download').catch(() => {}); }}>
-										<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-											<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-										</svg>
-										Download from Website
-									</button>
-								{:else}
-									<a class="update-install-btn" href="https://gitlab.com/ArkHost/HelixNotes/-/releases" target="_blank" rel="noopener">
-										<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-											<path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
-										</svg>
-										Download from Codeberg
-									</a>
-								{/if}
-								</div>
-							{/if}
-
-							{#if updateMessage}
-								<div class="import-result {updateMessage.type}">
-									{#if updateMessage.type === 'success'}
-										<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 11-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
-									{:else if updateMessage.type === 'error'}
-										<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
-									{:else}
-										<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
-									{/if}
-									<span>{updateMessage.text}</span>
-								</div>
-							{/if}
 						</div>
 					{/if}
 				</div>
