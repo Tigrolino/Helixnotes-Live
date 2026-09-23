@@ -10,11 +10,13 @@ changes here at all** - it's carried as another binary-frame message type
 (`MESSAGE_AWARENESS`, see the client's `syncProtocol.ts`) inside the exact same broadcast path
 Stage 3 already built, which is the point of keeping this relay opaque to what it's relaying.
 
-This server still has no idea what Yjs, awareness, a note, or a document is - it does not parse
-the binary frames it relays, it just moves them between the right sockets. The client's own
-`src/lib/collab/syncProtocol.ts` is the only place that understands the protocol carried inside
-those frames. The GitHub bridge and real persistence are separate, later additions to this same
-project (Stage 5), not a rewrite.
+This server still has no idea what a note or a notebook *means* - it never parses note structure,
+titles, or the tree. Stage 6 (see "Live document persistence" below) does decode the same binary
+frames' envelope enough to keep a per-workspace shadow copy of the raw Yjs state and save it -
+still without understanding anything about what's inside it. The client's own
+`src/lib/collab/syncProtocol.ts` remains the only place that understands note/notebook structure.
+The GitHub upload backup (Stage 5) and live-document persistence (Stage 6) are later additions to
+this same project, not a rewrite.
 
 ## Protocol
 
@@ -67,9 +69,30 @@ A GitHub push failure never fails the upload itself (the file already made it to
 back in the response instead.
 
 This backs up **uploaded files only**. The live document content itself (the Yjs CRDT state
-everyone's typing into) still isn't persisted anywhere - it lives only in each connected client's
-memory and this server's in-flight relay. That's a separate, larger piece of future work, not
-something this endpoint does as a side effect.
+everyone's typing into) is persisted separately - see "Live document persistence" below.
+
+## Live document persistence
+
+Every workspace's live Yjs document is kept durable, not just relayed:
+
+- The server holds one in-memory shadow copy of each workspace's document, built purely by
+  decoding the same sync/update frames it's already relaying (it still never looks at note
+  titles, tree structure, or anything else about what's *in* the document).
+- That shadow copy is saved to local disk a couple of seconds after the last edit (debounced), and
+  - if `GITHUB_TOKEN`/`GITHUB_REPO` are set - also pushed to that repo, throttled to at most once
+  a minute per workspace, at `snapshots/<workspace>.ydoc`. Whoever leaves a workspace last, or a
+  server shutdown, forces an immediate save instead of waiting out the throttle.
+- Whoever next connects to a workspace - a reconnect, everyone having left and come back later, a
+  fresh Render instance after a redeploy - gets synced from that saved state, even if nobody else
+  happens to be online at that exact moment to sync from directly. Without this, a workspace with
+  no peers currently connected would hand a joining client a blank document.
+
+Same durability story as uploads: this server's own disk isn't guaranteed to survive a redeploy
+(see "Deploying to Render" below), so `GITHUB_TOKEN`/`GITHUB_REPO` is what makes a snapshot
+outlive one. Without them, persistence still works locally - across reconnects and restarts on
+the same instance - just not across a redeploy that wipes the disk. `DOC_SAVE_DEBOUNCE_MS`,
+`DOC_SAVE_MAX_DELAY_MS`, `DOC_GITHUB_SAVE_MIN_INTERVAL_MS`, and `DOC_SNAPSHOTS_DIR` are all
+optional tuning - see `.env.example` for their defaults.
 
 ## Running locally
 
@@ -136,20 +159,22 @@ be pointed at this subdirectory of that one repo.
    - `COLLAB_PASSWORD` — the shared workspace secret. Generate one, don't reuse a real password:
      `openssl rand -base64 24`
    - `PORT` — Render sets this automatically; don't override it.
-   - `GITHUB_TOKEN` / `GITHUB_REPO` (optional, both together) — see "GitHub backup for uploads"
-     above. `GITHUB_REPO` can be this same `Tigrolino/Helixnotes-Live` repo (uploads land under
-     `attachments/<workspace>/...`, well clear of the source tree) or a separate one — either
-     works, since the Contents API push doesn't care whether it's also where the code lives.
-     Without these, uploads work but don't survive a redeploy.
+   - `GITHUB_TOKEN` / `GITHUB_REPO` (optional, both together) — back up both uploads (see
+     "GitHub backup for uploads" above) and live-document snapshots (see "Live document
+     persistence" above) to this repo. `GITHUB_REPO` can be this same `Tigrolino/Helixnotes-Live`
+     repo (uploads land under `attachments/<workspace>/...`, snapshots under
+     `snapshots/<workspace>.ydoc`, both well clear of the source tree) or a separate one — either
+     works. Without these, uploads and document persistence still work, just don't survive a
+     redeploy.
 6. Render terminates TLS at its edge, so the public URL is `wss://<your-service>.onrender.com` —
    that's what goes in HelixNotes's Settings → Collaboration → Server URL. The same host, with
    `https://` instead of `wss://`, is what the client uses for uploads - it derives that itself
    from the same Server URL setting, nothing extra to configure there.
 7. Render's free/starter plan has **no persistent disk** by default - a redeploy or restart wipes
-   anything `UPLOADS_DIR` saved locally. If you want uploads to survive that without relying on
-   GitHub backup, attach a paid Render Disk mounted at `UPLOADS_DIR`'s path instead (or in
-   addition) - GitHub backup and a persistent disk aren't mutually exclusive, either is enough on
-   its own.
+   anything `UPLOADS_DIR` or `DOC_SNAPSHOTS_DIR` saved locally. If you want uploads and live
+   documents to survive that without relying on GitHub backup, attach a paid Render Disk mounted
+   to cover both paths instead (or in addition) - GitHub backup and a persistent disk aren't
+   mutually exclusive, either is enough on its own.
 8. Every `git push` to `main` auto-deploys this service by default (Render watches the whole
    repo, not just `collab-server/`, so a HelixNotes-app-only commit will also trigger a redeploy
    of this service even though nothing here changed) - that's harmless, just a few seconds of
@@ -170,9 +195,6 @@ npm test   # builds, then spawns the server and exercises the relay: broadcast, 
 
 ## What's deliberately not here yet
 
-- No persistence for the live document content itself - the Yjs CRDT state is still only ever
-  in-memory (both here and in each client); only file/image uploads (above) have any durable
-  backup, and only once GITHUB_TOKEN/GITHUB_REPO are configured
 - No per-note routing within a workspace — a workspace is currently one shared broadcast group,
   not yet split per document (fine while there's only ever one test document, Stage 3/4's scope)
 - No per-user accounts — see the analysis doc §8 for why that's an explicit, later choice

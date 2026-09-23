@@ -1,15 +1,17 @@
-// HelixNotes collaboration server - Stage 2 transport + Stage 3 relay + Stage 5 file uploads.
+// HelixNotes collaboration server - Stage 2 transport + Stage 3 relay + Stage 5 file uploads +
+// Stage 6 live-document persistence.
 //
 // Scope (see the "HelixNotes Collaboration - Technical Analysis" doc, section 10): this server
 // authenticates a connection against a shared workspace password, then relays messages between
-// clients. It stays deliberately "dumb" about Yjs - it does not parse or understand the sync
-// protocol in src/lib/collab/syncProtocol.ts on the client, it just moves opaque frames between
-// the right sockets:
+// clients:
 //
 //   - Binary frames (Yjs sync-step/update messages, Stage 3+) are broadcast to every OTHER
-//     client currently authenticated into the same workspace. This is the real-time document
-//     sync channel: everything in-memory, nothing persisted here yet - the live Yjs document
-//     itself still has no durable store anywhere; only the plain-file uploads below do.
+//     client currently authenticated into the same workspace - this part is still a dumb,
+//     content-agnostic relay, unchanged since Stage 3. As of Stage 6, the server ALSO keeps one
+//     in-memory shadow Y.Doc per workspace up to date from those same frames (see "Live document
+//     persistence" further down) purely to save and restore state - it still has no idea what a
+//     "note" or a "notebook" is; a Yjs update is just an opaque, content-agnostic byte blob to it
+//     either way.
 //   - Text frames are still echoed back to the sender only, unchanged. This is Stage 2's original
 //     debug/proof-of-transport behavior (auth aside), kept as-is since nothing currently depends
 //     on relaying text between peers and collapsing it into the same broadcast path would change
@@ -38,9 +40,19 @@
 //     possible - consistent with this server's existing one-shared-secret-per-workspace model
 //     (see §8 of the analysis doc for why there's no per-user auth here at all).
 //
+// Stage 6 (live document persistence) keeps one in-memory Yjs document per workspace, fed purely
+// from the same binary frames the relay above already sees (decoding just the envelope - message
+// type 0/1/2 in src/lib/collab/syncProtocol.ts - never anything about notes or notebooks), and
+// saves it: debounced to local disk on every change, and - if GITHUB_TOKEN/GITHUB_REPO are set -
+// throttled and also pushed to that repo, at snapshots/<workspace>.ydoc. Whoever next connects to
+// that workspace (a reconnect, a fresh Render instance after a redeploy, everyone having left and
+// come back later) gets synced from that saved state, even if nobody else happens to be online at
+// that moment to sync from directly.
+//
 // This server's own disk is NOT durable (Render's free/starter filesystem is wiped on every
-// redeploy/restart) - GITHUB_TOKEN/GITHUB_REPO is what makes an upload survive that. Without
-// them, uploads still work, they just don't outlive the next deploy.
+// redeploy/restart) - GITHUB_TOKEN/GITHUB_REPO is what makes an upload, or a workspace's saved
+// document snapshot, survive that. Without them, both still work locally, they just don't outlive
+// the next deploy.
 
 // Load variables from a local .env file (see .env.example) into process.env, if one exists.
 // This must run before anything below reads process.env - nothing else in the module graph
@@ -53,6 +65,9 @@ import { timingSafeEqual, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { WebSocketServer, WebSocket, type RawData } from "ws";
+import * as Y from "yjs";
+import * as encoding from "lib0/encoding";
+import * as decoding from "lib0/decoding";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const COLLAB_PASSWORD = process.env.COLLAB_PASSWORD ?? "";
@@ -328,6 +343,230 @@ async function handleDownload(
   res.end(data);
 }
 
+// --- Stage 6: live document persistence ---
+//
+// See the module doc comment up top for the overview. This section only understands the same
+// envelope src/lib/collab/syncProtocol.ts already defines client-side (message type 0/1/2 are
+// sync step 1 / sync step 2 / update; type 3 is awareness - presence, not document content, and
+// is never touched here) - just enough to keep a shadow Y.Doc in sync and reply to a sync step 1
+// directly when nobody else is online to.
+const SYNC_STEP1 = 0;
+const SYNC_STEP2 = 1;
+const SYNC_UPDATE = 2;
+
+const DOC_SNAPSHOTS_DIR = process.env.DOC_SNAPSHOTS_DIR ?? "doc-snapshots";
+const DOC_SAVE_DEBOUNCE_MS = Number(process.env.DOC_SAVE_DEBOUNCE_MS ?? 2_000);
+const DOC_SAVE_MAX_DELAY_MS = Number(process.env.DOC_SAVE_MAX_DELAY_MS ?? 15_000);
+const DOC_GITHUB_SAVE_MIN_INTERVAL_MS = Number(process.env.DOC_GITHUB_SAVE_MIN_INTERVAL_MS ?? 60_000);
+
+/** One shadow Y.Doc per workspace, held for the life of the process once loaded. */
+const docs = new Map<string, Y.Doc>();
+const docLoadPromises = new Map<string, Promise<Y.Doc>>();
+const dirtySince = new Map<string, number>();
+const saveTimers = new Map<string, NodeJS.Timeout>();
+const lastGithubPush = new Map<string, number>();
+
+function docSnapshotPath(workspace: string): string {
+  return join(DOC_SNAPSHOTS_DIR, `${workspace}.ydoc`);
+}
+
+function githubApiHeaders(): Record<string, string> {
+  return {
+    Authorization: `Bearer ${GITHUB_TOKEN}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "User-Agent": "helixnotes-collab-server",
+  };
+}
+
+/** Fetches the currently-saved snapshot for `workspace` from the GitHub backup repo, or `null`
+ * if none exists there yet. Used both to hydrate a workspace on first join when local disk has
+ * nothing (e.g. a fresh Render instance right after a redeploy) and, inside
+ * pushSnapshotToGitHub, to find the sha an update has to reference. */
+async function fetchSnapshotFromGitHub(workspace: string): Promise<{ content: Buffer; sha: string } | null> {
+  const repoPath = `snapshots/${workspace}.ydoc`;
+  const res = await fetch(
+    `https://api.github.com/repos/${GITHUB_REPO}/contents/${repoPath}?ref=${encodeURIComponent(GITHUB_BRANCH)}`,
+    { headers: githubApiHeaders() },
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`GitHub API ${res.status}: ${text.slice(0, 300)}`);
+  }
+  const json = (await res.json()) as { content?: string; sha?: string };
+  if (!json.content || !json.sha) return null;
+  return { content: Buffer.from(json.content, "base64"), sha: json.sha };
+}
+
+/** Create-or-update the saved snapshot for `workspace` in the GitHub backup repo. Unlike an
+ * upload (pushToGitHub above), a snapshot lives at the same path every time it's saved, so
+ * updating it needs the existing file's sha - a plain create-only PUT would just fail once the
+ * file already exists there. */
+async function pushSnapshotToGitHub(workspace: string, content: Buffer): Promise<void> {
+  const repoPath = `snapshots/${workspace}.ydoc`;
+  const existing = await fetchSnapshotFromGitHub(workspace).catch(() => null);
+  const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${repoPath}`, {
+    method: "PUT",
+    headers: { ...githubApiHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message: `Update live document snapshot for workspace "${workspace}"`,
+      content: content.toString("base64"),
+      branch: GITHUB_BRANCH,
+      ...(existing ? { sha: existing.sha } : {}),
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`GitHub API ${res.status}: ${text.slice(0, 300)}`);
+  }
+}
+
+async function loadWorkspaceDoc(workspace: string): Promise<Y.Doc> {
+  const doc = new Y.Doc();
+  let snapshot: Buffer | null = null;
+  try {
+    snapshot = await readFile(docSnapshotPath(workspace));
+  } catch {
+    // No local snapshot - first time this workspace has been opened on this running instance,
+    // or a fresh disk after a Render redeploy. Fall through to GitHub below.
+  }
+  if (!snapshot && GITHUB_BACKUP_ENABLED) {
+    try {
+      const remote = await fetchSnapshotFromGitHub(workspace);
+      snapshot = remote?.content ?? null;
+    } catch (e) {
+      console.warn(
+        `[collab] could not check GitHub for a saved snapshot of workspace "${workspace}" (starting empty):`,
+        e,
+      );
+    }
+  }
+  if (snapshot && snapshot.length > 0) {
+    try {
+      Y.applyUpdate(doc, new Uint8Array(snapshot));
+      console.log(`[collab] restored workspace "${workspace}" from a saved snapshot (${snapshot.length} bytes)`);
+    } catch (e) {
+      console.error(`[collab] saved snapshot for workspace "${workspace}" failed to apply (starting empty):`, e);
+    }
+  }
+  return doc;
+}
+
+/** Returns the in-memory shadow doc for `workspace`, loading (and hydrating it from a saved
+ * snapshot, local or GitHub) first if this is the first time anyone's joined it on this running
+ * instance. Concurrent joins of the same brand-new workspace share one load instead of racing. */
+function ensureWorkspaceDocLoaded(workspace: string): Promise<Y.Doc> {
+  const existing = docs.get(workspace);
+  if (existing) return Promise.resolve(existing);
+  let pending = docLoadPromises.get(workspace);
+  if (!pending) {
+    pending = loadWorkspaceDoc(workspace).then((doc) => {
+      docs.set(workspace, doc);
+      docLoadPromises.delete(workspace);
+      return doc;
+    });
+    docLoadPromises.set(workspace, pending);
+  }
+  return pending;
+}
+
+/** Saves `workspace`'s current shadow-doc state to local disk, and - if GITHUB_BACKUP_ENABLED -
+ * also to the GitHub backup repo, throttled to at most once per DOC_GITHUB_SAVE_MIN_INTERVAL_MS
+ * unless `force` is set (used when the last peer leaves a workspace, and on shutdown, so a clean
+ * departure doesn't have to wait out the throttle window before it's actually safe). */
+async function flushWorkspace(workspace: string, opts: { force?: boolean } = {}): Promise<void> {
+  const timer = saveTimers.get(workspace);
+  if (timer) {
+    clearTimeout(timer);
+    saveTimers.delete(workspace);
+  }
+  dirtySince.delete(workspace);
+  const doc = docs.get(workspace);
+  if (!doc) return;
+
+  const snapshot = Buffer.from(Y.encodeStateAsUpdate(doc));
+  await mkdir(DOC_SNAPSHOTS_DIR, { recursive: true });
+  await writeFile(docSnapshotPath(workspace), snapshot);
+
+  if (GITHUB_BACKUP_ENABLED) {
+    const last = lastGithubPush.get(workspace) ?? 0;
+    if (opts.force || Date.now() - last >= DOC_GITHUB_SAVE_MIN_INTERVAL_MS) {
+      lastGithubPush.set(workspace, Date.now());
+      try {
+        await pushSnapshotToGitHub(workspace, snapshot);
+      } catch (e) {
+        console.error(`[collab] GitHub snapshot backup failed for workspace "${workspace}" (kept on local disk):`, e);
+      }
+    }
+  }
+}
+
+/** Debounces a save after a change: waits for DOC_SAVE_DEBOUNCE_MS of quiet, but never longer
+ * than DOC_SAVE_MAX_DELAY_MS after the first unsaved change, so a workspace under continuous
+ * editing (where a naive debounce timer would just keep getting reset and never fire) still gets
+ * saved periodically instead of only once editing finally pauses. */
+function scheduleSave(workspace: string): void {
+  if (!dirtySince.has(workspace)) dirtySince.set(workspace, Date.now());
+  const existingTimer = saveTimers.get(workspace);
+  if (existingTimer) clearTimeout(existingTimer);
+  const elapsed = Date.now() - dirtySince.get(workspace)!;
+  const delay = elapsed >= DOC_SAVE_MAX_DELAY_MS ? 0 : DOC_SAVE_DEBOUNCE_MS;
+  saveTimers.set(
+    workspace,
+    setTimeout(() => {
+      saveTimers.delete(workspace);
+      flushWorkspace(workspace).catch((e) => console.error(`[collab] failed to save workspace "${workspace}":`, e));
+    }, delay),
+  );
+}
+
+/** `ws` hands binary messages back as a Buffer by default (this server sets no streaming/
+ * fragmentation options) - ArrayBuffer/Buffer[] are handled too, defensively. */
+function toUint8Array(data: RawData): Uint8Array {
+  if (Buffer.isBuffer(data)) return new Uint8Array(data.buffer, data.byteOffset, data.length);
+  if (Array.isArray(data)) return new Uint8Array(Buffer.concat(data));
+  return new Uint8Array(data as ArrayBuffer);
+}
+
+/** Applies one incoming binary frame to `workspace`'s shadow doc for persistence, and - for a
+ * sync step 1 - replies to the sender directly from that shadow doc. This second part is what
+ * makes a lone client (nobody else currently online in the workspace) actually get their content
+ * back instead of starting blank: the broadcastToWorkspace() call the caller already made right
+ * before this only reaches other *currently connected* peers, which is nobody the moment you're
+ * the only one there. The caller wraps this in try/catch - a malformed or unrecognized frame here
+ * must never break the raw relay above it. */
+function handleDocMessage(workspace: string, sender: CollabSocket, bytes: Uint8Array): void {
+  const doc = docs.get(workspace);
+  if (!doc) return;
+  const decoder = decoding.createDecoder(bytes);
+  const messageType = decoding.readVarUint(decoder);
+  switch (messageType) {
+    case SYNC_STEP1: {
+      const remoteStateVector = decoding.readVarUint8Array(decoder);
+      const diff = Y.encodeStateAsUpdate(doc, remoteStateVector);
+      if (diff.length > 0 && sender.readyState === WebSocket.OPEN) {
+        const encoder = encoding.createEncoder();
+        encoding.writeVarUint(encoder, SYNC_STEP2);
+        encoding.writeVarUint8Array(encoder, diff);
+        sender.send(encoding.toUint8Array(encoder), { binary: true });
+      }
+      break;
+    }
+    case SYNC_STEP2:
+    case SYNC_UPDATE: {
+      const update = decoding.readVarUint8Array(decoder);
+      Y.applyUpdate(doc, update);
+      scheduleSave(workspace);
+      break;
+    }
+    default:
+      // Awareness (presence/cursors) or an unrecognized future type - not document content,
+      // nothing to persist.
+      break;
+  }
+}
+
 function requestHandler(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
 
@@ -389,7 +628,14 @@ function leaveWorkspace(workspace: string | null, socket: CollabSocket) {
   const members = workspaces.get(workspace);
   if (!members) return;
   members.delete(socket);
-  if (members.size === 0) workspaces.delete(workspace);
+  if (members.size === 0) {
+    workspaces.delete(workspace);
+    // Nobody's left to keep this workspace's document moving via live edits - get whatever's
+    // unsaved onto disk (and GitHub) now rather than waiting out the normal debounce/throttle.
+    flushWorkspace(workspace, { force: true }).catch((e) =>
+      console.error(`[collab] failed to flush workspace "${workspace}" after the last peer left:`, e),
+    );
+  }
 }
 
 /** Broadcast a binary frame to every other authenticated client in `workspace`. */
@@ -432,19 +678,37 @@ wss.on("connection", (socket: CollabSocket, req: IncomingMessage) => {
         socket.close(4001, "Invalid workspace or password");
         return;
       }
-      state.authenticated = true;
-      state.workspace = parsed.workspace;
-      joinWorkspace(parsed.workspace, socket);
+      const workspace = parsed.workspace;
       clearTimeout(authTimer);
-      console.log(`[collab] ${remote} authenticated for workspace "${parsed.workspace}"`);
-      socket.send(JSON.stringify({ type: "connected" }));
+      // Load (or hydrate from a saved snapshot) this workspace's shadow document before telling
+      // the client they're connected, so it's ready the moment their first sync step 1 arrives.
+      ensureWorkspaceDocLoaded(workspace)
+        .then(() => {
+          if (socket.readyState !== WebSocket.OPEN) return; // client gave up while we were loading
+          state.authenticated = true;
+          state.workspace = workspace;
+          joinWorkspace(workspace, socket);
+          console.log(`[collab] ${remote} authenticated for workspace "${workspace}"`);
+          socket.send(JSON.stringify({ type: "connected" }));
+        })
+        .catch((e) => {
+          console.error(`[collab] failed to load workspace "${workspace}":`, e);
+          socket.close(1011, "Failed to load workspace state");
+        });
       return;
     }
 
     if (isBinary) {
-      // Stage 3: relay Yjs sync/update frames to this client's workspace peers. The server does
-      // not parse these - see the module doc comment above.
+      // Stage 3: relay Yjs sync/update frames to this client's workspace peers - still a dumb,
+      // content-agnostic broadcast, unchanged.
       broadcastToWorkspace(state.workspace!, socket, data);
+      // Stage 6: also feed the same frame to this workspace's shadow doc for persistence (and
+      // reply directly if it's a sync step 1 - see handleDocMessage's doc comment for why).
+      try {
+        handleDocMessage(state.workspace!, socket, toUint8Array(data));
+      } catch (e) {
+        console.error(`[collab] failed to process a sync message for workspace "${state.workspace}":`, e);
+      }
     } else {
       // Stage 2's original debug/proof-of-transport behavior: echo text frames to the sender.
       socket.send(data, { binary: false });
@@ -489,8 +753,18 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     console.log(`[collab] received ${signal}, shutting down`);
     clearInterval(heartbeat);
-    wss.close(() => httpServer.close(() => process.exit(0)));
-    // Force-exit if graceful shutdown hangs (e.g. a client refusing to close).
-    setTimeout(() => process.exit(0), 5000).unref();
+    // Best-effort: save every workspace's current state before closing, so a restart or redeploy
+    // doesn't lose whatever hadn't hit the debounced save yet. Bounded by the force-exit fallback
+    // below either way, so this can't hang the shutdown indefinitely.
+    const flushes = Array.from(docs.keys()).map((workspace) =>
+      flushWorkspace(workspace, { force: true }).catch((e) =>
+        console.error(`[collab] failed to flush workspace "${workspace}" on shutdown:`, e),
+      ),
+    );
+    Promise.allSettled(flushes).finally(() => {
+      wss.close(() => httpServer.close(() => process.exit(0)));
+    });
+    // Force-exit if graceful shutdown (including the flush above) hangs.
+    setTimeout(() => process.exit(0), 8000).unref();
   });
 }
