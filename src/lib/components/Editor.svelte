@@ -4712,6 +4712,18 @@
 		if ($appConfig?.enable_wiki_links) {
 			refreshWikiLinkTitles();
 		}
+		// Live notes: focus immediately so this peer's cursor is broadcast to everyone else as
+		// soon as the note is opened, rather than only after they click into the text.
+		// CollaborationCaret's yCursorPlugin (from @tiptap/y-tiptap) only broadcasts a cursor
+		// position while the ProseMirror view actually has focus - simply having a live note open
+		// and visible was never enough, so without this, a peer who opens a note to read it never
+		// shows a cursor to anyone else at all, which is very likely why cursors looked broken:
+		// nothing was wrong with the sync/rendering, nobody's client had ever sent one.
+		// Skip on mobile - focusing a contenteditable pops the virtual keyboard, which would fire
+		// just from opening a note to read it, not because anyone asked to type.
+		if (liveFieldId && !isMobile) {
+			requestAnimationFrame(() => editor?.commands.focus());
+		}
 	}
 
 	export function toggleOutlinePanel() {
