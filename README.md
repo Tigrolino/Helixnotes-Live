@@ -13,7 +13,7 @@ No cloud, no lock-in - collaboration is opt-in and runs through a small, self-ho
 
 ## AI notice
 
-This fork was entirely coded with AI. I've reviewed every function and made sure I understand and
+This fork was coded with AI. I've reviewed every function and made sure I understand and
 approve of the changes, but there may still be issues I haven't discovered - if you come across
 anything that seems incorrect or broken, please report it to me.
 
