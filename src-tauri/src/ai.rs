@@ -535,7 +535,14 @@ async fn stream_ollama_generate(
         "stream": true,
         "options": {
             "num_predict": max_tokens,
-            "stop": ["\n\n"]
+            "stop": ["\n\n"],
+            // Ghost-text should guess the single most likely continuation, not go looking
+            // for an interesting one - a low temperature and top_p keep it close to the
+            // obvious next word(s) instead of wandering into an unrelated story or a
+            // quiz/worksheet-style tangent, which is what it did at the model's normal
+            // (higher, chat-oriented) default sampling settings.
+            "temperature": 0.2,
+            "top_p": 0.85
         }
     });
 

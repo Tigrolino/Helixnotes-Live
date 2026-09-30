@@ -204,8 +204,11 @@
 	const ghostTextPluginKey = new PluginKey('ghostText');
 	let ghostTextTimer: ReturnType<typeof setTimeout> | null = null;
 	let ghostTextGeneration = 0;
-	const GHOST_TEXT_DEBOUNCE_MS = 200;
-	const GHOST_TEXT_CONTEXT_CHARS = 600;
+	const GHOST_TEXT_DEBOUNCE_MS = 150;
+	const GHOST_TEXT_CONTEXT_CHARS = 400;
+	// Below this many real characters before the cursor (anywhere in the note, not just the
+	// current paragraph), don't even ask - there's nothing to actually continue yet.
+	const GHOST_TEXT_MIN_CONTEXT_CHARS = 20;
 	// What a lookahead fetch (kicked off right after showing a suggestion, in case the user
 	// accepts it) found for "the word(s) after this suggestion" - keyed to the document
 	// position it would apply at, so accept only uses it if nothing else happened in between.
@@ -441,13 +444,18 @@
 		}
 	}
 
-	// Inline arithmetic: "3+3" or "3-1" at the cursor gets an instant "=6"/"=2" suggestion
-	// computed locally, no AI call involved. A trailing "=" the user already typed (e.g. "3+3=")
-	// gets just "6". It's just a gray hint until Tab accepts it, so a stray match on something
-	// like "555-1234" is harmless to show - the one thing worth filtering out is a match that
-	// would actively mislead, so date-shaped text ("2024-01-15", "3/4/2024") is still excluded.
+	// Inline arithmetic: "3+3" at the cursor gets an instant "=6" suggestion computed locally,
+	// no AI call involved. A trailing "=" the user already typed (e.g. "3+3=") gets just "6".
+	// '+'/'*'/'×' trigger without spaces since they're rarely ambiguous next to digits; '-'
+	// and '/' need spaces around them, or this fires on every phone number ("555-1234"), page
+	// range ("10-15"), score ("3-2"), or version string ("3-2-1") that has nothing to do with
+	// arithmetic - showing a "result" for one of those just reads as a random number popping up
+	// for no reason. Date-shaped matches ("2024-01-15", "3/4/2024") are excluded outright too.
+	// Also matches × (not just *): the Typography extension used elsewhere in this file
+	// silently rewrites "3*3"/"3x3" into "3×3" via an input rule, so by the time this code
+	// reads the text, a literal "*" may already be gone.
 	const MATH_NUM = String.raw`(?:\d+(?:\.\d+)?|\([^()]*\))`;
-	const MATH_OP = String.raw`(?:\s*[+\-*/]\s*)`;
+	const MATH_OP = String.raw`(?:\s*[+*×]\s*|\s+-\s+|\s+/\s+)`;
 	const MATH_EXPR_RE = new RegExp(
 		String.raw`(?:^|[\s:;,([{])([-+]?${MATH_NUM}(?:${MATH_OP}${MATH_NUM})+)\s*(=)?\s*$`
 	);
@@ -492,11 +500,11 @@
 			for (;;) {
 				skipSpace();
 				const op = peek();
-				if (op === '*' || op === '/') {
+				if (op === '*' || op === '×' || op === '/') {
 					i++;
 					const rhs = parseFactor();
 					if (rhs === null) return null;
-					if (op === '*') v = v * rhs;
+					if (op === '*' || op === '×') v = v * rhs;
 					else {
 						if (rhs === 0) return null;
 						v = v / rhs;
@@ -569,6 +577,11 @@
 			return;
 		}
 		if (!$appConfig?.ai_provider) return;
+		// With almost nothing written yet, the model has nothing real to continue and tends to
+		// free-associate into an unrelated story or quiz-style tangent instead - require enough
+		// context anywhere before the cursor (not just this paragraph) to actually ground a guess.
+		const totalContextSoFar = editor.state.doc.textBetween(0, pos, '\n', '\n').trim().length;
+		if (totalContextSoFar < GHOST_TEXT_MIN_CONTEXT_CHARS) return;
 		ghostTextTimer = setTimeout(() => {
 			ghostTextTimer = null;
 			requestGhostTextSuggestion(generation, pos);
