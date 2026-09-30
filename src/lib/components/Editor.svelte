@@ -37,7 +37,7 @@
 	import { Extension, Node as TiptapNode, Mark as TiptapMark, mergeAttributes } from '@tiptap/core';
 	import { Plugin, PluginKey, EditorState, Selection, TextSelection } from '@tiptap/pm/state';
 	import { Decoration, DecorationSet } from '@tiptap/pm/view';
-	import { DOMSerializer } from '@tiptap/pm/model';
+	import { DOMSerializer, Node as ProseMirrorNode } from '@tiptap/pm/model';
 	import { convertFileSrc } from '@tauri-apps/api/core';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { readFile } from '@tauri-apps/plugin-fs';
@@ -296,13 +296,24 @@
 		},
 	});
 
-	// Offline spelling-correction: flags the word immediately before the cursor when it's not in
-	// the bundled dictionary, with a suggested single-word fix shown inline and accepted with Tab -
-	// same Tab-to-accept feel as ghost-text, but entirely local (no AI provider needed, works with
-	// none configured at all - see $lib/editor/spellcheck.ts). Registered before GhostTextPlugin in
-	// buildExtensions() so its handleKeyDown gets first refusal on Tab: a pending spelling
-	// correction takes priority over a pending AI completion when both happen to be showing. Off
-	// for live notes (v1 scope), same as ghost-text.
+	// Offline spelling-correction: underlines every misspelled word in the note (checked against
+	// the bundled dictionary, static/dictionaries/en.txt) the way a word processor's background
+	// spellchecker does - not just the word you're actively typing. A debounced whole-document
+	// scan keeps those underlines in place (remapped across edits, same as any ProseMirror
+	// decoration) as `errors` in the plugin state below.
+	//
+	// The *active* suggestion - the one word Tab will actually fix right now, shown in a small
+	// floating badge under it - is deliberately NOT cached in plugin state across keystrokes.
+	// An earlier version stored {from, to, suggestion} once and trusted it until the next edit
+	// invalidated it, and in practice that position went stale badly enough to corrupt text on
+	// accept (Tab replacing the wrong span and gluing words together with no space). Instead,
+	// computeActiveSpellFix() below is called fresh - both by decorations() for the badge and by
+	// the Tab handler for the actual edit - so there is no window where a stored position can
+	// disagree with the live document; "what Tab will do" and "what Tab does" are the same call.
+	//
+	// Entirely local: no AI provider needed, works with none configured at all. Registered before
+	// GhostTextPlugin in buildExtensions() so its handleKeyDown gets first refusal on Tab. Off for
+	// live notes (v1 scope), same as ghost-text.
 	const spellCheckPluginKey = new PluginKey('spellCheck');
 	// Matches the word that a just-typed boundary character (space, punctuation...) completed,
 	// right at the end of the text before the cursor - letters and apostrophes (straight or the
@@ -312,6 +323,41 @@
 	// no-match/mid-word input) before being wired in here.
 	const SPELL_CHECK_BOUNDARY_RE = /([A-Za-z'\u2019]+)([ \t\n.,!?;:()[\]{}"*_~/\\\u2013\u2014]+)$/;
 	const SPELL_CHECK_LOOKBACK_CHARS = 100;
+	// Matches one word anywhere in a text node, for the whole-document scan - same letter/
+	// apostrophe run as above but with no trailing-boundary requirement (used with the `g` flag
+	// to walk every word in a block, not just the one right before the cursor).
+	const SPELL_CHECK_WORD_RE = /[A-Za-z'\u2019]+/g;
+	const SPELL_CHECK_SCAN_DEBOUNCE_MS = 400;
+	let spellCheckScanTimer: ReturnType<typeof setTimeout> | null = null;
+
+	/** Fresh, synchronous check of the word right before the cursor - the same boundary-match
+	 *  logic that used to live in scheduleSpellCheck(), but called on demand (from decorations()
+	 *  and from the Tab handler) instead of cached, so its result can never be stale relative to
+	 *  `state`. Returns null if spell-check is off, the dictionary isn't loaded yet, the selection
+	 *  isn't a plain cursor, there's no completed word right before it, or that word is fine. */
+	function computeActiveSpellFix(state: EditorState): { from: number; to: number; suggestion: string } | null {
+		if (!$appConfig?.spell_check_enabled || !isDictionaryReady()) return null;
+		const sel = state.selection;
+		if (!sel.empty) return null;
+		const pos = sel.from;
+		const lookbackStart = Math.max(0, pos - SPELL_CHECK_LOOKBACK_CHARS);
+		const context = state.doc.textBetween(lookbackStart, pos, '\n', '\n');
+		const m = context.match(SPELL_CHECK_BOUNDARY_RE);
+		if (!m) return null;
+		const rawWord = m[1];
+		const boundaryLen = m[2].length;
+		const trailMatch = rawWord.match(/['\u2019]+$/);
+		const trimTrail = trailMatch ? trailMatch[0].length : 0;
+		const word = rawWord.slice(0, rawWord.length - trimTrail);
+		if (!word) return null;
+		const wordEndRel = context.length - boundaryLen - trimTrail;
+		const wordStartRel = wordEndRel - word.length;
+		const from = lookbackStart + wordStartRel;
+		const to = lookbackStart + wordEndRel;
+		const suggestion = suggestCorrection(word);
+		if (!suggestion) return null;
+		return { from, to, suggestion };
+	}
 
 	const SpellCheckPlugin = Extension.create({
 		name: 'spellCheck',
@@ -320,45 +366,57 @@
 				new Plugin({
 					key: spellCheckPluginKey,
 					state: {
-						init: () => null as { from: number; to: number; suggestion: string } | null,
-						apply(tr, value) {
+						init: () => DecorationSet.empty,
+						apply(tr, decoSet) {
+							// Remapped, not recomputed, so typing anywhere else in the note doesn't make
+							// every other underline flicker off and wait for the next debounced scan -
+							// same as a word processor's spellcheck shifting its existing underlines with
+							// your edits instead of clearing them.
+							const mapped = decoSet.map(tr.mapping, tr.doc);
 							const meta = tr.getMeta(spellCheckPluginKey);
-							if (meta) return meta.type === 'clear' ? null : { from: meta.from, to: meta.to, suggestion: meta.suggestion };
-							if (!value) return null;
-							// Same invalidation rule as ghost-text: any real edit or cursor move means this
-							// suggestion was computed for a document that no longer looks like this.
-							if (tr.docChanged || tr.selectionSet) return null;
-							return value;
+							if (!meta) return mapped;
+							if (meta.type === 'clear') return DecorationSet.empty;
+							// 'setErrors': a fresh whole-document scan result replaces the mapped set
+							// outright (it was computed from tr.doc, the current document, so it's not
+							// missing anything the mapped-forward version would have).
+							return DecorationSet.create(tr.doc, (meta.ranges as { from: number; to: number }[]).map((r) =>
+								Decoration.inline(r.from, r.to, { class: 'spell-error' })));
 						},
 					},
 					props: {
 						decorations(state) {
-							const value = spellCheckPluginKey.getState(state);
-							if (!value) return null;
-							const widget = document.createElement('span');
-							widget.className = 'spell-suggestion';
-							widget.textContent = ` \u2192 ${value.suggestion}`;
-							widget.setAttribute('contenteditable', 'false');
-							return DecorationSet.create(state.doc, [
-								Decoration.inline(value.from, value.to, { class: 'spell-error' }),
-								Decoration.widget(value.to, widget, { side: 1 }),
+							const decoSet = spellCheckPluginKey.getState(state) as DecorationSet | undefined;
+							const base = decoSet ?? DecorationSet.empty;
+							const active = computeActiveSpellFix(state);
+							if (!active) return base;
+							// Zero-width anchor so the badge floats under the word instead of pushing the
+							// rest of the line over - an earlier version used an inline widget that took
+							// up real space in the text flow and could visibly splice itself into text
+							// right next to it.
+							const anchor = document.createElement('span');
+							anchor.className = 'spell-suggestion-anchor';
+							anchor.setAttribute('contenteditable', 'false');
+							const badge = document.createElement('span');
+							badge.className = 'spell-suggestion-badge';
+							badge.textContent = active.suggestion;
+							anchor.appendChild(badge);
+							// Also decorate the active word directly, in case the debounced whole-
+							// document scan hasn't caught up to it yet - decorations don't mind the same
+							// range being added twice.
+							return base.add(state.doc, [
+								Decoration.inline(active.from, active.to, { class: 'spell-error' }),
+								Decoration.widget(active.to, anchor, { side: 1 }),
 							]);
 						},
-						handleKeyDown(_view, event) {
-							const value = spellCheckPluginKey.getState(_view.state);
-							if (!value) return false;
-							if (event.key === 'Escape') {
-								clearSpellCheckSuggestion();
-								return true;
-							}
-							if (event.key === 'Tab' && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey) {
-								// Defer to an autocomplete popup that's already claiming Tab for itself.
-								if (slashMenu || wikiLinkMenu || taskMetaMenu) return false;
-								event.preventDefault();
-								acceptSpellCorrection();
-								return true;
-							}
-							return false;
+						handleKeyDown(view, event) {
+							if (event.key !== 'Tab' || event.shiftKey || event.altKey || event.metaKey || event.ctrlKey) return false;
+							// Defer to an autocomplete popup that's already claiming Tab for itself.
+							if (slashMenu || wikiLinkMenu || taskMetaMenu) return false;
+							const active = computeActiveSpellFix(view.state);
+							if (!active) return false;
+							event.preventDefault();
+							editor?.chain().focus().insertContentAt({ from: active.from, to: active.to }, active.suggestion).run();
+							return true;
 						},
 					},
 				}),
@@ -366,63 +424,69 @@
 		},
 	});
 
-	function clearSpellCheckSuggestion() {
-		if (editor && !editor.isDestroyed && spellCheckPluginKey.getState(editor.state)) {
+	/** Walks every text node in the document (skipping code blocks - code isn't prose) looking
+	 *  for misspelled words, the same way computeActiveSpellFix() checks the one word before the
+	 *  cursor. Returns plain {from,to} ranges rather than decorations so the caller can hand them
+	 *  to the plugin as transaction meta. */
+	function scanDocumentForMisspellings(doc: ProseMirrorNode): { from: number; to: number }[] {
+		const ranges: { from: number; to: number }[] = [];
+		doc.descendants((node, pos) => {
+			if (node.type.name === 'codeBlock') return false;
+			if (!node.isText || !node.text) return true;
+			const text = node.text;
+			SPELL_CHECK_WORD_RE.lastIndex = 0;
+			let m: RegExpExecArray | null;
+			while ((m = SPELL_CHECK_WORD_RE.exec(text)) !== null) {
+				const raw = m[0];
+				const leadMatch = raw.match(/^['\u2019]+/);
+				const trimLead = leadMatch ? leadMatch[0].length : 0;
+				const trailMatch = raw.match(/['\u2019]+$/);
+				const trimTrail = trailMatch ? trailMatch[0].length : 0;
+				const word = raw.slice(trimLead, raw.length - trimTrail);
+				if (!word) continue;
+				if (suggestCorrection(word)) {
+					const from = pos + m.index + trimLead;
+					ranges.push({ from, to: from + word.length });
+				}
+			}
+			return true;
+		});
+		return ranges;
+	}
+
+	function clearAllSpellCheck() {
+		if (editor && !editor.isDestroyed) {
 			editor.view.dispatch(editor.state.tr.setMeta(spellCheckPluginKey, { type: 'clear' }));
 		}
 	}
 
-	function acceptSpellCorrection(): boolean {
-		if (!editor) return false;
-		const value = spellCheckPluginKey.getState(editor.state) as { from: number; to: number; suggestion: string } | null;
-		if (!value) return false;
-		editor.chain().focus().insertContentAt({ from: value.from, to: value.to }, value.suggestion).run();
-		return true;
+	function runSpellCheckScan() {
+		if (!editor || editor.isDestroyed || boundLiveFieldId) return;
+		if (!$appConfig?.spell_check_enabled || !isDictionaryReady()) {
+			clearAllSpellCheck();
+			return;
+		}
+		// A very large note (isLargeDoc, >100k characters - the same threshold the math-block
+		// renderer uses to skip its own expensive work) skips the background full-document scan;
+		// the instant per-word check as you type (computeActiveSpellFix() above) still runs.
+		if (isLargeDoc) return;
+		const ranges = scanDocumentForMisspellings(editor.state.doc);
+		editor.view.dispatch(editor.state.tr.setMeta(spellCheckPluginKey, { type: 'setErrors', ranges }));
 	}
 
-	/** Called on every editor update, right after scheduleGhostTextSuggestion() - checks whether
-	 *  the word a just-typed boundary character completed is misspelled, and shows a suggested
-	 *  fix if so. Purely local (a Set lookup plus, on a miss, a small edit-distance search - see
-	 *  $lib/editor/spellcheck.ts) and synchronous, so unlike ghost-text this needs no debouncing
-	 *  or AI provider - it only needs the dictionary to have finished loading. */
-	function scheduleSpellCheck() {
-		if (!editor || editor.isDestroyed || boundLiveFieldId || editor.view.composing) return;
-		if (!$appConfig?.spell_check_enabled || !isDictionaryReady()) {
-			clearSpellCheckSuggestion();
-			return;
-		}
-		const sel = editor.state.selection;
-		if (!sel.empty) {
-			clearSpellCheckSuggestion();
-			return;
-		}
-		const pos = sel.from;
-		const lookbackStart = Math.max(0, pos - SPELL_CHECK_LOOKBACK_CHARS);
-		const context = editor.state.doc.textBetween(lookbackStart, pos, '\n', '\n');
-		const m = context.match(SPELL_CHECK_BOUNDARY_RE);
-		if (!m) {
-			clearSpellCheckSuggestion();
-			return;
-		}
-		const rawWord = m[1];
-		const boundaryLen = m[2].length;
-		const trailMatch = rawWord.match(/['\u2019]+$/);
-		const trimTrail = trailMatch ? trailMatch[0].length : 0;
-		const word = rawWord.slice(0, rawWord.length - trimTrail);
-		if (!word) {
-			clearSpellCheckSuggestion();
-			return;
-		}
-		const wordEndRel = context.length - boundaryLen - trimTrail;
-		const wordStartRel = wordEndRel - word.length;
-		const from = lookbackStart + wordStartRel;
-		const to = lookbackStart + wordEndRel;
-		const suggestion = suggestCorrection(word);
-		if (!suggestion) {
-			clearSpellCheckSuggestion();
-			return;
-		}
-		editor.view.dispatch(editor.state.tr.setMeta(spellCheckPluginKey, { type: 'set', from, to, suggestion }));
+	/** Debounced whole-document spelling scan, like a word processor's background spellcheck -
+	 *  underlines every misspelled word in the note, not just the one at the cursor. Called on
+	 *  every editor update (debounced so fast typing doesn't re-walk the whole document on every
+	 *  keystroke) and once immediately whenever a note finishes loading or the dictionary finishes
+	 *  loading, so underlines are already there instead of only appearing once you start typing. */
+	function scheduleSpellCheckScan() {
+		if (spellCheckScanTimer) { clearTimeout(spellCheckScanTimer); spellCheckScanTimer = null; }
+		if (!editor || editor.isDestroyed || boundLiveFieldId) return;
+		if (!$appConfig?.spell_check_enabled) return;
+		spellCheckScanTimer = setTimeout(() => {
+			spellCheckScanTimer = null;
+			runSpellCheckScan();
+		}, SPELL_CHECK_SCAN_DEBOUNCE_MS);
 	}
 
 	function clearGhostSuggestion() {
@@ -4089,6 +4153,7 @@
 					editor.view.dispatch(tr);
 				}
 				isLoadingNote = false;
+				scheduleSpellCheckScan();
 			});
 		}
 		if ($sourceMode) {
@@ -5436,11 +5501,11 @@
 				if (!isMobile && showOutline) scheduleOutline();
 				if (showInfo) scheduleCounts();
 				scheduleGhostTextSuggestion();
-				scheduleSpellCheck();
+				scheduleSpellCheckScan();
 			},
 		});
 		editorReady = true;
-		loadDictionary();
+		loadDictionary().then(() => scheduleSpellCheckScan());
 		// Pre-load note titles for wiki-link autocomplete
 		if ($appConfig?.enable_wiki_links) {
 			refreshWikiLinkTitles();
@@ -10977,12 +11042,35 @@
 		text-underline-offset: 3px;
 	}
 
-	:global(.tiptap-wrapper .tiptap .spell-suggestion) {
+	/* Zero-width, out-of-flow anchor for the active spelling suggestion's badge - `display:
+	   inline-block; width: 0` keeps it from taking any space in the text flow (so it can never
+	   glue itself into the word it's anchored to or push later text over, the way an earlier
+	   in-flow version of this widget did), while `position: relative` gives the badge inside it
+	   something to position itself against. */
+	:global(.tiptap-wrapper .tiptap .spell-suggestion-anchor) {
+		position: relative;
+		display: inline-block;
+		width: 0;
+		overflow: visible;
+		white-space: nowrap;
+		vertical-align: baseline;
+	}
+
+	:global(.tiptap-wrapper .tiptap .spell-suggestion-badge) {
+		position: absolute;
+		left: 0;
+		top: 1.4em;
+		z-index: 5;
 		color: var(--warning);
-		opacity: 0.85;
+		background: var(--bg-primary);
+		border: 1px solid var(--warning);
+		border-radius: 4px;
+		padding: 1px 5px;
+		font-size: 0.8em;
+		opacity: 0.95;
+		white-space: nowrap;
 		pointer-events: none;
 		user-select: none;
-		white-space: pre-wrap;
 	}
 
 	:global(.tiptap-wrapper .tiptap > .is-empty::before) {
