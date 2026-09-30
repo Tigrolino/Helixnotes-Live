@@ -10267,10 +10267,17 @@
 		padding-left: 2px;
 	}
 
-	/* Suppress placeholder on task list / details / callout containers - it overlaps their own UI (checkbox, toggle, callout header) */
+	/* Suppress placeholder on task list / details / callout / list / blockquote containers - it overlaps their own UI
+	   (checkbox, toggle, callout header, list marker, quote bar). Placeholder's includeChildren option marks a
+	   deeply-empty container node "is-empty" in addition to the empty textblock inside it, so without this the
+	   generic rule above shows the placeholder text twice, floated on top of each other - e.g. typing "1. " to
+	   start a numbered list leaves "Start writing..." floating over the "1." marker instead of disappearing. */
 	:global(.tiptap-wrapper .tiptap > ul[data-type="taskList"].is-empty::before),
 	:global(.tiptap-wrapper .tiptap > [data-type="details"].is-empty::before),
-	:global(.tiptap-wrapper .tiptap > .callout.is-empty::before) {
+	:global(.tiptap-wrapper .tiptap > .callout.is-empty::before),
+	:global(.tiptap-wrapper .tiptap > ol.is-empty::before),
+	:global(.tiptap-wrapper .tiptap > ul:not([data-type="taskList"]).is-empty::before),
+	:global(.tiptap-wrapper .tiptap > blockquote.is-empty::before) {
 		content: none;
 	}
 
