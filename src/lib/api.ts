@@ -563,11 +563,12 @@ export async function setAiSettings(
   openaiCompatibleBaseUrl: string | null = null,
   openaiCompatibleApiKey: string | null = null,
   ghostTextEnabled: boolean = false,
+  ghostTextMaxWords: number = 1,
 ): Promise<void> {
   return invoke("set_ai_settings", {
     provider, apiKey, model, writingStyle, baseUrl,
     ollamaApiKey, openaiCompatibleBaseUrl, openaiCompatibleApiKey,
-    ghostTextEnabled,
+    ghostTextEnabled, ghostTextMaxWords,
   });
 }
 

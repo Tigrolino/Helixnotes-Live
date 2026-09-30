@@ -216,6 +216,7 @@
 	let aiModel = $state($appConfig?.ai_model ?? 'claude-sonnet-4-6');
 	let aiWritingStyle = $state($appConfig?.ai_writing_style ?? '');
 	let ghostTextEnabled = $state($appConfig?.ghost_text_enabled ?? false);
+	let ghostTextMaxWords = $state($appConfig?.ghost_text_max_words ?? 1);
 	let aiShowKey = $state(false);
 	let aiShowCompatibleKey = $state(false);
 	let aiShowOllamaKey = $state(false);
@@ -247,6 +248,7 @@
 			_openaiCompatibleBaseUrl || null,
 			_openaiCompatibleKey || null,
 			ghostTextEnabled,
+			ghostTextMaxWords,
 		);
 		if ($appConfig) {
 			$appConfig = {
@@ -261,6 +263,7 @@
 				ai_model: aiModel,
 				ai_writing_style: aiWritingStyle || null,
 				ghost_text_enabled: ghostTextEnabled,
+				ghost_text_max_words: ghostTextMaxWords,
 			};
 		}
 	}
@@ -2352,6 +2355,12 @@
 											<span class="toggle-knob"></span>
 										</button>
 									</label>
+									<div class="setting-options" style="margin-top: 10px;">
+										<button class="option-btn" class:active={ghostTextMaxWords === 1} onclick={() => { if (ghostTextMaxWords === 1) return; ghostTextMaxWords = 1; saveAiSettings(); }}>1 word</button>
+										<button class="option-btn" class:active={ghostTextMaxWords === 2} onclick={() => { if (ghostTextMaxWords === 2) return; ghostTextMaxWords = 2; saveAiSettings(); }}>2 words</button>
+										<button class="option-btn" class:active={ghostTextMaxWords === 3} onclick={() => { if (ghostTextMaxWords === 3) return; ghostTextMaxWords = 3; saveAiSettings(); }}>3 words</button>
+									</div>
+									<p class="setting-hint">How much of a suggestion to show at once. Lower is closer to what you were actually about to type; higher lets it finish more of the thought for you.</p>
 								</div>
 
 								<div class="settings-section">

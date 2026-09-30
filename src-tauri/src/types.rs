@@ -242,6 +242,10 @@ pub struct AppConfig {
     pub ai_writing_style: Option<String>,
     #[serde(default)]
     pub ghost_text_enabled: bool,
+    // How many words (1-3) a ghost-text/math suggestion shows at once; the frontend clamps
+    // this range and sizes its max_tokens request from it.
+    #[serde(default = "default_ghost_text_max_words")]
+    pub ghost_text_max_words: u32,
     #[serde(default)]
     pub default_view_mode: bool,
     #[serde(default)]
@@ -317,6 +321,10 @@ fn default_ai_model() -> String {
     "claude-sonnet-4-6".to_string()
 }
 
+fn default_ghost_text_max_words() -> u32 {
+    1
+}
+
 fn default_system_light_theme() -> String {
     "light".to_string()
 }
@@ -377,6 +385,7 @@ impl Default for AppConfig {
             ai_model: "claude-sonnet-4-6".to_string(),
             ai_writing_style: None,
             ghost_text_enabled: false,
+            ghost_text_max_words: 1,
             default_view_mode: false,
             new_notes_in_source_mode: false,
             show_tray_icon: false,

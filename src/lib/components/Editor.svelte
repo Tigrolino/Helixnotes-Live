@@ -205,8 +205,22 @@
 	let ghostTextTimer: ReturnType<typeof setTimeout> | null = null;
 	let ghostTextGeneration = 0;
 	const GHOST_TEXT_DEBOUNCE_MS = 700;
-	const GHOST_TEXT_MAX_TOKENS = 48;
 	const GHOST_TEXT_CONTEXT_CHARS = 1500;
+
+	/** 1-3, from Settings > AI > Ghost-Text Completion - how many words a suggestion shows
+	 *  at once. Clamped here too in case a config file was hand-edited or came from an older
+	 *  version that never had this field. */
+	function ghostTextMaxWords(): number {
+		const raw = $appConfig?.ghost_text_max_words ?? 1;
+		return Math.min(3, Math.max(1, Math.round(raw)));
+	}
+
+	/** A rough per-word token budget (most tokenizers split a word into a bit more than one
+	 *  token, plus we want a little headroom for punctuation) - generous enough to comfortably
+	 *  cover the word cap without asking the model for a whole paragraph it'll never use. */
+	function ghostTextMaxTokens(): number {
+		return 8 + ghostTextMaxWords() * 8;
+	}
 
 	const GhostTextPlugin = Extension.create({
 		name: 'ghostText',
@@ -276,6 +290,23 @@
 		return true;
 	}
 
+	/** Keeps only the first `maxWords` whitespace-delimited tokens of `text`, cutting right
+	 *  after the last one kept (so no trailing space, and punctuation glued onto that word -
+	 *  "store." - stays attached). Used to hold AI completions to the length set in
+	 *  Settings > AI > Ghost-Text Completion regardless of how much the model actually sent. */
+	function truncateToWords(text: string, maxWords: number): string {
+		const re = /\S+/g;
+		let count = 0;
+		let endIndex = 0;
+		let m: RegExpExecArray | null;
+		while ((m = re.exec(text)) !== null) {
+			count++;
+			endIndex = m.index + m[0].length;
+			if (count >= maxWords) break;
+		}
+		return count > 0 ? text.slice(0, endIndex) : text;
+	}
+
 	function showGhostSuggestion(rawText: string, pos: number, generation: number) {
 		if (!editor || editor.isDestroyed || generation !== ghostTextGeneration) return;
 		const sel = editor.state.selection;
@@ -285,6 +316,9 @@
 		// whatever they sent and decide the separating space ourselves below, from what's
 		// actually next to the cursor - that's reliable regardless of the model's own habits.
 		let cleaned = rawText.replace(/^\s+/, '').split(/\n{2,}/)[0];
+		if (!cleaned) return;
+		// Hold it to the configured word cap, whatever the model actually generated.
+		cleaned = truncateToWords(cleaned, ghostTextMaxWords());
 		if (!cleaned) return;
 		// Add a single separating space when the completion starts a fresh word right after
 		// non-space text, so accepting it doesn't glue two words together ("the" + "store" ->
@@ -324,21 +358,20 @@
 			}
 		});
 		try {
-			await aiAsk('continue_writing', contextText, null, requestId, GHOST_TEXT_MAX_TOKENS);
+			await aiAsk('continue_writing', contextText, null, requestId, ghostTextMaxTokens());
 		} catch {
 			// Silent by design - a missing/misconfigured AI provider shouldn't interrupt typing.
 			unlisten();
 		}
 	}
 
-	// Inline arithmetic: "3+3" at the cursor gets an instant "=6" suggestion computed locally,
-	// no AI call involved. A trailing "=" the user already typed (e.g. "3+3=") gets just "6".
-	// '+'/'*' trigger without spaces since they're rarely ambiguous next to digits; '-'/'/'
-	// require spaces around them so this stays quiet on phone numbers ("555-1234"), ranges
-	// ("9-5", "pages 10-15"), and fractions ("3/4") - and date-shaped matches are excluded
-	// outright so writing an actual date doesn't pop up a bogus calculation.
+	// Inline arithmetic: "3+3" or "3-1" at the cursor gets an instant "=6"/"=2" suggestion
+	// computed locally, no AI call involved. A trailing "=" the user already typed (e.g. "3+3=")
+	// gets just "6". It's just a gray hint until Tab accepts it, so a stray match on something
+	// like "555-1234" is harmless to show - the one thing worth filtering out is a match that
+	// would actively mislead, so date-shaped text ("2024-01-15", "3/4/2024") is still excluded.
 	const MATH_NUM = String.raw`(?:\d+(?:\.\d+)?|\([^()]*\))`;
-	const MATH_OP = String.raw`(?:\s*\+\s*|\s*\*\s*|\s+-\s+|\s+/\s+)`;
+	const MATH_OP = String.raw`(?:\s*[+\-*/]\s*)`;
 	const MATH_EXPR_RE = new RegExp(
 		String.raw`(?:^|[\s:;,([{])([-+]?${MATH_NUM}(?:${MATH_OP}${MATH_NUM})+)\s*(=)?\s*$`
 	);
