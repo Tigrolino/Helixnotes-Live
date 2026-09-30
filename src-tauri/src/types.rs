@@ -241,6 +241,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub ai_writing_style: Option<String>,
     #[serde(default)]
+    pub ghost_text_enabled: bool,
+    #[serde(default)]
     pub default_view_mode: bool,
     #[serde(default)]
     pub new_notes_in_source_mode: bool,
@@ -374,6 +376,7 @@ impl Default for AppConfig {
             openai_compatible_api_key: None,
             ai_model: "claude-sonnet-4-6".to_string(),
             ai_writing_style: None,
+            ghost_text_enabled: false,
             default_view_mode: false,
             new_notes_in_source_mode: false,
             show_tray_icon: false,
@@ -506,6 +509,12 @@ pub struct AiStreamEvent {
     pub event_type: String, // "text", "done", "error"
     pub text: Option<String>,
     pub error: Option<String>,
+    // Every stream shares the single "ai-stream" event name, so the frontend needs this to tell
+    // its own in-flight request's chunks apart from another concurrent one (e.g. the AI menu and
+    // a ghost-text completion streaming at the same time) - callers ignore any event whose
+    // request_id doesn't match the one they passed to ai_ask.
+    #[serde(default)]
+    pub request_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

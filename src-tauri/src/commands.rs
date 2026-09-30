@@ -2405,6 +2405,7 @@ pub fn set_ai_settings(
     ollama_api_key: Option<String>,
     openai_compatible_base_url: Option<String>,
     openai_compatible_api_key: Option<String>,
+    ghost_text_enabled: bool,
 ) -> Result<(), String> {
     let mut config = state.config.lock().map_err(|e| e.to_string())?;
     let key = api_key.filter(|k| !k.is_empty());
@@ -2424,6 +2425,7 @@ pub fn set_ai_settings(
     config.ai_provider = provider;
     config.ai_model = model;
     config.ai_writing_style = writing_style.filter(|s| !s.trim().is_empty());
+    config.ghost_text_enabled = ghost_text_enabled;
     save_app_config(&config)?;
     Ok(())
 }
@@ -2679,6 +2681,7 @@ pub fn ai_ask(
     text: String,
     custom_prompt: Option<String>,
     request_id: String,
+    max_tokens: Option<u32>,
 ) -> Result<(), String> {
     let (provider, api_key, model, writing_style, base_url) = {
         let state = app.state::<AppState>();
@@ -2704,6 +2707,38 @@ pub fn ai_ask(
         };
         (provider, key, model, style, base_url)
     };
+
+    // Ghost-text ("TypeSeer"-style) inline completion: a different job from the rest of this
+    // command (continue the user's writing instead of transforming a selection), so it gets its
+    // own system prompt and a small max_tokens instead of falling through to the generic one.
+    if action == "continue_writing" {
+        let mut system_prompt = "You are a ghost-text autocomplete engine inside a note-taking \
+            app called HelixNotes. Continue the user's text naturally from exactly where it \
+            stops - do not repeat any of the existing text back. Output ONLY the continuation: \
+            no quotes, no labels, no commentary, no markdown code fences. Keep it short - a few \
+            words up to one short sentence, never a whole paragraph. Match the existing tone, \
+            tense, and language. If the text ends mid-word, finish that word first, with no \
+            leading space. Stop at a natural pause such as the end of a clause or sentence."
+            .to_string();
+        if let Some(ref style) = writing_style {
+            system_prompt.push_str(&format!(
+                "\n\nThe user's preferred writing style: {}",
+                style
+            ));
+        }
+        crate::ai::ai_request(
+            app,
+            provider,
+            api_key,
+            model,
+            system_prompt,
+            text,
+            request_id,
+            base_url,
+            max_tokens.unwrap_or(48),
+        );
+        return Ok(());
+    }
 
     let mut system_prompt = "You are a helpful writing assistant inside a note-taking app called HelixNotes. \
         You help users improve, rewrite, summarize, and transform their text. \
@@ -2749,6 +2784,7 @@ pub fn ai_ask(
         user_message,
         request_id,
         base_url,
+        max_tokens.unwrap_or(4096),
     );
     Ok(())
 }

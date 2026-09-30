@@ -143,6 +143,7 @@ export interface AppConfig {
   openai_compatible_api_key: string | null;
   ai_model: string;
   ai_writing_style: string | null;
+  ghost_text_enabled: boolean;
   default_view_mode: boolean;
   new_notes_in_source_mode: boolean;
   show_tray_icon: boolean;
@@ -227,6 +228,7 @@ export interface AiStreamEvent {
   event_type: string;
   text: string | null;
   error: string | null;
+  request_id: string;
 }
 
 export interface NoteTitleEntry {

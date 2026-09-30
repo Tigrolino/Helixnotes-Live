@@ -18,6 +18,7 @@ pub fn ai_request(
     user_message: String,
     request_id: String,
     base_url: Option<String>,
+    max_tokens: u32,
 ) {
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -38,6 +39,7 @@ pub fn ai_request(
                         &system_prompt,
                         &user_message,
                         &request_id,
+                        max_tokens,
                     )
                     .await
                 }
@@ -52,6 +54,7 @@ pub fn ai_request(
                         &system_prompt,
                         &user_message,
                         &request_id,
+                        max_tokens,
                     )
                     .await
                 }
@@ -69,6 +72,7 @@ pub fn ai_request(
                             &system_prompt,
                             &user_message,
                             &request_id,
+                            max_tokens,
                         )
                         .await
                     }
@@ -81,6 +85,7 @@ pub fn ai_request(
                         &system_prompt,
                         &user_message,
                         &request_id,
+                        max_tokens,
                     )
                     .await
                 }
@@ -92,6 +97,7 @@ pub fn ai_request(
                         event_type: "error".to_string(),
                         text: None,
                         error: Some(e),
+                        request_id: request_id.to_string(),
                     },
                 );
             }
@@ -115,13 +121,14 @@ async fn stream_anthropic(
     model: &str,
     system_prompt: &str,
     user_message: &str,
-    _request_id: &str,
+    request_id: &str,
+    max_tokens: u32,
 ) -> Result<(), String> {
     let client = Client::new();
 
     let body = json!({
         "model": model,
-        "max_tokens": 4096,
+        "max_tokens": max_tokens,
         "stream": true,
         "system": system_prompt,
         "messages": [
@@ -171,6 +178,7 @@ async fn stream_anthropic(
                                 event_type: "done".to_string(),
                                 text: None,
                                 error: None,
+                                request_id: request_id.to_string(),
                             },
                         );
                         return Ok(());
@@ -188,6 +196,7 @@ async fn stream_anthropic(
                                             event_type: "text".to_string(),
                                             text: Some(text.to_string()),
                                             error: None,
+                                            request_id: request_id.to_string(),
                                         },
                                     );
                                 }
@@ -199,6 +208,7 @@ async fn stream_anthropic(
                                         event_type: "done".to_string(),
                                         text: None,
                                         error: None,
+                                        request_id: request_id.to_string(),
                                     },
                                 );
                                 return Ok(());
@@ -213,6 +223,7 @@ async fn stream_anthropic(
                                         event_type: "error".to_string(),
                                         text: None,
                                         error: Some(msg.to_string()),
+                                        request_id: request_id.to_string(),
                                     },
                                 );
                                 return Err(msg.to_string());
@@ -231,6 +242,7 @@ async fn stream_anthropic(
             event_type: "done".to_string(),
             text: None,
             error: None,
+            request_id: request_id.to_string(),
         },
     );
 
@@ -244,7 +256,8 @@ async fn stream_openai(
     model: &str,
     system_prompt: &str,
     user_message: &str,
-    _request_id: &str,
+    request_id: &str,
+    max_tokens: u32,
 ) -> Result<(), String> {
     let client = Client::new();
 
@@ -258,7 +271,7 @@ async fn stream_openai(
     let mut body = json!({
         "model": model,
         "stream": true,
-        token_key: 4096,
+        token_key: max_tokens,
         "messages": [
             {
                 "role": "system",
@@ -315,6 +328,7 @@ async fn stream_openai(
                                 event_type: "done".to_string(),
                                 text: None,
                                 error: None,
+                                request_id: request_id.to_string(),
                             },
                         );
                         return Ok(());
@@ -330,6 +344,7 @@ async fn stream_openai(
                                         event_type: "text".to_string(),
                                         text: Some(content.to_string()),
                                         error: None,
+                                        request_id: request_id.to_string(),
                                     },
                                 );
                             }
@@ -344,6 +359,7 @@ async fn stream_openai(
                                         event_type: "done".to_string(),
                                         text: None,
                                         error: None,
+                                        request_id: request_id.to_string(),
                                     },
                                 );
                                 return Ok(());
@@ -358,6 +374,7 @@ async fn stream_openai(
                                     event_type: "error".to_string(),
                                     text: None,
                                     error: Some(err.to_string()),
+                                    request_id: request_id.to_string(),
                                 },
                             );
                             return Err(err.to_string());
@@ -374,6 +391,7 @@ async fn stream_openai(
             event_type: "done".to_string(),
             text: None,
             error: None,
+            request_id: request_id.to_string(),
         },
     );
 

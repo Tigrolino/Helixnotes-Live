@@ -562,10 +562,12 @@ export async function setAiSettings(
   ollamaApiKey: string | null = null,
   openaiCompatibleBaseUrl: string | null = null,
   openaiCompatibleApiKey: string | null = null,
+  ghostTextEnabled: boolean = false,
 ): Promise<void> {
   return invoke("set_ai_settings", {
     provider, apiKey, model, writingStyle, baseUrl,
     ollamaApiKey, openaiCompatibleBaseUrl, openaiCompatibleApiKey,
+    ghostTextEnabled,
   });
 }
 
@@ -578,8 +580,9 @@ export async function aiAsk(
   text: string,
   customPrompt: string | null,
   requestId: string,
+  maxTokens: number | null = null,
 ): Promise<void> {
-  return invoke("ai_ask", { action, text, customPrompt, requestId });
+  return invoke("ai_ask", { action, text, customPrompt, requestId, maxTokens });
 }
 
 export async function getInstallType(): Promise<string> {

@@ -215,6 +215,7 @@
 	let _openaiCompatibleKey = $state($appConfig?.openai_compatible_api_key ?? '');
 	let aiModel = $state($appConfig?.ai_model ?? 'claude-sonnet-4-6');
 	let aiWritingStyle = $state($appConfig?.ai_writing_style ?? '');
+	let ghostTextEnabled = $state($appConfig?.ghost_text_enabled ?? false);
 	let aiShowKey = $state(false);
 	let aiShowCompatibleKey = $state(false);
 	let aiShowOllamaKey = $state(false);
@@ -245,6 +246,7 @@
 			_ollamaApiKey || null,
 			_openaiCompatibleBaseUrl || null,
 			_openaiCompatibleKey || null,
+			ghostTextEnabled,
 		);
 		if ($appConfig) {
 			$appConfig = {
@@ -258,6 +260,7 @@
 				openai_compatible_api_key: _openaiCompatibleKey || null,
 				ai_model: aiModel,
 				ai_writing_style: aiWritingStyle || null,
+				ghost_text_enabled: ghostTextEnabled,
 			};
 		}
 	}
@@ -2336,6 +2339,19 @@
 										rows="3"
 									></textarea>
 									<p class="setting-hint">Describe your preferred tone, style, or personality. This will be applied to all AI actions.</p>
+								</div>
+
+								<div class="settings-section">
+									<h3>Ghost-Text Completion</h3>
+									<label class="setting-toggle">
+										<span class="setting-label">
+											<span class="setting-name">Suggest as you type</span>
+											<span class="setting-desc">Shows a gray preview of how your sentence might continue - press Tab to accept, or keep typing to ignore it. Uses your AI provider above, so it sends a short snippet of the note around your cursor on every pause while you write.</span>
+										</span>
+										<button class="toggle-switch" class:on={ghostTextEnabled} role="switch" aria-checked={ghostTextEnabled} aria-label="Suggest as you type" onclick={() => { ghostTextEnabled = !ghostTextEnabled; saveAiSettings(); }}>
+											<span class="toggle-knob"></span>
+										</button>
+									</label>
 								</div>
 
 								<div class="settings-section">
