@@ -213,6 +213,15 @@
 	// accepts it) found for "the word(s) after this suggestion" - keyed to the document
 	// position it would apply at, so accept only uses it if nothing else happened in between.
 	let ghostSpeculative: { afterPos: number; text: string } | null = null;
+	// How long a matching span has to be before it counts as a real duplicate (long enough
+	// that two unrelated sentences sharing a common short phrase don't trigger it), and how
+	// far back to look for an earlier occurrence of it. Small models running in raw-
+	// completion mode, once enough of the note ahead of the cursor is itself prior AI
+	// output, can start conditioning on their own recent text and loop back onto a passage
+	// verbatim instead of continuing it - this stays local (a paragraph or two) rather than
+	// scanning the whole note, since that's where an in-session loop actually shows up.
+	const GHOST_TEXT_REPEAT_CHECK_LEN = 24;
+	const GHOST_TEXT_REPEAT_LOOKBACK_CHARS = 1500;
 
 	/** 1-3, from Settings > AI > Ghost-Text Completion - how many words a suggestion shows
 	 *  at once. Clamped here too in case a config file was hand-edited or came from an older
@@ -373,6 +382,22 @@
 		return cleaned;
 	}
 
+	/** True if the text right before the cursor, extended by `suggestion`, would just
+	 *  reproduce a span that already occurs earlier in `textBeforeCursor` - the tell-tale
+	 *  sign of a model looping back onto its own recently-generated output instead of
+	 *  genuinely continuing it. Only looks within GHOST_TEXT_REPEAT_LOOKBACK_CHARS, so a
+	 *  phrase that legitimately recurs much earlier in a long note isn't treated as a loop. */
+	function isRepeatingSuggestion(textBeforeCursor: string, suggestion: string): boolean {
+		const tail = textBeforeCursor.slice(-60) + suggestion;
+		if (tail.trim().length < GHOST_TEXT_REPEAT_CHECK_LEN) return false;
+		const needle = tail.slice(-GHOST_TEXT_REPEAT_CHECK_LEN);
+		const searchEnd = textBeforeCursor.length - 60;
+		if (searchEnd <= 0) return false;
+		const searchStart = Math.max(0, searchEnd - GHOST_TEXT_REPEAT_LOOKBACK_CHARS);
+		const haystack = textBeforeCursor.slice(searchStart, searchEnd);
+		return haystack.includes(needle);
+	}
+
 	function showGhostSuggestion(rawText: string, pos: number, generation: number, isMath = false) {
 		if (!editor || editor.isDestroyed || generation !== ghostTextGeneration) return;
 		const sel = editor.state.selection;
@@ -381,6 +406,11 @@
 		const recentContext = editor.state.doc.textBetween(Math.max(0, pos - 40), pos, '\n', '\n');
 		const cleaned = cleanCompletion(rawText, charBefore, recentContext, isMath);
 		if (!cleaned) return;
+		if (!isMath) {
+			const lookbackStart = Math.max(0, pos - (60 + GHOST_TEXT_REPEAT_LOOKBACK_CHARS));
+			const repeatCheckContext = editor.state.doc.textBetween(lookbackStart, pos, '\n', '\n');
+			if (isRepeatingSuggestion(repeatCheckContext, cleaned)) return;
+		}
 		editor.view.dispatch(editor.state.tr.setMeta(ghostTextPluginKey, { type: 'set', text: cleaned, from: pos }));
 	}
 

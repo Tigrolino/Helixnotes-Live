@@ -542,7 +542,15 @@ async fn stream_ollama_generate(
             // quiz/worksheet-style tangent, which is what it did at the model's normal
             // (higher, chat-oriented) default sampling settings.
             "temperature": 0.2,
-            "top_p": 0.85
+            "top_p": 0.85,
+            // A small model in raw-completion mode has no repetition penalty applied by a
+            // chat template, and once enough of the note ahead of the cursor is itself
+            // prior AI output, the model conditions on its own recent text and can settle
+            // into looping back over a passage verbatim instead of continuing it - push
+            // harder than Ollama's own default (1.1) against repeating anything from the
+            // last few hundred tokens of context.
+            "repeat_penalty": 1.3,
+            "repeat_last_n": 256
         }
     });
 
