@@ -10341,6 +10341,16 @@
 		cursor: col-resize;
 	}
 
+	/* The placeholder text below is floated with height:0 so it doesn't add vertical space to an empty
+	   paragraph - content (real or a later block) can sit right where the placeholder is without the line
+	   growing. But a float that takes no height also isn't "cleared" by later siblings, so without this it
+	   can render on top of whatever block comes right after the empty paragraph instead of stopping at its
+	   edge - most visible on a table, whose cell borders and background make the overlap obvious. Every
+	   direct child of the editor clears floats so nothing ever paints over a neighboring block. */
+	:global(.tiptap-wrapper .tiptap > *) {
+		clear: both;
+	}
+
 	:global(.tiptap-wrapper .tiptap > .is-empty::before) {
 		content: attr(data-placeholder);
 		color: var(--text-tertiary);
