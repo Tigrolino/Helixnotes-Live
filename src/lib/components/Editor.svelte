@@ -450,7 +450,24 @@
 		const sel = state.selection;
 		if (!sel.empty) return null;
 		const pos = sel.from;
-		const lookbackStart = Math.max(0, pos - SPELL_CHECK_LOOKBACK_CHARS);
+		// Every offset below is computed as an index into `context` (a plain string) and then
+		// added straight back onto `lookbackStart` to get a real document position - which is
+		// only valid 1:1 if `context` never crosses a block boundary. textBetween() collapses
+		// each block boundary it crosses down to a single blockSeparator character, even though
+		// crossing one actually consumes more than one document position (closing the previous
+		// block, opening the next) - so a lookback window reaching back past a heading or an
+		// earlier paragraph makes `context` shorter than the real position span it came from,
+		// and every position computed from it afterwards (including the word's own from/to,
+		// even though the word itself is nowhere near that earlier boundary) ends up shifted
+		// left by however many positions were lost. That's what produced the "ment" -> "wentent"
+		// corruption report: Tab-accept spliced the suggestion into a range shifted a few
+		// characters too early. A word can never span a block boundary in the first place, so
+		// clamping the lookback to the start of the cursor's own textblock is both correct and
+		// exactly what's needed - it guarantees `context` only ever contains text from the
+		// single block the cursor is in, so no boundary is ever crossed and the arithmetic below
+		// is always exact.
+		const blockStart = state.doc.resolve(pos).start();
+		const lookbackStart = Math.max(blockStart, pos - SPELL_CHECK_LOOKBACK_CHARS);
 		const context = state.doc.textBetween(lookbackStart, pos, '\n', '\n');
 		const m = context.match(SPELL_CHECK_BOUNDARY_RE);
 		if (!m) return null;
@@ -594,7 +611,18 @@
 				const thisBlock = blockIndex;
 				let blockText = '';
 				node.forEach((child, childOffset) => {
-					if (!child.isText || !child.text) return;
+					if (!child.isText || !child.text) {
+						// A non-text inline child (hardBreak, image, mention, ...) has no text of
+						// its own to add, but skipping it silently would let the text runs on
+						// either side of it run together with no separator in the prompt sent to
+						// the AI - e.g. "wordone<hardBreak>wordtwo" becoming "wordonewordtwo",
+						// which could read as (or actually become) one misspelled word. A single
+						// space keeps the two runs apart without shifting any of the *document*
+						// positions in `tokens` below, which are computed from the node's own
+						// position, not from blockText.
+						if (blockText && !/\s$/.test(blockText)) blockText += ' ';
+						return;
+					}
 					const childPos = pos + 1 + childOffset;
 					blockText += child.text;
 					for (const { word, start, end } of tokenizeWords(child.text)) {
@@ -747,6 +775,16 @@
 				finishInFlight();
 				if (generation !== aiSpellGeneration || !editor || editor.isDestroyed) return;
 				const entries = parseSpellCheckResponse(accumulated);
+				// Diagnostic only (never shown to the user) - the AI's raw response is the one
+				// thing this whole pipeline can't otherwise inspect after the fact, so when the
+				// count of flagged words looks suspiciously low (or parsing silently failed),
+				// this is the quickest way to tell "the model really only found 2 problems"
+				// apart from "something broke between the model and here".
+				if (entries.length === 0 && accumulated.trim()) {
+					console.debug('[ai-spell-check] response parsed to 0 entries; raw response:', accumulated);
+				} else {
+					console.debug(`[ai-spell-check] ${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} parsed from ${promptBlocks.length} paragraph(s); raw response:`, accumulated);
+				}
 				const suggestions = new Map<string, string[]>();
 				const ranges: { from: number; to: number }[] = [];
 				for (const entry of entries) {
@@ -769,7 +807,7 @@
 		});
 		aiSpellScanInFlight = true;
 		try {
-			await aiAsk('spell_check', prompt, null, requestId, 4096);
+			await aiAsk('spell_check', prompt, null, requestId, 8192);
 		} catch {
 			// Silent by design, same as ghost-text - a missing/misconfigured AI provider
 			// shouldn't interrupt typing or show an error where an underline would go.

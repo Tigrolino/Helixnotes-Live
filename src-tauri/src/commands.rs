@@ -2761,20 +2761,36 @@ pub fn ai_ask(
     // response and matches them back against positions it already computed itself while
     // building the prompt, the same lesson learned from the earlier Tab-corruption bug.
     if action == "spell_check" {
-        let system_prompt = "You are a spell-checking engine inside a note-taking app called \
-            HelixNotes. You will be given a numbered list of paragraphs from a user's note, one \
-            per line, formatted as \"<number>: <paragraph text>\". Find words that are \
-            genuinely misspelled - real typos, not: technical terms, code identifiers, proper \
-            nouns, names, URLs, abbreviations, slang, or words that are simply uncommon but \
-            correctly spelled. Use the surrounding sentence to judge commonly-confused but \
-            correctly-spelled words (their/there/they're, its/it's, etc.) only when one is \
-            clearly wrong in context - do not flag a homophone just because another exists. For \
-            each misspelling found, report the paragraph number it came from, the misspelled \
-            word exactly as it appears in the text, and up to 3 single-word corrections, best \
-            guess first. Respond with ONLY a JSON array, no markdown code fences, no commentary: \
+        let system_prompt = "You are a meticulous proofreading engine inside a note-taking app \
+            called HelixNotes. You will be given a numbered list of paragraphs from a user's \
+            note, one per line, formatted as \"<number>: <paragraph text>\". Go through EVERY \
+            paragraph, word by word, and catch every one of the following that you find: \
+            (1) misspelled words / typos, e.g. \"teh\" -> \"the\", \"recieve\" -> \"receive\"; \
+            (2) commonly confused words that are wrong for the context, e.g. \"its\" vs \"it's\", \
+            \"their\"/\"there\"/\"they're\", \"your\"/\"you're\", \"then\"/\"than\"; \
+            (3) missing apostrophes in contractions, e.g. \"dont\" -> \"don't\", \"isnt\" -> \
+            \"isn't\", \"cant\" -> \"can't\", \"youre\" -> \"you're\", \"theyre\" -> \"they're\", \
+            \"shouldnt\" -> \"shouldn't\", \"whats\" -> \"what's\"; \
+            (4) basic grammar mistakes fixable by changing one word, e.g. subject-verb \
+            agreement (\"This sentence are\" -> \"is\", \"I has\" -> \"have\", \"We was\" -> \
+            \"were\", \"the deadline were\" -> \"was\"); \
+            (5) a word accidentally typed twice in a row (\"the the\", \"is is\"). \
+            Do NOT flag: technical terms, code identifiers, proper nouns, names, URLs, \
+            correctly-spelled uncommon words, or a homophone that's actually correct in context. \
+            Be thorough and exhaustive, not conservative: a real note commonly has many errors \
+            of many different kinds throughout, not just one. Check every paragraph on the list \
+            independently - finding an error in one paragraph is not a reason to stop or skip \
+            the rest, and a paragraph with several errors should produce several entries, one \
+            per error. Never stop partway through the list. For each problem found, report the \
+            paragraph number it came from, the exact wrong word or token as it appears in the \
+            text (always a single word - if the real fix touches more than one word, report \
+            whichever single word most needs to change), and up to 3 single-word corrections, \
+            best guess first. Respond with ONLY a JSON array covering every paragraph's errors, \
+            no markdown code fences, no commentary, and never truncate or summarize the list: \
             [{\"block\": 0, \"word\": \"teh\", \"suggestions\": [\"the\", \"ten\", \"tea\"]}, \
-            ...]. If nothing is misspelled in a paragraph, just omit it - if nothing is \
-            misspelled at all, respond with exactly: []"
+            {\"block\": 2, \"word\": \"dont\", \"suggestions\": [\"don't\"]}, ...]. If a \
+            paragraph has no problems, omit it from the array - if nothing is wrong anywhere in \
+            the whole list, respond with exactly: []"
             .to_string();
         crate::ai::ai_request(
             app,
@@ -2785,7 +2801,7 @@ pub fn ai_ask(
             text,
             request_id,
             base_url,
-            max_tokens.unwrap_or(4096),
+            max_tokens.unwrap_or(8192),
             false,
         );
         return Ok(());
