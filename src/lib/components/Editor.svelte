@@ -281,11 +281,21 @@
 		const sel = editor.state.selection;
 		if (!sel.empty || sel.from !== pos) return;
 		// Stop at the first blank line - a completion is a phrase/sentence, not a new paragraph.
-		// Only strip a stray leading newline here, never a leading space: a completion that
-		// continues right after a word boundary ("the" -> " store") needs that space kept, or
-		// accepting it would jam the new word straight onto the old one ("thestore").
-		const cleaned = rawText.replace(/^\n+/, '').split(/\n{2,}/)[0];
+		// Small local models are inconsistent about whether they send a leading space, so strip
+		// whatever they sent and decide the separating space ourselves below, from what's
+		// actually next to the cursor - that's reliable regardless of the model's own habits.
+		let cleaned = rawText.replace(/^\s+/, '').split(/\n{2,}/)[0];
 		if (!cleaned) return;
+		// Add a single separating space when the completion starts a fresh word right after
+		// non-space text, so accepting it doesn't glue two words together ("the" + "store" ->
+		// "the store", not "thestore"). Leave punctuation that attaches directly to the
+		// previous word alone (periods, commas, closing brackets, apostrophes...).
+		if (!/^[.,!?;:)\]}%'’\-]/.test(cleaned)) {
+			const charBefore = pos > 0 ? editor.state.doc.textBetween(pos - 1, pos) : '';
+			if (charBefore && !/\s/.test(charBefore)) {
+				cleaned = ' ' + cleaned;
+			}
+		}
 		editor.view.dispatch(editor.state.tr.setMeta(ghostTextPluginKey, { type: 'set', text: cleaned, from: pos }));
 	}
 
