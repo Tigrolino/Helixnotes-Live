@@ -19,6 +19,7 @@ pub fn ai_request(
     request_id: String,
     base_url: Option<String>,
     max_tokens: u32,
+    is_continuation: bool,
 ) {
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -45,18 +46,28 @@ pub fn ai_request(
                 }
                 "ollama" => {
                     let url = base_url.as_deref().unwrap_or(OLLAMA_DEFAULT_URL);
-                    let url = format!("{}/v1/chat/completions", url.trim_end_matches('/'));
-                    stream_openai(
-                        &app,
-                        &url,
-                        key_opt,
-                        &model,
-                        &system_prompt,
-                        &user_message,
-                        &request_id,
-                        max_tokens,
-                    )
-                    .await
+                    if is_continuation {
+                        // Ghost-text needs raw next-token continuation, not a chat reply - an
+                        // instruct-tuned model asked to "continue this text" over the chat API
+                        // will often respond/comment on it instead of literally continuing it.
+                        // Ollama's native /api/generate with raw:true bypasses the chat template
+                        // entirely, so the model just predicts the next tokens.
+                        stream_ollama_generate(&app, url, &model, &user_message, &request_id, max_tokens)
+                            .await
+                    } else {
+                        let url = format!("{}/v1/chat/completions", url.trim_end_matches('/'));
+                        stream_openai(
+                            &app,
+                            &url,
+                            key_opt,
+                            &model,
+                            &system_prompt,
+                            &user_message,
+                            &request_id,
+                            max_tokens,
+                        )
+                        .await
+                    }
                 }
                 "openai_compatible" => {
                     let url = base_url.as_deref().unwrap_or("");
@@ -500,4 +511,114 @@ async fn test_openai(url: &str, api_key: Option<&str>, model: &str) -> Result<St
         let body_text = response.text().await.unwrap_or_default();
         Err(format!("API error {}: {}", status, body_text))
     }
+}
+
+/// Ollama's native raw-completion endpoint: bypasses the chat template entirely, so the
+/// model does plain next-token continuation instead of treating `prompt` as a chat turn to
+/// reply to. Streams newline-delimited JSON objects (not SSE) - each has a `response` text
+/// fragment, and the final one carries `done: true`.
+async fn stream_ollama_generate(
+    app: &AppHandle,
+    base_url: &str,
+    model: &str,
+    prompt: &str,
+    request_id: &str,
+    max_tokens: u32,
+) -> Result<(), String> {
+    let client = Client::new();
+    let url = format!("{}/api/generate", base_url.trim_end_matches('/'));
+
+    let body = json!({
+        "model": model,
+        "prompt": prompt,
+        "raw": true,
+        "stream": true,
+        "options": {
+            "num_predict": max_tokens,
+            "stop": ["\n\n"]
+        }
+    });
+
+    let response = client
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body_text = response.text().await.unwrap_or_default();
+        return Err(format!("API error {}: {}", status, body_text));
+    }
+
+    use futures::StreamExt;
+    let mut stream = response.bytes_stream();
+    let mut buffer = String::new();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("Stream error: {}", e))?;
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+        while let Some(newline_pos) = buffer.find('\n') {
+            let line = buffer[..newline_pos].trim().to_string();
+            buffer = buffer[newline_pos + 1..].to_string();
+            if line.is_empty() {
+                continue;
+            }
+            let parsed: serde_json::Value = match serde_json::from_str(&line) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            if let Some(err) = parsed["error"].as_str() {
+                let _ = app.emit(
+                    "ai-stream",
+                    AiStreamEvent {
+                        event_type: "error".to_string(),
+                        text: None,
+                        error: Some(err.to_string()),
+                        request_id: request_id.to_string(),
+                    },
+                );
+                return Err(err.to_string());
+            }
+            if let Some(text) = parsed["response"].as_str() {
+                if !text.is_empty() {
+                    let _ = app.emit(
+                        "ai-stream",
+                        AiStreamEvent {
+                            event_type: "text".to_string(),
+                            text: Some(text.to_string()),
+                            error: None,
+                            request_id: request_id.to_string(),
+                        },
+                    );
+                }
+            }
+            if parsed["done"].as_bool().unwrap_or(false) {
+                let _ = app.emit(
+                    "ai-stream",
+                    AiStreamEvent {
+                        event_type: "done".to_string(),
+                        text: None,
+                        error: None,
+                        request_id: request_id.to_string(),
+                    },
+                );
+                return Ok(());
+            }
+        }
+    }
+
+    let _ = app.emit(
+        "ai-stream",
+        AiStreamEvent {
+            event_type: "done".to_string(),
+            text: None,
+            error: None,
+            request_id: request_id.to_string(),
+        },
+    );
+
+    Ok(())
 }

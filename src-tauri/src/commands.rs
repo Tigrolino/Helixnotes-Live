@@ -2736,6 +2736,7 @@ pub fn ai_ask(
             request_id,
             base_url,
             max_tokens.unwrap_or(48),
+            true,
         );
         return Ok(());
     }
@@ -2785,6 +2786,7 @@ pub fn ai_ask(
         request_id,
         base_url,
         max_tokens.unwrap_or(4096),
+        false,
     );
     Ok(())
 }

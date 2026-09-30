@@ -289,10 +289,12 @@
 		// Add a single separating space when the completion starts a fresh word right after
 		// non-space text, so accepting it doesn't glue two words together ("the" + "store" ->
 		// "the store", not "thestore"). Leave punctuation that attaches directly to the
-		// previous word alone (periods, commas, closing brackets, apostrophes...).
-		if (!/^[.,!?;:)\]}%'’\-]/.test(cleaned)) {
+		// previous word alone (periods, commas, closing brackets, apostrophes...), and don't
+		// add one after a character that never wants a trailing space either (an already-typed
+		// "=" before a math result, opening brackets/quotes...).
+		if (!/^[.,!?;:)\]}%'’=\-]/.test(cleaned)) {
 			const charBefore = pos > 0 ? editor.state.doc.textBetween(pos - 1, pos) : '';
-			if (charBefore && !/\s/.test(charBefore)) {
+			if (charBefore && !/[\s(\[{"'‘=]/.test(charBefore)) {
 				cleaned = ' ' + cleaned;
 			}
 		}
@@ -329,14 +331,119 @@
 		}
 	}
 
+	// Inline arithmetic: "3+3" at the cursor gets an instant "=6" suggestion computed locally,
+	// no AI call involved. A trailing "=" the user already typed (e.g. "3+3=") gets just "6".
+	// '+'/'*' trigger without spaces since they're rarely ambiguous next to digits; '-'/'/'
+	// require spaces around them so this stays quiet on phone numbers ("555-1234"), ranges
+	// ("9-5", "pages 10-15"), and fractions ("3/4") - and date-shaped matches are excluded
+	// outright so writing an actual date doesn't pop up a bogus calculation.
+	const MATH_NUM = String.raw`(?:\d+(?:\.\d+)?|\([^()]*\))`;
+	const MATH_OP = String.raw`(?:\s*\+\s*|\s*\*\s*|\s+-\s+|\s+/\s+)`;
+	const MATH_EXPR_RE = new RegExp(
+		String.raw`(?:^|[\s:;,([{])([-+]?${MATH_NUM}(?:${MATH_OP}${MATH_NUM})+)\s*(=)?\s*$`
+	);
+	const DATE_SHAPE_RE = /^\d{1,4}\s*[-/]\s*\d{1,2}\s*[-/]\s*\d{1,4}$/;
+
+	/** A small, safe recursive-descent evaluator for +, -, *, /, parens, and a leading unary
+	 *  sign - deliberately not eval()/Function() since this runs on arbitrary note text.
+	 *  Returns null on anything it can't fully parse (including trailing junk) or division
+	 *  by zero, so a false match never produces a confusing "suggestion". */
+	function evalMathExpression(expr: string): number | null {
+		let i = 0;
+		const peek = () => expr[i];
+		const skipSpace = () => { while (expr[i] === ' ') i++; };
+		function parseNumber(): number | null {
+			skipSpace();
+			const start = i;
+			if (expr[i] === '+' || expr[i] === '-') i++;
+			let hasDigits = false;
+			while (i < expr.length && /[0-9]/.test(expr[i])) { i++; hasDigits = true; }
+			if (expr[i] === '.') {
+				i++;
+				while (i < expr.length && /[0-9]/.test(expr[i])) { i++; hasDigits = true; }
+			}
+			if (!hasDigits) { i = start; return null; }
+			return parseFloat(expr.slice(start, i));
+		}
+		function parseFactor(): number | null {
+			skipSpace();
+			if (peek() === '(') {
+				i++;
+				const v = parseExpr();
+				skipSpace();
+				if (peek() !== ')') return null;
+				i++;
+				return v;
+			}
+			return parseNumber();
+		}
+		function parseTerm(): number | null {
+			let v = parseFactor();
+			if (v === null) return null;
+			for (;;) {
+				skipSpace();
+				const op = peek();
+				if (op === '*' || op === '/') {
+					i++;
+					const rhs = parseFactor();
+					if (rhs === null) return null;
+					if (op === '*') v = v * rhs;
+					else {
+						if (rhs === 0) return null;
+						v = v / rhs;
+					}
+				} else break;
+			}
+			return v;
+		}
+		function parseExpr(): number | null {
+			let v = parseTerm();
+			if (v === null) return null;
+			for (;;) {
+				skipSpace();
+				const op = peek();
+				if (op === '+' || op === '-') {
+					i++;
+					const rhs = parseTerm();
+					if (rhs === null) return null;
+					v = op === '+' ? v + rhs : v - rhs;
+				} else break;
+			}
+			return v;
+		}
+		const result = parseExpr();
+		skipSpace();
+		if (result === null || i !== expr.length) return null;
+		return result;
+	}
+
+	function formatMathResult(n: number): string {
+		if (Number.isInteger(n)) return String(n);
+		return n.toFixed(6).replace(/\.?0+$/, '');
+	}
+
+	/** Returns "=6" (or just "6" if the user already typed the "="), or null if the text
+	 *  doesn't end in a recognizable, non-date-shaped arithmetic expression. */
+	function tryMathCompletion(text: string): string | null {
+		const m = MATH_EXPR_RE.exec(text);
+		if (!m) return null;
+		const expr = m[1].trim();
+		if (DATE_SHAPE_RE.test(expr)) return null;
+		const result = evalMathExpression(expr);
+		if (result === null || !Number.isFinite(result)) return null;
+		const formatted = formatMathResult(result);
+		return m[2] ? formatted : '=' + formatted;
+	}
+
 	/** Called on every editor update; debounces a ghost-text request for the current cursor
-	 *  position once typing pauses. A no-op unless the feature is on, an AI provider is
-	 *  configured, this isn't a live note, and the cursor sits at the end of a plain paragraph
-	 *  or heading with a bit of real content already in it. */
+	 *  position once typing pauses. A no-op unless the feature is on, this isn't a live note,
+	 *  and the cursor sits at the end of a plain paragraph or heading with a bit of real
+	 *  content already in it. A trailing math expression short-circuits straight to an instant
+	 *  local suggestion - no AI provider needed for that part. */
 	function scheduleGhostTextSuggestion() {
 		if (ghostTextTimer) { clearTimeout(ghostTextTimer); ghostTextTimer = null; }
 		ghostTextGeneration++;
-		if (!$appConfig?.ghost_text_enabled || !$appConfig?.ai_provider) return;
+		if (!$appConfig?.ghost_text_enabled) return;
 		if (!editor || boundLiveFieldId || editor.view.composing) return;
 		const sel = editor.state.selection;
 		if (!sel.empty) return;
@@ -347,6 +454,12 @@
 		if (block.textContent.trim().length < 3) return;
 		const generation = ghostTextGeneration;
 		const pos = resolvedFrom.pos;
+		const mathSuggestion = tryMathCompletion(block.textContent);
+		if (mathSuggestion !== null) {
+			showGhostSuggestion(mathSuggestion, pos, generation);
+			return;
+		}
+		if (!$appConfig?.ai_provider) return;
 		ghostTextTimer = setTimeout(() => {
 			ghostTextTimer = null;
 			requestGhostTextSuggestion(generation, pos);
