@@ -59,7 +59,7 @@
 	import { serializeInlineMarkdown } from '$lib/editor/markdown';
 	import { restoreTitleHeading, stripTitleHeading, type HiddenTitleHeading } from '$lib/editor/titleVisibility';
 	import { loadDictionary, isDictionaryReady, isKnownWord, suggestCorrection, suggestCorrections } from '$lib/editor/spellcheck';
-	import { buildSpellCheckPrompt, parseSpellCheckResponse, type SpellCheckPromptBlock } from '$lib/editor/aiSpellCheck';
+	import { buildSpellCheckPrompt, parseSpellCheckResponse, type SpellCheckPromptBlock, type SpellCheckEntry } from '$lib/editor/aiSpellCheck';
 	import { tagIterationKey } from '$lib/utils/tag-styles';
 	import { replaceWithWikiLink } from '$lib/editor/wikiLinks';
 	import { assetSourceToMarkdown, assetUrlToLocalPath, normalizeLocalAssetPath, resolveVaultFilePath } from '$lib/utils/paths';
@@ -744,6 +744,77 @@
 		}, AI_SPELL_SCAN_DEBOUNCE_MS);
 	}
 
+	// Sent to the AI one chunk of consecutive paragraphs at a time (see runAiSpellScan() below)
+	// rather than the whole note in a single request. A single long prompt asking the model to
+	// be exhaustive over every paragraph in a big note is exactly the kind of task LLMs tend to
+	// start out thorough on and then coast through - which lines up with "it gets like one word
+	// then stops" - and a shorter chunk is both easier for the model to actually be exhaustive
+	// over and cheaper to retry/resume if one request fails. Budget is on characters rather than
+	// paragraph count since paragraph length varies wildly.
+	const AI_SPELL_CHUNK_CHAR_BUDGET = 700;
+
+	/** Runs a single spell-check request for one chunk's worth of prompt text and resolves with
+	 *  its parsed entries - [] for a request that errored or came back unparseable, same as a
+	 *  chunk with nothing wrong in it, since from the caller's perspective those are both "this
+	 *  chunk contributed nothing" and the scan should still move on to the next chunk rather
+	 *  than aborting the whole note over one bad request. Logs the raw response either way
+	 *  (success or failure) - see the console.error/console.log calls below - since a silent
+	 *  failure here previously looked identical to "the AI found nothing", which is exactly what
+	 *  made the max_tokens regression invisible. */
+	async function requestSpellCheckChunk(
+		prompt: string,
+		chunkLabel: string,
+	): Promise<SpellCheckEntry[]> {
+		const requestId = crypto.randomUUID();
+		let accumulated = '';
+		return new Promise<SpellCheckEntry[]>((resolve) => {
+			let settled = false;
+			let unlisten: (() => void) | null = null;
+			const finish = (entries: SpellCheckEntry[]) => {
+				if (settled) return;
+				settled = true;
+				if (unlisten) unlisten();
+				resolve(entries);
+			};
+			listen<AiStreamEvent>('ai-stream', (event) => {
+				if (event.payload.request_id !== requestId) return;
+				const data = event.payload;
+				if (data.event_type === 'text' && data.text) {
+					accumulated += data.text;
+				} else if (data.event_type === 'done') {
+					const entries = parseSpellCheckResponse(accumulated);
+					// console.log (not console.debug) deliberately - Chrome DevTools hides
+					// console.debug behind its "Verbose" log-level filter, which is off by
+					// default, so a debug-only log here would go just as unseen as no log at
+					// all. This is the one place to check "did the AI actually find fewer
+					// errors than expected, or did something break before it even replied".
+					console.log(`[ai-spell-check] ${chunkLabel}: ${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} parsed; raw response:`, accumulated);
+					finish(entries);
+				} else if (data.event_type === 'error') {
+					// Silent to the user by design (same as ghost-text - a flaky AI provider
+					// shouldn't interrupt typing or pop an error where an underline would go),
+					// but silent to the developer too was the real problem: a rejected request
+					// (wrong API key, a max_tokens over the model's real cap, rate limit, ...)
+					// previously looked byte-for-byte identical to "the AI checked and found
+					// nothing wrong". Log it so that distinction is visible.
+					console.error(`[ai-spell-check] ${chunkLabel} failed:`, data.error);
+					finish([]);
+				}
+			}).then((fn) => {
+				// The response can in principle arrive before listen()'s own promise resolves
+				// (it's an extra async hop of its own) - if finish() already ran, unsubscribe
+				// immediately instead of leaving a dangling listener.
+				if (settled) { fn(); return; }
+				unlisten = fn;
+			});
+			aiAsk('spell_check', prompt, null, requestId, 4096).catch(() => {
+				// Silent by design, same as ghost-text - a missing/misconfigured AI provider
+				// shouldn't interrupt typing or show an error where an underline would go.
+				finish([]);
+			});
+		});
+	}
+
 	async function runAiSpellScan(generation: number) {
 		if (!editor || editor.isDestroyed || generation !== aiSpellGeneration) return;
 		const { promptBlocks, tokens } = collectSpellTokens(editor.state.doc);
@@ -755,38 +826,33 @@
 			return;
 		}
 		if (fullText === aiSpellLastScannedText) return;
-		const prompt = buildSpellCheckPrompt(promptBlocks);
-		const requestId = crypto.randomUUID();
-		let accumulated = '';
-		// Only touch the in-flight indicator from a callback that's confirmed its own
-		// generation still matches - a stale request finishing after a newer one has already
-		// started must never clear the flag out from under it.
-		const finishInFlight = () => {
-			if (generation === aiSpellGeneration) aiSpellScanInFlight = false;
-		};
-		const unlisten = await listen<AiStreamEvent>('ai-stream', (event) => {
-			if (event.payload.request_id !== requestId) return;
-			if (generation !== aiSpellGeneration) { unlisten(); return; }
-			const data = event.payload;
-			if (data.event_type === 'text' && data.text) {
-				accumulated += data.text;
-			} else if (data.event_type === 'done') {
-				unlisten();
-				finishInFlight();
+
+		// Group consecutive paragraphs into chunks under the char budget - always at least one
+		// block per chunk even if that single block alone is over budget (an oversized paragraph
+		// still has to be sent as its own chunk rather than dropped or stalling the loop).
+		const chunks: SpellCheckPromptBlock[][] = [];
+		let current: SpellCheckPromptBlock[] = [];
+		let currentChars = 0;
+		for (const block of promptBlocks) {
+			if (current.length && currentChars + block.text.length > AI_SPELL_CHUNK_CHAR_BUDGET) {
+				chunks.push(current);
+				current = [];
+				currentChars = 0;
+			}
+			current.push(block);
+			currentChars += block.text.length;
+		}
+		if (current.length) chunks.push(current);
+
+		aiSpellScanInFlight = true;
+		const suggestions = new Map<string, string[]>();
+		const ranges: { from: number; to: number }[] = [];
+		try {
+			for (let c = 0; c < chunks.length; c++) {
 				if (generation !== aiSpellGeneration || !editor || editor.isDestroyed) return;
-				const entries = parseSpellCheckResponse(accumulated);
-				// Diagnostic only (never shown to the user) - the AI's raw response is the one
-				// thing this whole pipeline can't otherwise inspect after the fact, so when the
-				// count of flagged words looks suspiciously low (or parsing silently failed),
-				// this is the quickest way to tell "the model really only found 2 problems"
-				// apart from "something broke between the model and here".
-				if (entries.length === 0 && accumulated.trim()) {
-					console.debug('[ai-spell-check] response parsed to 0 entries; raw response:', accumulated);
-				} else {
-					console.debug(`[ai-spell-check] ${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} parsed from ${promptBlocks.length} paragraph(s); raw response:`, accumulated);
-				}
-				const suggestions = new Map<string, string[]>();
-				const ranges: { from: number; to: number }[] = [];
+				const prompt = buildSpellCheckPrompt(chunks[c]);
+				const entries = await requestSpellCheckChunk(prompt, `chunk ${c + 1}/${chunks.length}`);
+				if (generation !== aiSpellGeneration || !editor || editor.isDestroyed) return;
 				for (const entry of entries) {
 					const lowerWord = entry.word.toLowerCase();
 					if (spellIgnoreSet.has(lowerWord)) continue;
@@ -797,37 +863,19 @@
 						}
 					}
 				}
-				aiSpellSuggestions = suggestions;
-				aiSpellLastScannedText = fullText;
-				editor.view.dispatch(editor.state.tr.setMeta(spellCheckPluginKey, { type: 'setErrors', ranges }));
-			} else if (data.event_type === 'error') {
-				unlisten();
-				finishInFlight();
-				// Silent to the user by design (same as ghost-text - a flaky AI provider
-				// shouldn't interrupt typing or pop an error where an underline would go), but
-				// silent to the DEVELOPER too was the real problem: a rejected request (wrong
-				// API key, a max_tokens over the model's real cap, rate limit, ...) previously
-				// looked byte-for-byte identical to "the AI checked and found nothing wrong" -
-				// there was no way to tell those apart. Log it so that distinction is visible.
-				console.error('[ai-spell-check] request failed:', data.error);
+				// Paint results as each chunk finishes rather than waiting for the whole note -
+				// a copy of the accumulated (never replaced) maps/arrays so an earlier chunk's
+				// underlines stay up while a later chunk is still in flight, and so the note
+				// isn't left showing nothing at all for the full duration of a long scan.
+				aiSpellSuggestions = new Map(suggestions);
+				editor.view.dispatch(editor.state.tr.setMeta(spellCheckPluginKey, { type: 'setErrors', ranges: [...ranges] }));
 			}
-		});
-		aiSpellScanInFlight = true;
-		try {
-			// Deliberately NOT raised above 4096: a couple of providers/models cap max output
-			// tokens below 8192 and reject the request outright if you ask for more - and a
-			// rejected request here fails completely silently (see the 'error' branch above),
-			// which looks indistinguishable from "the AI genuinely found nothing". If a future
-			// report turns out to be truncation on a very large note rather than the model
-			// itself being too conservative, the console.debug/console.error logging above is
-			// what to check before touching this number again - raise it only once the actual
-			// provider's real limit is known, not as a guess.
-			await aiAsk('spell_check', prompt, null, requestId, 4096);
-		} catch {
-			// Silent by design, same as ghost-text - a missing/misconfigured AI provider
-			// shouldn't interrupt typing or show an error where an underline would go.
-			unlisten();
-			finishInFlight();
+			aiSpellLastScannedText = fullText;
+		} finally {
+			// Same generation guard as before: only this call's own (still-current) generation
+			// is allowed to clear the in-flight flag, so a stale scan finishing late can never
+			// clear it out from under a newer one that's already running.
+			if (generation === aiSpellGeneration) aiSpellScanInFlight = false;
 		}
 	}
 
