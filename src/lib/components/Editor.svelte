@@ -784,7 +784,18 @@
 
 	function applySpellContextSuggestion(suggestion: string) {
 		if (!editor || !spellContextMenu) return;
-		const { from, to } = spellContextMenu;
+		const { from, to, word } = spellContextMenu;
+		// Belt-and-suspenders re-check right before mutating: onUpdate (below) keeps this range
+		// mapped forward as the document changes while the menu is open, closing the menu
+		// outright if the word it was opened for stops matching there, but confirm it one more
+		// time at the point of use rather than trusting a value computed earlier - the same
+		// "never trust a position without reverifying at the point of use" rule
+		// computeActiveSpellFix() follows for the Tab-accept badge, and the rule the original
+		// Tab-corruption fix (27e1ba1) established for this whole feature.
+		if (from >= to || editor.state.doc.textBetween(from, to).toLowerCase() !== word.toLowerCase()) {
+			closeSpellContextMenu();
+			return;
+		}
 		editor.chain().focus().insertContentAt({ from, to }, suggestion).run();
 		closeSpellContextMenu();
 	}
@@ -4428,6 +4439,11 @@
 		aiSpellSuggestions = new Map();
 		aiSpellLastScannedText = null;
 		aiSpellScanInFlight = false;
+		// A right-click spell-fix menu left open from the previous note would otherwise linger
+		// with a {from, to} range into a document that's about to be replaced entirely - the
+		// onUpdate remap below would catch this too (the word can't possibly still match after a
+		// full note swap), but closing it here is immediate rather than waiting on that check.
+		spellContextMenu = null;
 		isLoadingNote = true;
 		clearGhostSuggestion();
 		isLargeDoc = content.length > LARGE_DOC_CHARS;
@@ -5799,7 +5815,30 @@
 					prevCursorWikiMark = curWikiMark;
 				}
 			},
-			onUpdate: () => {
+			onUpdate: ({ transaction }) => {
+				// The right-click spell-fix menu freezes a {from, to, word} range at the moment
+				// it's opened (handleEditorContextMenu), but the menu can stay open for a while -
+				// the user reads the suggestions, or just doesn't click one right away - during
+				// which the document can keep changing (their own further typing, a remote edit
+				// on a live/collaborative note, autoformatting, ...). Left alone, that frozen
+				// range would go stale exactly the way a position the original Tab-corruption fix
+				// (27e1ba1) was meant to prevent: applySpellContextSuggestion() would then splice
+				// the chosen suggestion into whatever now occupies those old integer offsets,
+				// which can be unrelated text several words away, producing exactly the kind of
+				// mashed-together corruption ("wentent"-style) that was reported. So: remap the
+				// stored range through every transaction the same way the decoration set already
+				// does (decoSet.map(tr.mapping, tr.doc) in SpellCheckPlugin above), and close the
+				// menu outright the moment the word it was opened for no longer matches there -
+				// better to have the menu disappear than to risk applying a fix to the wrong text.
+				if (spellContextMenu && transaction.docChanged && editor) {
+					const mappedFrom = transaction.mapping.map(spellContextMenu.from, -1);
+					const mappedTo = transaction.mapping.map(spellContextMenu.to, 1);
+					const stillThere = mappedFrom < mappedTo &&
+						editor.state.doc.textBetween(mappedFrom, mappedTo).toLowerCase() === spellContextMenu.word.toLowerCase();
+					spellContextMenu = stillThere
+						? { ...spellContextMenu, from: mappedFrom, to: mappedTo }
+						: null;
+				}
 				if (ignoreNextUpdate || isLoadingNote) {
 					ignoreNextUpdate = false;
 					return;
