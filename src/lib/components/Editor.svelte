@@ -351,6 +351,15 @@
 	function cleanCompletion(rawText: string, charBefore: string, recentContext: string, isMath = false): string {
 		let cleaned = rawText.replace(/^\s+/, '').split(/\n{2,}/)[0];
 		if (!cleaned) return '';
+		// Raw-completion mode has no chat template holding the model's own control tokens back,
+		// so a multimodal model can leak things like "<start_of_image>...</end_of_image>" or a
+		// stray code fence straight into the text instead of an actual word. Cut the suggestion
+		// off right before the first sign of one rather than showing it.
+		const leak = cleaned.match(/<\/?[a-zA-Z][\w:-]*(?:\s[^<>]*)?>|```/);
+		if (leak && leak.index !== undefined) {
+			cleaned = cleaned.slice(0, leak.index);
+		}
+		if (!cleaned) return '';
 		cleaned = truncateToWords(cleaned, ghostTextMaxWords());
 		if (!cleaned) return '';
 		if (!/^[.,!?;:)\]}%'’=\-]/.test(cleaned)) {
