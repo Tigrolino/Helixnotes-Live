@@ -2360,7 +2360,7 @@
 										<button class="option-btn" class:active={ghostTextMaxWords === 2} onclick={() => { if (ghostTextMaxWords === 2) return; ghostTextMaxWords = 2; saveAiSettings(); }}>2 words</button>
 										<button class="option-btn" class:active={ghostTextMaxWords === 3} onclick={() => { if (ghostTextMaxWords === 3) return; ghostTextMaxWords = 3; saveAiSettings(); }}>3 words</button>
 									</div>
-									<p class="setting-hint">How much of a suggestion to show at once. Lower is closer to what you were actually about to type; higher lets it finish more of the thought for you.</p>
+									<p class="setting-hint">Suggestions show a full sentence (or close to it) at once - this sets how much of it each Tab press fills in. Lower feels closer to typing it yourself one step at a time; higher fills in more per press, with the rest still waiting for your next Tab(s).</p>
 								</div>
 
 								<div class="settings-section">

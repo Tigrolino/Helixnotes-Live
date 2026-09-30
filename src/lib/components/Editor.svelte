@@ -223,19 +223,26 @@
 	const GHOST_TEXT_REPEAT_CHECK_LEN = 24;
 	const GHOST_TEXT_REPEAT_LOOKBACK_CHARS = 1500;
 
-	/** 1-3, from Settings > AI > Ghost-Text Completion - how many words a suggestion shows
-	 *  at once. Clamped here too in case a config file was hand-edited or came from an older
-	 *  version that never had this field. */
+	// TypeSeer-style: the model is asked for a whole sentence-ish chunk up front and all of
+	// it is shown as ghost text - the configured 1-3 word cap (below) no longer limits how
+	// much is fetched/displayed, only how much a single Tab press actually inserts. The rest
+	// stays buffered as ghost text and needs no new request until it runs out.
+	const GHOST_TEXT_DISPLAY_MAX_WORDS = 30;
+
+	/** 1-3, from Settings > AI > Ghost-Text Completion - how many words a single Tab press
+	 *  applies from the (usually longer) buffered suggestion. Clamped here too in case a
+	 *  config file was hand-edited or came from an older version that never had this field. */
 	function ghostTextMaxWords(): number {
 		const raw = $appConfig?.ghost_text_max_words ?? 1;
 		return Math.min(3, Math.max(1, Math.round(raw)));
 	}
 
-	/** A rough per-word token budget (most tokenizers split a word into a bit more than one
-	 *  token, plus we want a little headroom for punctuation) - generous enough to comfortably
-	 *  cover the word cap without asking the model for a whole paragraph it'll never use. */
+	/** Token budget for fetching a whole buffered suggestion - generous enough to usually
+	 *  cover a full sentence regardless of the per-Tab word cap above, since that cap no
+	 *  longer limits what's fetched. cleanCompletion() trims the raw result back down (the
+	 *  display word cap, or the first sentence boundary) once it's back. */
 	function ghostTextMaxTokens(): number {
-		return 8 + ghostTextMaxWords() * 8;
+		return 64;
 	}
 
 	const GhostTextPlugin = Extension.create({
@@ -303,24 +310,37 @@
 		if (!value) return false;
 		const sel = editor.state.selection;
 		if (!sel.empty || sel.from !== value.from) return false;
-		const newPos = value.from + value.text.length;
+		// TypeSeer-style: only the configured word cap is actually inserted by this Tab press -
+		// whatever's left of the buffered suggestion stays showing as ghost text, ready for the
+		// next Tab, with no new request needed until it runs out.
+		const applied = truncateToWords(value.text, ghostTextMaxWords());
+		const remainder = value.text.slice(applied.length);
+		const newPos = value.from + applied.length;
 		const pending = ghostSpeculative;
 		ghostSpeculative = null;
-		editor.chain().focus().insertContentAt(value.from, value.text).run();
+		editor.chain().focus().insertContentAt(value.from, applied).run();
 		// insertContentAt's onUpdate already ran scheduleGhostTextSuggestion(), which bumped
-		// ghostTextGeneration and queued a fresh debounce. If a lookahead fetch already told us
-		// what comes next (kicked off when this suggestion first appeared, on the assumption
-		// it'd be accepted), skip that wait and show it right now instead - that's what keeps
-		// repeated Tab-accepts feeling instant instead of a fresh wait every time.
-		if (pending && pending.afterPos === newPos && editor.state.selection.from === newPos) {
-			if (ghostTextTimer) { clearTimeout(ghostTextTimer); ghostTextTimer = null; }
-			const generation = ghostTextGeneration;
-			showGhostSuggestion(pending.text, newPos, generation);
-			const contextText = editor.state.doc.textBetween(0, newPos, '\n', '\n');
-			const slicedContext = contextText.length > GHOST_TEXT_CONTEXT_CHARS
-				? contextText.slice(-GHOST_TEXT_CONTEXT_CHARS)
-				: contextText;
-			kickOffSpeculativePrefetch(slicedContext, pending.text, newPos, generation);
+		// ghostTextGeneration and queued a fresh debounce. If there's more of the already-
+		// fetched suggestion left to show, skip the wait and show it right now. Otherwise, if
+		// that buffer just ran out, fall back to a lookahead fetch already told us what comes
+		// right after it (kicked off when this suggestion first appeared, on the assumption it'd
+		// eventually be fully accepted). Either way this is what keeps repeated Tab-accepts
+		// feeling instant - if neither is available, the freshly-queued debounce is left alone
+		// to fetch a new one.
+		if (editor.state.selection.from === newPos) {
+			if (remainder.trim()) {
+				if (ghostTextTimer) { clearTimeout(ghostTextTimer); ghostTextTimer = null; }
+				editor.view.dispatch(editor.state.tr.setMeta(ghostTextPluginKey, { type: 'set', text: remainder, from: newPos }));
+			} else if (pending && pending.afterPos === newPos) {
+				if (ghostTextTimer) { clearTimeout(ghostTextTimer); ghostTextTimer = null; }
+				const generation = ghostTextGeneration;
+				showGhostSuggestion(pending.text, newPos, generation);
+				const contextText = editor.state.doc.textBetween(0, newPos, '\n', '\n');
+				const slicedContext = contextText.length > GHOST_TEXT_CONTEXT_CHARS
+					? contextText.slice(-GHOST_TEXT_CONTEXT_CHARS)
+					: contextText;
+				kickOffSpeculativePrefetch(slicedContext, pending.text, newPos, generation);
+			}
 		}
 		return true;
 	}
@@ -342,9 +362,12 @@
 		return count > 0 ? text.slice(0, endIndex) : text;
 	}
 
-	/** Cleans a raw model completion down to what should actually be shown/inserted: strips
-	 *  leading whitespace, cuts at the first blank line, holds it to the configured word cap,
-	 *  and adds a single separating space when the result starts a fresh word right after
+	/** Cleans a raw model completion down to what should actually be shown/buffered: strips
+	 *  leading whitespace, cuts at the first blank line, holds it to a generous display cap
+	 *  or the end of the first sentence, whichever comes first (GHOST_TEXT_DISPLAY_MAX_WORDS -
+	 *  the per-Tab word cap in Settings doesn't limit this, only how much of it
+	 *  acceptGhostSuggestion actually inserts per Tab), and adds a single separating space
+	 *  when the result starts a fresh word right after
 	 *  non-space text, so accepting it doesn't glue two words together ("the" + "store" ->
 	 *  "the store", not "thestore"). Leave punctuation that attaches directly to the previous
 	 *  word alone (periods, commas, closing brackets, apostrophes...), and don't add one after
@@ -369,8 +392,14 @@
 			cleaned = cleaned.slice(0, leak.index);
 		}
 		if (!cleaned) return '';
-		cleaned = truncateToWords(cleaned, ghostTextMaxWords());
+		cleaned = truncateToWords(cleaned, GHOST_TEXT_DISPLAY_MAX_WORDS);
 		if (!cleaned) return '';
+		// Show through the end of the first sentence if one shows up well before that word
+		// cap - the point is "the rest of what you were about to type", not a run-on block.
+		const sentenceEnd = cleaned.match(/[.!?](?=\s|$)/);
+		if (sentenceEnd && sentenceEnd.index !== undefined) {
+			cleaned = cleaned.slice(0, sentenceEnd.index + 1);
+		}
 		if (!/^[.,!?;:)\]}%'’=\-]/.test(cleaned)) {
 			if (charBefore && !/[\s(\[{"'‘=]/.test(charBefore)) {
 				cleaned = ' ' + cleaned;
