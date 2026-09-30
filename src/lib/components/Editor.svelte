@@ -281,7 +281,10 @@
 		const sel = editor.state.selection;
 		if (!sel.empty || sel.from !== pos) return;
 		// Stop at the first blank line - a completion is a phrase/sentence, not a new paragraph.
-		const cleaned = rawText.replace(/^\s+/, '').split(/\n{2,}/)[0];
+		// Only strip a stray leading newline here, never a leading space: a completion that
+		// continues right after a word boundary ("the" -> " store") needs that space kept, or
+		// accepting it would jam the new word straight onto the old one ("thestore").
+		const cleaned = rawText.replace(/^\n+/, '').split(/\n{2,}/)[0];
 		if (!cleaned) return;
 		editor.view.dispatch(editor.state.tr.setMeta(ghostTextPluginKey, { type: 'set', text: cleaned, from: pos }));
 	}
