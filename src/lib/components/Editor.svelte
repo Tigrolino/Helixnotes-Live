@@ -113,6 +113,88 @@
 			};
 		},
 	});
+
+	// TipTap's mark input rules only fire when the closing delimiter is the very last thing typed,
+	// immediately before the cursor - they look at the text *before* the cursor on every keystroke.
+	// Type all the delimiters first (e.g. "****") and then fill in content in the middle, and the rule
+	// never sees a complete match next to the cursor, so nothing converts - even though a reload (which
+	// re-parses the note's raw markdown from scratch) reads the exact same text as valid **bold**. This
+	// plugin re-scans the current line after every edit and converts any complete, un-marked
+	// **bold**/__bold__, ~~strikethrough~~ or `code` span it finds regardless of typing order, so typing
+	// out of order behaves the same as typing in order. Left out on purpose: single */_ italics, whose
+	// delimiters collide too easily with ordinary text (snake_case_names, "5 * 2 * 3") to auto-convert
+	// safely outside of the normal in-order shortcut.
+	const MARKDOWN_SPAN_PATTERNS: Array<{ mark: string; delimLen: number; regex: RegExp }> = [
+		{ mark: 'bold', delimLen: 2, regex: /(\*\*|__)([^\s](?:[^\n]*?[^\s])?)\1/g },
+		{ mark: 'strike', delimLen: 2, regex: /~~([^\s](?:[^\n]*?[^\s])?)~~/g },
+		{ mark: 'code', delimLen: 1, regex: /`([^\s`](?:[^`\n]*?[^\s`])?)`/g },
+	];
+
+	function findNextMarkdownSpan(text: string, fromIndex: number) {
+		let best: { from: number; to: number; delimLen: number; mark: string } | null = null;
+		for (const { mark, delimLen, regex } of MARKDOWN_SPAN_PATTERNS) {
+			regex.lastIndex = fromIndex;
+			const m = regex.exec(text);
+			if (m && (!best || m.index < best.from)) best = { from: m.index, to: m.index + m[0].length, delimLen, mark };
+		}
+		return best;
+	}
+
+	function findMarkdownSpans(text: string) {
+		const spans: Array<{ from: number; to: number; delimLen: number; mark: string }> = [];
+		let cursor = 0;
+		while (cursor <= text.length) {
+			const next = findNextMarkdownSpan(text, cursor);
+			if (!next) break;
+			spans.push(next);
+			cursor = next.to;
+		}
+		return spans;
+	}
+
+	const MarkdownAutoFormat = Extension.create({
+		name: 'markdownAutoFormat',
+		addProseMirrorPlugins() {
+			return [
+				new Plugin({
+					key: new PluginKey('markdownAutoFormat'),
+					appendTransaction(transactions, _oldState, newState) {
+						if (isLoadingNote || editor?.view?.composing) return null;
+						if (!transactions.some((tr) => tr.docChanged)) return null;
+						if (transactions.some((tr) => tr.getMeta('addToHistory') === false || tr.getMeta('y-sync$'))) return null;
+
+						const resolvedFrom = newState.selection.$from;
+						const block = resolvedFrom.parent;
+						if (!block.isTextblock || block.type.name === 'codeBlock' || !block.textContent) return null;
+
+						const spans = findMarkdownSpans(block.textContent);
+						if (!spans.length) return null;
+
+						const blockStart = resolvedFrom.start(resolvedFrom.depth);
+						const tr = newState.tr;
+						const originalHead = newState.selection.from;
+
+						// Right-to-left so earlier positions stay valid as later-in-line ones are edited first.
+						for (let i = spans.length - 1; i >= 0; i--) {
+							const span = spans[i];
+							const markType = newState.schema.marks[span.mark];
+							if (!markType) continue;
+							const absFrom = blockStart + span.from;
+							const absTo = blockStart + span.to;
+							const innerLength = span.to - span.from - span.delimLen * 2;
+							tr.delete(absTo - span.delimLen, absTo);
+							tr.delete(absFrom, absFrom + span.delimLen);
+							tr.addMark(absFrom, absFrom + innerLength, markType.create());
+						}
+
+						if (!tr.steps.length) return null;
+						tr.setSelection(TextSelection.near(tr.doc.resolve(tr.mapping.map(originalHead))));
+						return tr;
+					},
+				}),
+			];
+		},
+	});
 	let editorReady = $state(false);
 	let sourceContent = $state('');
 	let sourceHighlightHtml = $derived.by(() => {
@@ -4408,6 +4490,7 @@
 	function buildExtensions(liveFieldId: string | null) {
 		return [
 				MixedListShortcuts,
+				MarkdownAutoFormat,
 				// Collaboration ships its own undo/redo (via y-tiptap's yUndoPlugin); StarterKit's
 				// history must be disabled for a live note so the two don't fight over Mod-Z/Mod-Y.
 				StarterKit.configure({ codeBlock: false, ...(liveFieldId ? { history: false } : {}) }),
