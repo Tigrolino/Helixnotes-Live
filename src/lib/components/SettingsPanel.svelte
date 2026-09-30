@@ -217,6 +217,7 @@
 	let aiWritingStyle = $state($appConfig?.ai_writing_style ?? '');
 	let ghostTextEnabled = $state($appConfig?.ghost_text_enabled ?? false);
 	let ghostTextMaxWords = $state($appConfig?.ghost_text_max_words ?? 1);
+	let spellCheckEnabled = $state($appConfig?.spell_check_enabled ?? true);
 	let aiShowKey = $state(false);
 	let aiShowCompatibleKey = $state(false);
 	let aiShowOllamaKey = $state(false);
@@ -249,6 +250,7 @@
 			_openaiCompatibleKey || null,
 			ghostTextEnabled,
 			ghostTextMaxWords,
+			spellCheckEnabled,
 		);
 		if ($appConfig) {
 			$appConfig = {
@@ -264,6 +266,7 @@
 				ai_writing_style: aiWritingStyle || null,
 				ghost_text_enabled: ghostTextEnabled,
 				ghost_text_max_words: ghostTextMaxWords,
+				spell_check_enabled: spellCheckEnabled,
 			};
 		}
 	}
@@ -2361,6 +2364,19 @@
 										<button class="option-btn" class:active={ghostTextMaxWords === 3} onclick={() => { if (ghostTextMaxWords === 3) return; ghostTextMaxWords = 3; saveAiSettings(); }}>3 words</button>
 									</div>
 									<p class="setting-hint">Suggestions show a full sentence (or close to it) at once - this sets how much of it each Tab press fills in. Lower feels closer to typing it yourself one step at a time; higher fills in more per press, with the rest still waiting for your next Tab(s).</p>
+								</div>
+
+								<div class="settings-section">
+									<h3>Spelling Corrections</h3>
+									<label class="setting-toggle">
+										<span class="setting-label">
+											<span class="setting-name">Flag misspelled words</span>
+											<span class="setting-desc">Underlines a misspelled word right after you type it and shows a suggested fix - press Tab to accept it, or keep typing to ignore it. Checked against a bundled offline dictionary, so this works with no AI provider configured at all.</span>
+										</span>
+										<button class="toggle-switch" class:on={spellCheckEnabled} role="switch" aria-checked={spellCheckEnabled} aria-label="Flag misspelled words" onclick={() => { spellCheckEnabled = !spellCheckEnabled; saveAiSettings(); }}>
+											<span class="toggle-knob"></span>
+										</button>
+									</label>
 								</div>
 
 								<div class="settings-section">

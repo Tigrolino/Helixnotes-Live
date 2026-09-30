@@ -2407,6 +2407,7 @@ pub fn set_ai_settings(
     openai_compatible_api_key: Option<String>,
     ghost_text_enabled: bool,
     ghost_text_max_words: u32,
+    spell_check_enabled: bool,
 ) -> Result<(), String> {
     let mut config = state.config.lock().map_err(|e| e.to_string())?;
     let key = api_key.filter(|k| !k.is_empty());
@@ -2428,6 +2429,7 @@ pub fn set_ai_settings(
     config.ai_writing_style = writing_style.filter(|s| !s.trim().is_empty());
     config.ghost_text_enabled = ghost_text_enabled;
     config.ghost_text_max_words = ghost_text_max_words.clamp(1, 3);
+    config.spell_check_enabled = spell_check_enabled;
     save_app_config(&config)?;
     Ok(())
 }

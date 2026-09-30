@@ -246,6 +246,10 @@ pub struct AppConfig {
     // this range and sizes its max_tokens request from it.
     #[serde(default = "default_ghost_text_max_words")]
     pub ghost_text_max_words: u32,
+    // Offline spelling-correction (static/dictionaries/en.txt) - unlike ghost-text, needs
+    // no AI provider, so it defaults on.
+    #[serde(default = "default_true")]
+    pub spell_check_enabled: bool,
     #[serde(default)]
     pub default_view_mode: bool,
     #[serde(default)]
@@ -386,6 +390,7 @@ impl Default for AppConfig {
             ai_writing_style: None,
             ghost_text_enabled: false,
             ghost_text_max_words: 1,
+            spell_check_enabled: true,
             default_view_mode: false,
             new_notes_in_source_mode: false,
             show_tray_icon: false,

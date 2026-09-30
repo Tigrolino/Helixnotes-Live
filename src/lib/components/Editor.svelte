@@ -58,6 +58,7 @@
 	import { clearFormatting } from '$lib/editor/clearFormatting';
 	import { serializeInlineMarkdown } from '$lib/editor/markdown';
 	import { restoreTitleHeading, stripTitleHeading, type HiddenTitleHeading } from '$lib/editor/titleVisibility';
+	import { loadDictionary, isDictionaryReady, suggestCorrection } from '$lib/editor/spellcheck';
 	import { tagIterationKey } from '$lib/utils/tag-styles';
 	import { replaceWithWikiLink } from '$lib/editor/wikiLinks';
 	import { assetSourceToMarkdown, assetUrlToLocalPath, normalizeLocalAssetPath, resolveVaultFilePath } from '$lib/utils/paths';
@@ -294,6 +295,135 @@
 			];
 		},
 	});
+
+	// Offline spelling-correction: flags the word immediately before the cursor when it's not in
+	// the bundled dictionary, with a suggested single-word fix shown inline and accepted with Tab -
+	// same Tab-to-accept feel as ghost-text, but entirely local (no AI provider needed, works with
+	// none configured at all - see $lib/editor/spellcheck.ts). Registered before GhostTextPlugin in
+	// buildExtensions() so its handleKeyDown gets first refusal on Tab: a pending spelling
+	// correction takes priority over a pending AI completion when both happen to be showing. Off
+	// for live notes (v1 scope), same as ghost-text.
+	const spellCheckPluginKey = new PluginKey('spellCheck');
+	// Matches the word that a just-typed boundary character (space, punctuation...) completed,
+	// right at the end of the text before the cursor - letters and apostrophes (straight or the
+	// curly one Typography auto-converts mid-word to) making up the word, followed by whatever
+	// boundary run closed it out. Verified standalone (11/11 cases: plain words, contractions with
+	// both apostrophe styles, a closing single-quote/possessive, hyphenated compounds, digits,
+	// no-match/mid-word input) before being wired in here.
+	const SPELL_CHECK_BOUNDARY_RE = /([A-Za-z'\u2019]+)([ \t\n.,!?;:()[\]{}"*_~/\\\u2013\u2014]+)$/;
+	const SPELL_CHECK_LOOKBACK_CHARS = 100;
+
+	const SpellCheckPlugin = Extension.create({
+		name: 'spellCheck',
+		addProseMirrorPlugins() {
+			return [
+				new Plugin({
+					key: spellCheckPluginKey,
+					state: {
+						init: () => null as { from: number; to: number; suggestion: string } | null,
+						apply(tr, value) {
+							const meta = tr.getMeta(spellCheckPluginKey);
+							if (meta) return meta.type === 'clear' ? null : { from: meta.from, to: meta.to, suggestion: meta.suggestion };
+							if (!value) return null;
+							// Same invalidation rule as ghost-text: any real edit or cursor move means this
+							// suggestion was computed for a document that no longer looks like this.
+							if (tr.docChanged || tr.selectionSet) return null;
+							return value;
+						},
+					},
+					props: {
+						decorations(state) {
+							const value = spellCheckPluginKey.getState(state);
+							if (!value) return null;
+							const widget = document.createElement('span');
+							widget.className = 'spell-suggestion';
+							widget.textContent = ` \u2192 ${value.suggestion}`;
+							widget.setAttribute('contenteditable', 'false');
+							return DecorationSet.create(state.doc, [
+								Decoration.inline(value.from, value.to, { class: 'spell-error' }),
+								Decoration.widget(value.to, widget, { side: 1 }),
+							]);
+						},
+						handleKeyDown(_view, event) {
+							const value = spellCheckPluginKey.getState(_view.state);
+							if (!value) return false;
+							if (event.key === 'Escape') {
+								clearSpellCheckSuggestion();
+								return true;
+							}
+							if (event.key === 'Tab' && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey) {
+								// Defer to an autocomplete popup that's already claiming Tab for itself.
+								if (slashMenu || wikiLinkMenu || taskMetaMenu) return false;
+								event.preventDefault();
+								acceptSpellCorrection();
+								return true;
+							}
+							return false;
+						},
+					},
+				}),
+			];
+		},
+	});
+
+	function clearSpellCheckSuggestion() {
+		if (editor && !editor.isDestroyed && spellCheckPluginKey.getState(editor.state)) {
+			editor.view.dispatch(editor.state.tr.setMeta(spellCheckPluginKey, { type: 'clear' }));
+		}
+	}
+
+	function acceptSpellCorrection(): boolean {
+		if (!editor) return false;
+		const value = spellCheckPluginKey.getState(editor.state) as { from: number; to: number; suggestion: string } | null;
+		if (!value) return false;
+		editor.chain().focus().insertContentAt({ from: value.from, to: value.to }, value.suggestion).run();
+		return true;
+	}
+
+	/** Called on every editor update, right after scheduleGhostTextSuggestion() - checks whether
+	 *  the word a just-typed boundary character completed is misspelled, and shows a suggested
+	 *  fix if so. Purely local (a Set lookup plus, on a miss, a small edit-distance search - see
+	 *  $lib/editor/spellcheck.ts) and synchronous, so unlike ghost-text this needs no debouncing
+	 *  or AI provider - it only needs the dictionary to have finished loading. */
+	function scheduleSpellCheck() {
+		if (!editor || editor.isDestroyed || boundLiveFieldId || editor.view.composing) return;
+		if (!$appConfig?.spell_check_enabled || !isDictionaryReady()) {
+			clearSpellCheckSuggestion();
+			return;
+		}
+		const sel = editor.state.selection;
+		if (!sel.empty) {
+			clearSpellCheckSuggestion();
+			return;
+		}
+		const pos = sel.from;
+		const lookbackStart = Math.max(0, pos - SPELL_CHECK_LOOKBACK_CHARS);
+		const context = editor.state.doc.textBetween(lookbackStart, pos, '\n', '\n');
+		const m = context.match(SPELL_CHECK_BOUNDARY_RE);
+		if (!m) {
+			clearSpellCheckSuggestion();
+			return;
+		}
+		const rawWord = m[1];
+		const boundaryLen = m[2].length;
+		const trailMatch = rawWord.match(/['\u2019]+$/);
+		const trimTrail = trailMatch ? trailMatch[0].length : 0;
+		const word = rawWord.slice(0, rawWord.length - trimTrail);
+		if (!word) {
+			clearSpellCheckSuggestion();
+			return;
+		}
+		const wordEndRel = context.length - boundaryLen - trimTrail;
+		const wordStartRel = wordEndRel - word.length;
+		const from = lookbackStart + wordStartRel;
+		const to = lookbackStart + wordEndRel;
+		const suggestion = suggestCorrection(word);
+		if (!suggestion) {
+			clearSpellCheckSuggestion();
+			return;
+		}
+		editor.view.dispatch(editor.state.tr.setMeta(spellCheckPluginKey, { type: 'set', from, to, suggestion }));
+	}
 
 	function clearGhostSuggestion() {
 		if (ghostTextTimer) { clearTimeout(ghostTextTimer); ghostTextTimer = null; }
@@ -4964,6 +5094,7 @@
 		return [
 				MixedListShortcuts,
 				MarkdownAutoFormat,
+				...(!liveFieldId ? [SpellCheckPlugin] : []),
 				...(!liveFieldId ? [GhostTextPlugin] : []),
 				// Collaboration ships its own undo/redo (via y-tiptap's yUndoPlugin); StarterKit's
 				// history must be disabled for a live note so the two don't fight over Mod-Z/Mod-Y.
@@ -5305,9 +5436,11 @@
 				if (!isMobile && showOutline) scheduleOutline();
 				if (showInfo) scheduleCounts();
 				scheduleGhostTextSuggestion();
+				scheduleSpellCheck();
 			},
 		});
 		editorReady = true;
+		loadDictionary();
 		// Pre-load note titles for wiki-link autocomplete
 		if ($appConfig?.enable_wiki_links) {
 			refreshWikiLinkTitles();
@@ -10832,6 +10965,21 @@
 	:global(.tiptap-wrapper .tiptap .ghost-suggestion) {
 		color: var(--text-tertiary);
 		opacity: 0.75;
+		pointer-events: none;
+		user-select: none;
+		white-space: pre-wrap;
+	}
+
+	:global(.tiptap-wrapper .tiptap .spell-error) {
+		text-decoration: underline wavy;
+		text-decoration-color: var(--warning);
+		text-decoration-thickness: 1.5px;
+		text-underline-offset: 3px;
+	}
+
+	:global(.tiptap-wrapper .tiptap .spell-suggestion) {
+		color: var(--warning);
+		opacity: 0.85;
 		pointer-events: none;
 		user-select: none;
 		white-space: pre-wrap;
