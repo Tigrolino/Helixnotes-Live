@@ -342,8 +342,13 @@
 	 *  a character that never wants a trailing space either (an already-typed "=" before a math
 	 *  result, opening brackets/quotes...). `charBefore` is the character that would sit right
 	 *  before this completion - the real document character for a live suggestion, or the last
-	 *  character of an already-shown suggestion when speculating about what comes after it. */
-	function cleanCompletion(rawText: string, charBefore: string): string {
+	 *  character of an already-shown suggestion when speculating about what comes after it.
+	 *  `recentContext` is roughly the last 40 characters before the cursor, used only to guard
+	 *  against a bare-number suggestion that has nothing to do with the text (a known quirk of
+	 *  running an instruction-tuned model in raw-completion mode - it occasionally free-
+	 *  associates a random digit instead of an actual word). `isMath` skips that guard, since a
+	 *  math result is a number by definition. */
+	function cleanCompletion(rawText: string, charBefore: string, recentContext: string, isMath = false): string {
 		let cleaned = rawText.replace(/^\s+/, '').split(/\n{2,}/)[0];
 		if (!cleaned) return '';
 		cleaned = truncateToWords(cleaned, ghostTextMaxWords());
@@ -353,15 +358,19 @@
 				cleaned = ' ' + cleaned;
 			}
 		}
+		if (!isMath && /^\d+(\.\d+)?[.,!?;:]?$/.test(cleaned.trimStart()) && !/\d/.test(recentContext)) {
+			return '';
+		}
 		return cleaned;
 	}
 
-	function showGhostSuggestion(rawText: string, pos: number, generation: number) {
+	function showGhostSuggestion(rawText: string, pos: number, generation: number, isMath = false) {
 		if (!editor || editor.isDestroyed || generation !== ghostTextGeneration) return;
 		const sel = editor.state.selection;
 		if (!sel.empty || sel.from !== pos) return;
 		const charBefore = pos > 0 ? editor.state.doc.textBetween(pos - 1, pos) : '';
-		const cleaned = cleanCompletion(rawText, charBefore);
+		const recentContext = editor.state.doc.textBetween(Math.max(0, pos - 40), pos, '\n', '\n');
+		const cleaned = cleanCompletion(rawText, charBefore, recentContext, isMath);
 		if (!cleaned) return;
 		editor.view.dispatch(editor.state.tr.setMeta(ghostTextPluginKey, { type: 'set', text: cleaned, from: pos }));
 	}
@@ -429,7 +438,8 @@
 			} else if (data.event_type === 'done') {
 				unlisten();
 				const charBefore = afterText[afterText.length - 1] ?? '';
-				const cleaned = cleanCompletion(accumulated, charBefore);
+				const recentContext = contextText.slice(-40);
+				const cleaned = cleanCompletion(accumulated, charBefore, recentContext);
 				if (cleaned) {
 					ghostSpeculative = { afterPos, text: cleaned };
 				}
@@ -573,7 +583,7 @@
 		const pos = resolvedFrom.pos;
 		const mathSuggestion = tryMathCompletion(block.textContent);
 		if (mathSuggestion !== null) {
-			showGhostSuggestion(mathSuggestion, pos, generation);
+			showGhostSuggestion(mathSuggestion, pos, generation, true);
 			return;
 		}
 		if (!$appConfig?.ai_provider) return;
