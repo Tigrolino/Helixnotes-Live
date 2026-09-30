@@ -37,6 +37,36 @@ export function buildSpellCheckPrompt(blocks: SpellCheckPromptBlock[]): string {
 	return blocks.map((b) => `${b.index}: ${b.text}`).join('\n');
 }
 
+/** Recovers a usable array from JSON that's broken only at the very end - live testing against
+ *  real (sometimes weaker/overloaded) models turned up a markdown fence that never closed, a
+ *  stray extra character or bracket tacked on after the array's own closing `]`, and an array
+ *  whose closing `]` just never arrived - each of which otherwise threw away an entire chunk's
+ *  worth of real, correctly-found results over a few trailing characters. Finds the last `}` in
+ *  the text (the close of the last complete entry, if the model got at least one full entry
+ *  out), truncates there, and appends `]`. This only ever discards text AFTER the last complete
+ *  entry it can find - it never touches or guesses at anything before that point, so it can't
+ *  turn a genuinely corrupted entry (e.g. a stray `'` where a `"` belonged, in the middle of the
+ *  array) into something it isn't. That case is correctly left to fail below, which loses just
+ *  that one chunk's results rather than risking a misread word or suggestion. */
+function tryRecoverTruncatedArray(text: string): unknown {
+	// The last `}` in the text isn't necessarily the real close of the last complete entry -
+	// there can be stray characters after it too (a dangling `"]}` was observed in practice,
+	// which itself contains a `}`). Walk backward through every `}` position, trying each one in
+	// turn, until one of them yields valid JSON once `]` is appended - capped well above any
+	// realistic number of entries in one chunk, just so a pathological string can't spin forever.
+	let searchFrom = text.length;
+	for (let attempts = 0; attempts < 500; attempts++) {
+		const brace = text.lastIndexOf('}', searchFrom - 1);
+		if (brace === -1) return undefined;
+		try {
+			return JSON.parse(text.slice(0, brace + 1) + ']');
+		} catch {
+			searchFrom = brace;
+		}
+	}
+	return undefined;
+}
+
 /** Parses the AI's response into a validated, de-duplicated list of corrections. Defensive
  *  about a model wrapping its JSON in a markdown code fence despite being told not to, and
  *  drops anything that doesn't match the expected shape rather than throwing - a malformed or
@@ -45,15 +75,24 @@ export function buildSpellCheckPrompt(blocks: SpellCheckPromptBlock[]): string {
  *  one wins if a model somehow repeats itself. */
 export function parseSpellCheckResponse(raw: string): SpellCheckEntry[] {
 	let text = raw.trim();
-	const fenced = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
-	if (fenced) text = fenced[1].trim();
+	// Strip a leading and/or trailing markdown fence independently, rather than requiring both
+	// to be present as a single matched pair - a response can be cut off (a rate limit, a
+	// connection hiccup, the model just stopping early) after opening a ```json fence but before
+	// ever closing it, and that's just as recoverable as the missing-closing-`]` case
+	// tryRecoverTruncatedArray() handles below.
+	const openFence = text.match(/^```(?:json)?\s*/);
+	if (openFence) text = text.slice(openFence[0].length);
+	const closeFence = text.match(/\s*```$/);
+	if (closeFence) text = text.slice(0, text.length - closeFence[0].length);
+	text = text.trim();
 	if (!text) return [];
 
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(text);
 	} catch {
-		return [];
+		parsed = tryRecoverTruncatedArray(text);
+		if (parsed === undefined) return [];
 	}
 	if (!Array.isArray(parsed)) return [];
 

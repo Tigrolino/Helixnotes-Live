@@ -108,3 +108,41 @@ test('parseSpellCheckResponse ignores non-object array entries instead of throwi
 	const raw = JSON.stringify(['not an object', 42, null, { block: 0, word: 'adn', suggestions: ['and'] }]);
 	assert.deepEqual(parseSpellCheckResponse(raw), [{ block: 0, word: 'adn', suggestions: ['and'] }]);
 });
+
+// The following cases all come from real, verbatim raw responses logged during live testing
+// against an actual (occasionally unreliable) configured model - each one previously lost an
+// entire chunk's worth of correctly-found results to a JSON parse failure over a few trailing
+// characters, well after the last complete, well-formed entry.
+
+test('parseSpellCheckResponse recovers entries when the array never got its closing bracket', () => {
+	// Real observed shape: a dangling `"]}` tacked on after the last complete entry, with no `]`
+	// ever closing the array itself.
+	const raw = '```json\n[{"block": 0, "word": "realy", "suggestions": ["really"]}, {"block": 16, "word": "makes", "suggestions": ["make"]}"]}\n```';
+	assert.deepEqual(parseSpellCheckResponse(raw), [
+		{ block: 0, word: 'realy', suggestions: ['really'] },
+		{ block: 16, word: 'makes', suggestions: ['make'] },
+	]);
+});
+
+test('parseSpellCheckResponse recovers entries when there is a stray extra closing bracket', () => {
+	// Real observed shape: `...["don't"]}]]` - one `]` too many after an otherwise well-formed,
+	// properly closed array.
+	const raw = '[{"block": 4, "word": "dont", "suggestions": ["don\'t"]}, {"block": 12, "word": "dont", "suggestions": ["do not"]}]]';
+	assert.deepEqual(parseSpellCheckResponse(raw), [
+		{ block: 4, word: 'dont', suggestions: ["don't"] },
+		{ block: 12, word: 'dont', suggestions: ['do not'] },
+	]);
+});
+
+test('parseSpellCheckResponse recovers entries when a markdown fence opens but never closes', () => {
+	const raw = '```json\n[{"block": 2, "word": "Ment", "suggestions": ["mean"]}]';
+	assert.deepEqual(parseSpellCheckResponse(raw), [{ block: 2, word: 'Ment', suggestions: ['mean'] }]);
+});
+
+test('parseSpellCheckResponse gives up (returns []) rather than guessing at a corrupted entry in the middle of the array', () => {
+	// Real observed shape: a suggestion string opened with " and closed with ' instead, which
+	// corrupts everything from that point on - this must NOT be "recovered" into something that
+	// looks plausible, since there's no safe way to know what the model actually meant.
+	const raw = '[{"block": 0, "word": "aplication", "suggestions": ["application\']}, {"block": 2, "word": "uses", "suggestions": ["use"]}]';
+	assert.deepEqual(parseSpellCheckResponse(raw), []);
+});
