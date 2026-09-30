@@ -2786,7 +2786,10 @@ pub fn ai_ask(
             text (always a single word - if the real fix touches more than one word, report \
             whichever single word most needs to change), and up to 3 single-word corrections, \
             best guess first. Respond with ONLY a JSON array covering every paragraph's errors, \
-            no markdown code fences, no commentary, and never truncate or summarize the list: \
+            no markdown code fences, no commentary, and never truncate or summarize the list. \
+            Use plain straight double-quote characters (\") for every JSON string - never curly \
+            or smart quotes (\u{201c} \u{201d}) - and make sure the array's own brackets are \
+            balanced and properly closed: \
             [{\"block\": 0, \"word\": \"teh\", \"suggestions\": [\"the\", \"ten\", \"tea\"]}, \
             {\"block\": 2, \"word\": \"dont\", \"suggestions\": [\"don't\"]}, ...]. If a \
             paragraph has no problems, omit it from the array - if nothing is wrong anywhere in \
