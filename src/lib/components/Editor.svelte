@@ -204,8 +204,12 @@
 	const ghostTextPluginKey = new PluginKey('ghostText');
 	let ghostTextTimer: ReturnType<typeof setTimeout> | null = null;
 	let ghostTextGeneration = 0;
-	const GHOST_TEXT_DEBOUNCE_MS = 700;
-	const GHOST_TEXT_CONTEXT_CHARS = 1500;
+	const GHOST_TEXT_DEBOUNCE_MS = 200;
+	const GHOST_TEXT_CONTEXT_CHARS = 600;
+	// What a lookahead fetch (kicked off right after showing a suggestion, in case the user
+	// accepts it) found for "the word(s) after this suggestion" - keyed to the document
+	// position it would apply at, so accept only uses it if nothing else happened in between.
+	let ghostSpeculative: { afterPos: number; text: string } | null = null;
 
 	/** 1-3, from Settings > AI > Ghost-Text Completion - how many words a suggestion shows
 	 *  at once. Clamped here too in case a config file was hand-edited or came from an older
@@ -275,6 +279,7 @@
 	function clearGhostSuggestion() {
 		if (ghostTextTimer) { clearTimeout(ghostTextTimer); ghostTextTimer = null; }
 		ghostTextGeneration++;
+		ghostSpeculative = null;
 		if (editor && !editor.isDestroyed && ghostTextPluginKey.getState(editor.state)) {
 			editor.view.dispatch(editor.state.tr.setMeta(ghostTextPluginKey, { type: 'clear' }));
 		}
@@ -286,7 +291,25 @@
 		if (!value) return false;
 		const sel = editor.state.selection;
 		if (!sel.empty || sel.from !== value.from) return false;
+		const newPos = value.from + value.text.length;
+		const pending = ghostSpeculative;
+		ghostSpeculative = null;
 		editor.chain().focus().insertContentAt(value.from, value.text).run();
+		// insertContentAt's onUpdate already ran scheduleGhostTextSuggestion(), which bumped
+		// ghostTextGeneration and queued a fresh debounce. If a lookahead fetch already told us
+		// what comes next (kicked off when this suggestion first appeared, on the assumption
+		// it'd be accepted), skip that wait and show it right now instead - that's what keeps
+		// repeated Tab-accepts feeling instant instead of a fresh wait every time.
+		if (pending && pending.afterPos === newPos && editor.state.selection.from === newPos) {
+			if (ghostTextTimer) { clearTimeout(ghostTextTimer); ghostTextTimer = null; }
+			const generation = ghostTextGeneration;
+			showGhostSuggestion(pending.text, newPos, generation);
+			const contextText = editor.state.doc.textBetween(0, newPos, '\n', '\n');
+			const slicedContext = contextText.length > GHOST_TEXT_CONTEXT_CHARS
+				? contextText.slice(-GHOST_TEXT_CONTEXT_CHARS)
+				: contextText;
+			kickOffSpeculativePrefetch(slicedContext, pending.text, newPos, generation);
+		}
 		return true;
 	}
 
@@ -307,31 +330,36 @@
 		return count > 0 ? text.slice(0, endIndex) : text;
 	}
 
-	function showGhostSuggestion(rawText: string, pos: number, generation: number) {
-		if (!editor || editor.isDestroyed || generation !== ghostTextGeneration) return;
-		const sel = editor.state.selection;
-		if (!sel.empty || sel.from !== pos) return;
-		// Stop at the first blank line - a completion is a phrase/sentence, not a new paragraph.
-		// Small local models are inconsistent about whether they send a leading space, so strip
-		// whatever they sent and decide the separating space ourselves below, from what's
-		// actually next to the cursor - that's reliable regardless of the model's own habits.
+	/** Cleans a raw model completion down to what should actually be shown/inserted: strips
+	 *  leading whitespace, cuts at the first blank line, holds it to the configured word cap,
+	 *  and adds a single separating space when the result starts a fresh word right after
+	 *  non-space text, so accepting it doesn't glue two words together ("the" + "store" ->
+	 *  "the store", not "thestore"). Leave punctuation that attaches directly to the previous
+	 *  word alone (periods, commas, closing brackets, apostrophes...), and don't add one after
+	 *  a character that never wants a trailing space either (an already-typed "=" before a math
+	 *  result, opening brackets/quotes...). `charBefore` is the character that would sit right
+	 *  before this completion - the real document character for a live suggestion, or the last
+	 *  character of an already-shown suggestion when speculating about what comes after it. */
+	function cleanCompletion(rawText: string, charBefore: string): string {
 		let cleaned = rawText.replace(/^\s+/, '').split(/\n{2,}/)[0];
-		if (!cleaned) return;
-		// Hold it to the configured word cap, whatever the model actually generated.
+		if (!cleaned) return '';
 		cleaned = truncateToWords(cleaned, ghostTextMaxWords());
-		if (!cleaned) return;
-		// Add a single separating space when the completion starts a fresh word right after
-		// non-space text, so accepting it doesn't glue two words together ("the" + "store" ->
-		// "the store", not "thestore"). Leave punctuation that attaches directly to the
-		// previous word alone (periods, commas, closing brackets, apostrophes...), and don't
-		// add one after a character that never wants a trailing space either (an already-typed
-		// "=" before a math result, opening brackets/quotes...).
+		if (!cleaned) return '';
 		if (!/^[.,!?;:)\]}%'’=\-]/.test(cleaned)) {
-			const charBefore = pos > 0 ? editor.state.doc.textBetween(pos - 1, pos) : '';
 			if (charBefore && !/[\s(\[{"'‘=]/.test(charBefore)) {
 				cleaned = ' ' + cleaned;
 			}
 		}
+		return cleaned;
+	}
+
+	function showGhostSuggestion(rawText: string, pos: number, generation: number) {
+		if (!editor || editor.isDestroyed || generation !== ghostTextGeneration) return;
+		const sel = editor.state.selection;
+		if (!sel.empty || sel.from !== pos) return;
+		const charBefore = pos > 0 ? editor.state.doc.textBetween(pos - 1, pos) : '';
+		const cleaned = cleanCompletion(rawText, charBefore);
+		if (!cleaned) return;
 		editor.view.dispatch(editor.state.tr.setMeta(ghostTextPluginKey, { type: 'set', text: cleaned, from: pos }));
 	}
 
@@ -353,7 +381,22 @@
 			if (data.event_type === 'text' && data.text) {
 				accumulated += data.text;
 				showGhostSuggestion(accumulated, pos, generation);
-			} else if (data.event_type === 'done' || data.event_type === 'error') {
+			} else if (data.event_type === 'done') {
+				unlisten();
+				// Get a head start on "what comes after this" while the user is still reading
+				// it/deciding whether to accept - if they do hit Tab, the next chunk is either
+				// already here or much closer to done, instead of a fresh wait every time.
+				if (editor && !editor.isDestroyed) {
+					const shown = ghostTextPluginKey.getState(editor.state) as { text: string; from: number } | null;
+					if (shown && shown.from === pos && shown.text) {
+						const speculativeContext = contextText + shown.text;
+						const slicedContext = speculativeContext.length > GHOST_TEXT_CONTEXT_CHARS
+							? speculativeContext.slice(-GHOST_TEXT_CONTEXT_CHARS)
+							: speculativeContext;
+						kickOffSpeculativePrefetch(slicedContext, shown.text, pos + shown.text.length, generation);
+					}
+				}
+			} else if (data.event_type === 'error') {
 				unlisten();
 			}
 		});
@@ -361,6 +404,39 @@
 			await aiAsk('continue_writing', contextText, null, requestId, ghostTextMaxTokens());
 		} catch {
 			// Silent by design - a missing/misconfigured AI provider shouldn't interrupt typing.
+			unlisten();
+		}
+	}
+
+	/** Fetches what would come after a suggestion that's currently showing, in the background,
+	 *  and caches it in ghostSpeculative for acceptGhostSuggestion() to use instantly instead
+	 *  of making the user wait through another debounce + round trip. Never displayed directly
+	 *  - if the guess turns out wrong (the user edited something else, or typed past it) it's
+	 *  just discarded. */
+	async function kickOffSpeculativePrefetch(contextText: string, afterText: string, afterPos: number, generation: number) {
+		if (!$appConfig?.ai_provider) return;
+		const requestId = crypto.randomUUID();
+		let accumulated = '';
+		const unlisten = await listen<AiStreamEvent>('ai-stream', (event) => {
+			if (event.payload.request_id !== requestId) return;
+			if (generation !== ghostTextGeneration) { unlisten(); return; }
+			const data = event.payload;
+			if (data.event_type === 'text' && data.text) {
+				accumulated += data.text;
+			} else if (data.event_type === 'done') {
+				unlisten();
+				const charBefore = afterText[afterText.length - 1] ?? '';
+				const cleaned = cleanCompletion(accumulated, charBefore);
+				if (cleaned) {
+					ghostSpeculative = { afterPos, text: cleaned };
+				}
+			} else if (data.event_type === 'error') {
+				unlisten();
+			}
+		});
+		try {
+			await aiAsk('continue_writing', contextText, null, requestId, ghostTextMaxTokens());
+		} catch {
 			unlisten();
 		}
 	}
