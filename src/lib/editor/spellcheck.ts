@@ -46,7 +46,7 @@ const COMMON_WORDS = new Set([
 	'state', 'once', 'book', 'hear', 'stop', 'without', 'second', 'later', 'miss', 'idea',
 	'enough', 'eat', 'face', 'watch', 'far', 'really', 'almost', 'let', 'above', 'girl',
 	'sometimes', 'mountain', 'cut', 'young', 'talk', 'soon', 'list', 'song', 'being', 'leave',
-	'family'
+	'family', 'hello', 'hi', 'hey', 'help', 'hero', 'okay', 'yes', 'no', 'please', 'thanks'
 ]);
 
 let dictionary: Set<string> | null = null;
@@ -209,4 +209,79 @@ export function suggestCorrection(word: string): string | null {
 		return correction[0].toUpperCase() + correction.slice(1);
 	}
 	return correction;
+}
+
+/** A candidate correction together with what it took to reach it from the misspelled word -
+ *  used only to rank candidates (see rankedCorrections() below), never returned as-is. */
+type Candidate = { word: string; kind: EditKind; distance: 1 | 2 };
+
+/** Sorts candidates for display. Unlike suggestCorrection()'s single guess - which ranks
+ *  purely by EditKind (transposition, then substitution, then deletion, then insertion; see
+ *  edits1()) because it only ever returns one answer and a rare-but-"closer" edit pattern is
+ *  a reasonable tiebreaker for a single silent guess - a menu of several options is read by a
+ *  person, and a 370k-word dictionary pulled from public wordlists has plenty of obscure or
+ *  archaic entries sitting at edit-distance 1 (an early version of this ranking offered
+ *  "halo"/"held"/"hele"/"helm" for "helo" ahead of the obviously-intended "hello", purely
+ *  because they're substitutions and "hello" is an insertion). So a word in COMMON_WORDS is
+ *  ranked ahead of one that isn't, full stop, before edit distance or kind are even
+ *  considered; those still break ties within each group. */
+function rankCandidates(candidates: Candidate[]): string[] {
+	return [...candidates]
+		.sort((a, b) => {
+			const aCommon = COMMON_WORDS.has(a.word);
+			const bCommon = COMMON_WORDS.has(b.word);
+			if (aCommon !== bCommon) return aCommon ? -1 : 1;
+			if (a.distance !== b.distance) return a.distance - b.distance;
+			if (a.kind !== b.kind) return a.kind - b.kind;
+			return a.word < b.word ? -1 : a.word > b.word ? 1 : 0;
+		})
+		.map((c) => c.word);
+}
+
+/** Up to `limit` distinct dictionary words plausibly meant by `lowerWord`, best guesses
+ *  first - see rankCandidates() for how "best" is decided. Edit-distance-2 candidates are
+ *  only considered if distance-1 didn't fill `limit` on its own. Unlike bestCorrection()
+ *  (used by suggestCorrection(), which stays conservative and returns nothing rather than
+ *  guess wrong), this is meant to hand several candidates to a person to pick from, so a
+ *  genuinely ambiguous typo isn't a reason to hold anything back - it's exactly the case
+ *  multiple suggestions are for. */
+function rankedCorrections(lowerWord: string, dict: Set<string>, limit: number): string[] {
+	const e1 = edits1(lowerWord);
+	const seen = new Set<string>();
+	const candidates: Candidate[] = [];
+	for (const [candidate, kind] of e1) {
+		if (candidate === lowerWord || seen.has(candidate) || !dict.has(candidate)) continue;
+		seen.add(candidate);
+		candidates.push({ word: candidate, kind, distance: 1 });
+	}
+	if (candidates.length < limit) {
+		// Bounds the search, not the result - rankCandidates + the slice below still pick the
+		// best `limit` out of however many distance-2 candidates turned up.
+		let distance2Count = 0;
+		outer: for (const [w1, k1] of e1) {
+			for (const [w2, k2] of edits1(w1)) {
+				if (w2 === lowerWord || seen.has(w2) || !dict.has(w2)) continue;
+				seen.add(w2);
+				candidates.push({ word: w2, kind: (Math.max(k1, k2) as EditKind), distance: 2 });
+				if (++distance2Count > 24) break outer;
+			}
+		}
+	}
+	return rankCandidates(candidates).slice(0, limit);
+}
+
+/** Up to `limit` (default 3) plausible corrections for a misspelled word, best guess first -
+ *  for a "pick one" UI (the right-click suggestion menu) rather than suggestCorrection()'s
+ *  single conservative guess. Returns [] for a word that isn't misspelled in the first place
+ *  (same rules as suggestCorrection(): too short, ALL CAPS, or already a dictionary word),
+ *  same as returning null there - the caller shouldn't be showing this menu at all in that
+ *  case. Capitalization of each suggestion is matched to the original word. */
+export function suggestCorrections(word: string, limit = 3): string[] {
+	if (!dictionary) return [];
+	if (word.length < 3 || ALL_UPPER_RE.test(word)) return [];
+	if (isKnownWord(word)) return [];
+	const lower = word.toLowerCase().replace(/’/g, "'");
+	const ranked = rankedCorrections(lower, dictionary, limit);
+	const capitalize = word[0] !== word[0].toLowerCase();
+	return ranked.map((w) => (capitalize ? w[0].toUpperCase() + w.slice(1) : w));
 }

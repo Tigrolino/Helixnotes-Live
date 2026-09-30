@@ -58,7 +58,7 @@
 	import { clearFormatting } from '$lib/editor/clearFormatting';
 	import { serializeInlineMarkdown } from '$lib/editor/markdown';
 	import { restoreTitleHeading, stripTitleHeading, type HiddenTitleHeading } from '$lib/editor/titleVisibility';
-	import { loadDictionary, isDictionaryReady, suggestCorrection } from '$lib/editor/spellcheck';
+	import { loadDictionary, isDictionaryReady, suggestCorrection, suggestCorrections } from '$lib/editor/spellcheck';
 	import { tagIterationKey } from '$lib/utils/tag-styles';
 	import { replaceWithWikiLink } from '$lib/editor/wikiLinks';
 	import { assetSourceToMarkdown, assetUrlToLocalPath, normalizeLocalAssetPath, resolveVaultFilePath } from '$lib/utils/paths';
@@ -330,6 +330,56 @@
 	const SPELL_CHECK_SCAN_DEBOUNCE_MS = 400;
 	let spellCheckScanTimer: ReturnType<typeof setTimeout> | null = null;
 
+	// Per-note "ignore this word" list for spell-check, kept in localStorage (same pattern as
+	// keybindings.ts and liveNotebook.ts's quick-access list) rather than in the note file
+	// itself - the simplest way to make "Ignore" durable across reopening the note without
+	// touching note content or needing any backend/Rust plumbing. Per-device only: unlike the
+	// note itself, it doesn't travel through sync, WebDAV, or git to another machine - a real
+	// limitation worth knowing about, but an acceptable v1 trade for how low-risk it keeps this.
+	const SPELL_IGNORE_STORAGE_KEY = 'helixnotes-spell-ignore';
+
+	function loadSpellIgnoreStore(): Record<string, string[]> {
+		try {
+			if (typeof localStorage === 'undefined') return {};
+			const raw = localStorage.getItem(SPELL_IGNORE_STORAGE_KEY);
+			return raw ? JSON.parse(raw) : {};
+		} catch {
+			return {};
+		}
+	}
+
+	function saveSpellIgnoreStore(store: Record<string, string[]>) {
+		try {
+			if (typeof localStorage !== 'undefined') localStorage.setItem(SPELL_IGNORE_STORAGE_KEY, JSON.stringify(store));
+		} catch {
+			// Storage full or unavailable (private browsing etc.) - the ignore list just won't
+			// persist across a restart; not worth surfacing an error for.
+		}
+	}
+
+	/** The current note's ignored words, lowercased - refreshed in loadNote() whenever the open
+	 *  note changes. computeActiveSpellFix(), scanDocumentForMisspellings() and
+	 *  misspelledWordAtPos() all check against this before flagging a word. */
+	let spellIgnoreSet = new Set<string>();
+
+	function refreshSpellIgnoreSet(path: string) {
+		spellIgnoreSet = new Set((loadSpellIgnoreStore()[path] ?? []).map((w) => w.toLowerCase()));
+	}
+
+	/** Adds `word` to the current note's ignore list (persisted) and to the in-memory set
+	 *  (instant - the caller still has to trigger a rescan/redecorate to actually clear the
+	 *  underline; see ignoreSpellContextWord()). */
+	function ignoreWordForNote(path: string, word: string) {
+		const store = loadSpellIgnoreStore();
+		const lower = word.toLowerCase();
+		const list = store[path] ?? [];
+		if (!list.some((w) => w.toLowerCase() === lower)) {
+			store[path] = [...list, word];
+			saveSpellIgnoreStore(store);
+		}
+		spellIgnoreSet.add(lower);
+	}
+
 	/** Fresh, synchronous check of the word right before the cursor - the same boundary-match
 	 *  logic that used to live in scheduleSpellCheck(), but called on demand (from decorations()
 	 *  and from the Tab handler) instead of cached, so its result can never be stale relative to
@@ -350,6 +400,7 @@
 		const trimTrail = trailMatch ? trailMatch[0].length : 0;
 		const word = rawWord.slice(0, rawWord.length - trimTrail);
 		if (!word) return null;
+		if (spellIgnoreSet.has(word.toLowerCase())) return null;
 		const wordEndRel = context.length - boundaryLen - trimTrail;
 		const wordStartRel = wordEndRel - word.length;
 		const from = lookbackStart + wordStartRel;
@@ -424,6 +475,28 @@
 		},
 	});
 
+	/** Every letter/apostrophe word in `text`, boundary-trimmed the same way
+	 *  computeActiveSpellFix() trims one (a leading or trailing straight/curly apostrophe - a
+	 *  possessive's or a closing quote mark - stripped off), as {word, start, end} offsets into
+	 *  `text`. Shared by the whole-document scan and the right-click "what word is this" lookup
+	 *  so both tokenize words identically. */
+	function tokenizeWords(text: string): { word: string; start: number; end: number }[] {
+		const out: { word: string; start: number; end: number }[] = [];
+		SPELL_CHECK_WORD_RE.lastIndex = 0;
+		let m: RegExpExecArray | null;
+		while ((m = SPELL_CHECK_WORD_RE.exec(text)) !== null) {
+			const raw = m[0];
+			const leadMatch = raw.match(/^['\u2019]+/);
+			const trimLead = leadMatch ? leadMatch[0].length : 0;
+			const trailMatch = raw.match(/['\u2019]+$/);
+			const trimTrail = trailMatch ? trailMatch[0].length : 0;
+			const word = raw.slice(trimLead, raw.length - trimTrail);
+			if (!word) continue;
+			out.push({ word, start: m.index + trimLead, end: m.index + trimLead + word.length });
+		}
+		return out;
+	}
+
 	/** Walks every text node in the document (skipping code blocks - code isn't prose) looking
 	 *  for misspelled words, the same way computeActiveSpellFix() checks the one word before the
 	 *  cursor. Returns plain {from,to} ranges rather than decorations so the caller can hand them
@@ -433,25 +506,40 @@
 		doc.descendants((node, pos) => {
 			if (node.type.name === 'codeBlock') return false;
 			if (!node.isText || !node.text) return true;
-			const text = node.text;
-			SPELL_CHECK_WORD_RE.lastIndex = 0;
-			let m: RegExpExecArray | null;
-			while ((m = SPELL_CHECK_WORD_RE.exec(text)) !== null) {
-				const raw = m[0];
-				const leadMatch = raw.match(/^['\u2019]+/);
-				const trimLead = leadMatch ? leadMatch[0].length : 0;
-				const trailMatch = raw.match(/['\u2019]+$/);
-				const trimTrail = trailMatch ? trailMatch[0].length : 0;
-				const word = raw.slice(trimLead, raw.length - trimTrail);
-				if (!word) continue;
-				if (suggestCorrection(word)) {
-					const from = pos + m.index + trimLead;
-					ranges.push({ from, to: from + word.length });
-				}
+			for (const { word, start, end } of tokenizeWords(node.text)) {
+				if (spellIgnoreSet.has(word.toLowerCase())) continue;
+				if (suggestCorrection(word)) ranges.push({ from: pos + start, to: pos + end });
 			}
 			return true;
 		});
 		return ranges;
+	}
+
+	/** Finds the misspelled word (if any) whose range contains document position `pos` - used
+	 *  by the right-click handler to figure out which word was clicked, independent of where
+	 *  the cursor happens to be (unlike computeActiveSpellFix(), which only ever looks at the
+	 *  word right before the cursor). Only searches a small window around `pos` rather than the
+	 *  whole document, since a right-click only ever lands on an already-underlined word if
+	 *  it's going to match anything at all. */
+	function misspelledWordAtPos(doc: ProseMirrorNode, pos: number): { from: number; to: number; word: string } | null {
+		let found: { from: number; to: number; word: string } | null = null;
+		const lo = Math.max(0, pos - 60);
+		const hi = Math.min(doc.content.size, pos + 60);
+		doc.nodesBetween(lo, hi, (node, nodePos) => {
+			if (found || node.type.name === 'codeBlock') return false;
+			if (!node.isText || !node.text) return true;
+			for (const { word, start, end } of tokenizeWords(node.text)) {
+				const from = nodePos + start;
+				const to = nodePos + end;
+				if (pos < from || pos > to) continue;
+				if (spellIgnoreSet.has(word.toLowerCase())) continue;
+				if (!suggestCorrection(word)) continue;
+				found = { from, to, word };
+				break;
+			}
+			return true;
+		});
+		return found;
 	}
 
 	function clearAllSpellCheck() {
@@ -487,6 +575,24 @@
 			spellCheckScanTimer = null;
 			runSpellCheckScan();
 		}, SPELL_CHECK_SCAN_DEBOUNCE_MS);
+	}
+
+	function closeSpellContextMenu() {
+		spellContextMenu = null;
+	}
+
+	function applySpellContextSuggestion(suggestion: string) {
+		if (!editor || !spellContextMenu) return;
+		const { from, to } = spellContextMenu;
+		editor.chain().focus().insertContentAt({ from, to }, suggestion).run();
+		closeSpellContextMenu();
+	}
+
+	function ignoreSpellContextWord() {
+		if (!spellContextMenu) return;
+		ignoreWordForNote(loadedPath, spellContextMenu.word);
+		closeSpellContextMenu();
+		runSpellCheckScan();
 	}
 
 	function clearGhostSuggestion() {
@@ -881,6 +987,7 @@
 	let hasPendingBlobs = false;
 	let lastSourceMode = $sourceMode;
 	let linkContextMenu = $state<{ x: number; y: number; href: string; anchor: HTMLAnchorElement } | null>(null);
+	let spellContextMenu = $state<{ x: number; y: number; from: number; to: number; word: string; suggestions: string[] } | null>(null);
 	let hiddenTitleHeading: HiddenTitleHeading | null = null;
 	let taskRevealTimer: ReturnType<typeof setTimeout> | null = null;
 	let taskRevealElement: HTMLElement | null = null;
@@ -4115,6 +4222,7 @@
 		const revealRequest = ++taskRevealRequest;
 		const revealTarget = taskTarget ? resolveTaskTarget(taskTarget, content) : null;
 		loadedPath = path;
+		refreshSpellIgnoreSet(path);
 		isLoadingNote = true;
 		clearGhostSuggestion();
 		isLargeDoc = content.length > LARGE_DOC_CHARS;
@@ -5735,6 +5843,27 @@
 
 	function handleEditorContextMenu(event: MouseEvent) {
 		const target = event.target as HTMLElement;
+		const spellSpan = target.closest('.spell-error') as HTMLElement | null;
+		if (spellSpan && editor && $appConfig?.spell_check_enabled) {
+			const coords = editor.view.posAtCoords({ left: event.clientX, top: event.clientY });
+			const pos = coords ? coords.pos : editor.view.posAtDOM(spellSpan, 0);
+			const hit = misspelledWordAtPos(editor.state.doc, pos);
+			if (hit) {
+				event.preventDefault();
+				event.stopPropagation();
+				const suggestions = suggestCorrections(hit.word, 3);
+				let sx = event.clientX;
+				let sy = event.clientY;
+				const menuWidth = 200;
+				const menuHeight = 90 + suggestions.length * 34;
+				if (sx + menuWidth > window.innerWidth) sx = window.innerWidth - menuWidth - 8;
+				if (sy + menuHeight > window.innerHeight) sy = window.innerHeight - menuHeight - 8;
+				if (sx < 4) sx = 4;
+				if (sy < 4) sy = 4;
+				spellContextMenu = { x: sx, y: sy, from: hit.from, to: hit.to, word: hit.word, suggestions };
+				return;
+			}
+		}
 		const anchor = target.closest('a');
 		if (anchor) {
 			const href = anchor.getAttribute('href');
@@ -7972,6 +8101,23 @@
 		(e.target as HTMLInputElement).value = '';
 	}} />
 </div>
+
+{#if spellContextMenu}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="link-context-overlay" onclick={(e) => closeFromOverlay(e, closeSpellContextMenu)} onkeydown={(e) => closeOnEscape(e, closeSpellContextMenu)}>
+		<div class="link-context-menu" style="left: {spellContextMenu.x}px; top: {spellContextMenu.y}px">
+			<div class="link-context-url">“{spellContextMenu.word}”</div>
+			{#each spellContextMenu.suggestions as suggestion}
+				<button onclick={() => applySpellContextSuggestion(suggestion)}>{suggestion}</button>
+			{/each}
+			{#if !spellContextMenu.suggestions.length}
+				<div class="link-context-url">No suggestions</div>
+			{/if}
+			<div class="link-context-sep"></div>
+			<button onclick={ignoreSpellContextWord}>Ignore in this note</button>
+		</div>
+	</div>
+{/if}
 
 {#if linkContextMenu}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->

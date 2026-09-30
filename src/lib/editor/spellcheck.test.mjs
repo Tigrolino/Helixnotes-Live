@@ -14,7 +14,7 @@ globalThis.fetch = async (url) => {
 	throw new Error(`unexpected fetch in test: ${url}`);
 };
 
-const { loadDictionary, isDictionaryReady, isKnownWord, suggestCorrection } = await import(
+const { loadDictionary, isDictionaryReady, isKnownWord, suggestCorrection, suggestCorrections } = await import(
 	new URL('./spellcheck.ts', import.meta.url)
 );
 
@@ -25,6 +25,7 @@ const { loadDictionary, isDictionaryReady, isKnownWord, suggestCorrection } = aw
 // right here, synchronously, before anything is awaited.
 const readyBeforeLoad = isDictionaryReady();
 const suggestionBeforeLoad = suggestCorrection('helllo');
+const suggestionsBeforeLoad = suggestCorrections('helllo');
 
 test('suggestCorrection returns null before the dictionary has loaded', () => {
 	assert.equal(readyBeforeLoad, false);
@@ -109,4 +110,43 @@ test('a real (if uncommon) word is never "corrected" into a different real word'
 
 test('gibberish far from any real word yields no suggestion rather than a wild guess', () => {
 	assert.equal(suggestCorrection('zxqvwrbpl'), null);
+});
+
+test('suggestCorrections returns several ranked candidates for an ambiguous typo', () => {
+	const options = suggestCorrections('helo');
+	assert.ok(Array.isArray(options));
+	assert.ok(options.length >= 1 && options.length <= 3);
+	// Both a substitution (help) and a deletion (hello) are one edit away - substitution
+	// ranks first (see EditKind ordering in rankedCorrections()).
+	assert.equal(options[0], 'help');
+	assert.ok(options.includes('hello'), `expected 'hello' among ${JSON.stringify(options)}`);
+	// No duplicates.
+	assert.equal(new Set(options).size, options.length);
+});
+
+test('suggestCorrections respects a custom limit', () => {
+	const options = suggestCorrections('helo', 1);
+	assert.equal(options.length, 1);
+	assert.equal(options[0], 'help');
+});
+
+test('suggestCorrections returns [] for a correctly-spelled word', () => {
+	assert.deepEqual(suggestCorrections('hello'), []);
+});
+
+test('suggestCorrections returns [] before the dictionary has loaded, same as suggestCorrection', () => {
+	assert.deepEqual(suggestionsBeforeLoad, []);
+});
+
+test('suggestCorrections preserves capitalization across every returned candidate', () => {
+	const options = suggestCorrections('Teh');
+	assert.ok(options.length > 0);
+	for (const w of options) {
+		assert.equal(w[0], w[0].toUpperCase(), `expected ${JSON.stringify(w)} capitalized`);
+	}
+	assert.equal(options[0], 'The');
+});
+
+test('suggestCorrections returns [] for gibberish with nothing close, same as suggestCorrection', () => {
+	assert.deepEqual(suggestCorrections('zxqvwrbpl'), []);
 });
