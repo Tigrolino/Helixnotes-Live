@@ -394,8 +394,13 @@
 	// identically meaning two different things in two different paragraphs is a rare enough
 	// edge case that losing per-occurrence precision here is worth the simpler, uniform lookup
 	// shape shared with the Basic engine; the last paragraph scanned wins if they ever disagree.
-	let aiSpellSuggestions = new Map<string, string>();
+	let aiSpellSuggestions = new Map<string, string[]>();
 	let aiSpellTimer: ReturnType<typeof setTimeout> | null = null;
+	// Drives the bottom-right "Checking spelling..." indicator - true only while this
+	// specific (current-generation) AI request is actually in flight, not during the
+	// debounce countdown before it starts. $state because, unlike the rest of this block,
+	// it's read directly by the template.
+	let aiSpellScanInFlight = $state(false);
 	// Bumped at the start of every scheduleAiSpellScan() call (even when it's about to return
 	// early) so an in-flight request from a previous call - or a previous note, see loadNote() -
 	// can never paint over what's showing now, the same generation-counter pattern
@@ -421,7 +426,7 @@
 	function getSuggestion(word: string): string | null {
 		if (spellIgnoreSet.has(word.toLowerCase())) return null;
 		if ($appConfig?.spell_check_engine === 'ai') {
-			return aiSpellSuggestions.get(word.toLowerCase()) ?? null;
+			return aiSpellSuggestions.get(word.toLowerCase())?.[0] ?? null;
 		}
 		return suggestCorrection(word);
 	}
@@ -429,11 +434,7 @@
 	function getSuggestionsFor(word: string, limit: number): string[] {
 		if (spellIgnoreSet.has(word.toLowerCase())) return [];
 		if ($appConfig?.spell_check_engine === 'ai') {
-			// The AI engine only ever gives one correction per word (it's not asked to rank
-			// alternatives the way Hunspell's suggest() does) - the right-click menu just shows
-			// whatever single suggestion came back, or "No suggestions" if none did.
-			const s = aiSpellSuggestions.get(word.toLowerCase());
-			return s ? [s] : [];
+			return (aiSpellSuggestions.get(word.toLowerCase()) ?? []).slice(0, limit);
 		}
 		return suggestCorrections(word, limit);
 	}
@@ -729,6 +730,12 @@
 		const prompt = buildSpellCheckPrompt(promptBlocks);
 		const requestId = crypto.randomUUID();
 		let accumulated = '';
+		// Only touch the in-flight indicator from a callback that's confirmed its own
+		// generation still matches - a stale request finishing after a newer one has already
+		// started must never clear the flag out from under it.
+		const finishInFlight = () => {
+			if (generation === aiSpellGeneration) aiSpellScanInFlight = false;
+		};
 		const unlisten = await listen<AiStreamEvent>('ai-stream', (event) => {
 			if (event.payload.request_id !== requestId) return;
 			if (generation !== aiSpellGeneration) { unlisten(); return; }
@@ -737,14 +744,15 @@
 				accumulated += data.text;
 			} else if (data.event_type === 'done') {
 				unlisten();
+				finishInFlight();
 				if (generation !== aiSpellGeneration || !editor || editor.isDestroyed) return;
 				const entries = parseSpellCheckResponse(accumulated);
-				const suggestions = new Map<string, string>();
+				const suggestions = new Map<string, string[]>();
 				const ranges: { from: number; to: number }[] = [];
 				for (const entry of entries) {
 					const lowerWord = entry.word.toLowerCase();
 					if (spellIgnoreSet.has(lowerWord)) continue;
-					suggestions.set(lowerWord, entry.suggestion);
+					suggestions.set(lowerWord, entry.suggestions);
 					for (const token of tokens) {
 						if (token.blockIndex === entry.block && token.word.toLowerCase() === lowerWord) {
 							ranges.push({ from: token.from, to: token.to });
@@ -756,14 +764,17 @@
 				editor.view.dispatch(editor.state.tr.setMeta(spellCheckPluginKey, { type: 'setErrors', ranges }));
 			} else if (data.event_type === 'error') {
 				unlisten();
+				finishInFlight();
 			}
 		});
+		aiSpellScanInFlight = true;
 		try {
 			await aiAsk('spell_check', prompt, null, requestId, 4096);
 		} catch {
 			// Silent by design, same as ghost-text - a missing/misconfigured AI provider
 			// shouldn't interrupt typing or show an error where an underline would go.
 			unlisten();
+			finishInFlight();
 		}
 	}
 
@@ -4416,6 +4427,7 @@
 		aiSpellGeneration++;
 		aiSpellSuggestions = new Map();
 		aiSpellLastScannedText = null;
+		aiSpellScanInFlight = false;
 		isLoadingNote = true;
 		clearGhostSuggestion();
 		isLargeDoc = content.length > LARGE_DOC_CHARS;
@@ -8609,6 +8621,16 @@
 	</div>
 {/if}
 
+{#if aiSpellScanInFlight && $appConfig?.spell_check_enabled && $appConfig?.spell_check_engine === 'ai'}
+	<div class="ai-spell-toast">
+		<svg class="ai-spell-toast-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+			<circle cx="12" cy="12" r="10" opacity="0.25" />
+			<path d="M12 2a10 10 0 019.95 9" />
+		</svg>
+		Checking spelling...
+	</div>
+{/if}
+
 {#if mathModal}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div class="math-modal-overlay" onclick={(e) => closeFromOverlay(e, cancelMathModal)} onkeydown={(e) => closeOnEscape(e, cancelMathModal)}>
@@ -11285,6 +11307,34 @@
 
 	@keyframes copy-spin {
 		to { transform: rotate(360deg); }
+	}
+
+	/* Same bottom-right toast pattern as .copy-toast, offset above it so the two can never
+	   visually overlap on the rare occasion both happen to show at once. */
+	.ai-spell-toast {
+		position: fixed;
+		bottom: 66px;
+		right: 24px;
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 8px 16px;
+		min-width: 100px;
+		justify-content: center;
+		background: var(--bg-secondary);
+		border: 1px solid var(--border-color);
+		border-radius: 8px;
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+		font-size: 13px;
+		font-weight: 500;
+		color: var(--text-secondary);
+		z-index: 9999;
+		animation: toast-in 0.15s ease-out;
+		pointer-events: none;
+	}
+
+	.ai-spell-toast-spinner {
+		animation: copy-spin 0.8s linear infinite;
 	}
 
 	:global(.tiptap-wrapper .tiptap mark) {

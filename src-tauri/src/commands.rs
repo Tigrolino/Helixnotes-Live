@@ -2770,11 +2770,11 @@ pub fn ai_ask(
             correctly-spelled words (their/there/they're, its/it's, etc.) only when one is \
             clearly wrong in context - do not flag a homophone just because another exists. For \
             each misspelling found, report the paragraph number it came from, the misspelled \
-            word exactly as it appears in the text, and your best single-word correction. \
-            Respond with ONLY a JSON array, no markdown code fences, no commentary: \
-            [{\"block\": 0, \"word\": \"teh\", \"suggestion\": \"the\"}, ...]. If \
-            nothing is misspelled in a paragraph, just omit it - if nothing is misspelled at \
-            all, respond with exactly: []"
+            word exactly as it appears in the text, and up to 3 single-word corrections, best \
+            guess first. Respond with ONLY a JSON array, no markdown code fences, no commentary: \
+            [{\"block\": 0, \"word\": \"teh\", \"suggestions\": [\"the\", \"ten\", \"tea\"]}, \
+            ...]. If nothing is misspelled in a paragraph, just omit it - if nothing is \
+            misspelled at all, respond with exactly: []"
             .to_string();
         crate::ai::ai_request(
             app,

@@ -1,16 +1,16 @@
 // Pure helpers for the AI-powered spell-check engine: building the prompt sent to the
 // configured AI provider and parsing its response. Deliberately split out from Editor.svelte,
 // which owns the ProseMirror-specific half (collecting numbered paragraphs from the live
-// document, and turning parsed {block, word, suggestion} entries back into on-screen
+// document, and turning parsed {block, word, suggestions} entries back into on-screen
 // underlines) - this half has no DOM/editor dependency, so it can be unit tested directly.
 //
 // See commands.rs's "spell_check" ai_ask branch for the system prompt the model actually
 // receives (it's told to reply with exactly the JSON shape parseSpellCheckResponse expects),
 // and Editor.svelte's collectSpellTokens()/runAiSpellScan() for how this is wired up. The
 // position-safety rule from the earlier Tab-corruption bug still applies here: this module
-// only ever hands back a {block, word, suggestion} string triple - never a character offset -
-// so the one piece of information the AI can't get right (exactly where in the live,
-// possibly-already-edited document something is) is never the thing being trusted.
+// only ever hands back a {block, word, suggestions} triple - never a character offset - so the
+// one piece of information the AI can't get right (exactly where in the live, possibly-
+// already-edited document something is) is never the thing being trusted.
 
 export interface SpellCheckPromptBlock {
 	index: number;
@@ -20,8 +20,14 @@ export interface SpellCheckPromptBlock {
 export interface SpellCheckEntry {
 	block: number;
 	word: string;
-	suggestion: string;
+	// Up to 3, best guess first - mirrors the Basic engine's suggestCorrections(), so the
+	// right-click menu can show several options under either engine. suggestions[0] is what
+	// Tab-accept and the inline badge use, the same way suggestCorrection() (singular) is
+	// suggestCorrections()[0] for the Basic engine.
+	suggestions: string[];
 }
+
+const MAX_SUGGESTIONS = 3;
 
 /** Builds the user message sent to the AI for spell-checking: one numbered line per paragraph,
  *  in exactly the "<number>: <paragraph text>" format the system prompt (in commands.rs) tells
@@ -57,15 +63,28 @@ export function parseSpellCheckResponse(raw: string): SpellCheckEntry[] {
 		const rec = item as Record<string, unknown>;
 		const block = rec.block;
 		const word = rec.word;
-		const suggestion = rec.suggestion;
+		const rawSuggestions = rec.suggestions;
 		if (typeof block !== 'number' || !Number.isFinite(block)) continue;
 		if (typeof word !== 'string' || !word.trim()) continue;
-		if (typeof suggestion !== 'string' || !suggestion.trim()) continue;
+		if (!Array.isArray(rawSuggestions)) continue;
 		const trimmedWord = word.trim();
-		const trimmedSuggestion = suggestion.trim();
-		if (trimmedWord.toLowerCase() === trimmedSuggestion.toLowerCase()) continue;
-		const key = `${block}:${trimmedWord.toLowerCase()}`;
-		byKey.set(key, { block, word: trimmedWord, suggestion: trimmedSuggestion });
+		const lowerWord = trimmedWord.toLowerCase();
+
+		const seen = new Set<string>();
+		const suggestions: string[] = [];
+		for (const s of rawSuggestions) {
+			if (typeof s !== 'string' || !s.trim()) continue;
+			const trimmed = s.trim();
+			const lower = trimmed.toLowerCase();
+			if (lower === lowerWord || seen.has(lower)) continue;
+			seen.add(lower);
+			suggestions.push(trimmed);
+			if (suggestions.length >= MAX_SUGGESTIONS) break;
+		}
+		if (!suggestions.length) continue;
+
+		const key = `${block}:${lowerWord}`;
+		byKey.set(key, { block, word: trimmedWord, suggestions });
 	}
 	return [...byKey.values()];
 }
