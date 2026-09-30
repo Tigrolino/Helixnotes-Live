@@ -58,7 +58,8 @@
 	import { clearFormatting } from '$lib/editor/clearFormatting';
 	import { serializeInlineMarkdown } from '$lib/editor/markdown';
 	import { restoreTitleHeading, stripTitleHeading, type HiddenTitleHeading } from '$lib/editor/titleVisibility';
-	import { loadDictionary, isDictionaryReady, suggestCorrection, suggestCorrections } from '$lib/editor/spellcheck';
+	import { loadDictionary, isDictionaryReady, isKnownWord, suggestCorrection, suggestCorrections } from '$lib/editor/spellcheck';
+	import { buildSpellCheckPrompt, parseSpellCheckResponse, type SpellCheckPromptBlock } from '$lib/editor/aiSpellCheck';
 	import { tagIterationKey } from '$lib/utils/tag-styles';
 	import { replaceWithWikiLink } from '$lib/editor/wikiLinks';
 	import { assetSourceToMarkdown, assetUrlToLocalPath, normalizeLocalAssetPath, resolveVaultFilePath } from '$lib/utils/paths';
@@ -380,13 +381,71 @@
 		spellIgnoreSet.add(lower);
 	}
 
+	// ── Spell-check engine dispatch ──
+	//
+	// Two engines share the rest of this file's spell-check machinery (computeActiveSpellFix,
+	// the whole-document scan, the right-click menu): "basic" (spellcheck.ts, offline via
+	// nspell) and "ai" (this block, routed through the configured AI provider). Everything else
+	// in this file calls isWordMisspelled()/getSuggestion()/getSuggestionsFor() rather than
+	// either engine directly, so it doesn't need to know which one is active.
+
+	// AI engine's results: lowercased word -> suggestion, built from parseSpellCheckResponse()
+	// entries (see runAiSpellScan()). Flat rather than per-paragraph - the same word spelled
+	// identically meaning two different things in two different paragraphs is a rare enough
+	// edge case that losing per-occurrence precision here is worth the simpler, uniform lookup
+	// shape shared with the Basic engine; the last paragraph scanned wins if they ever disagree.
+	let aiSpellSuggestions = new Map<string, string>();
+	let aiSpellTimer: ReturnType<typeof setTimeout> | null = null;
+	// Bumped at the start of every scheduleAiSpellScan() call (even when it's about to return
+	// early) so an in-flight request from a previous call - or a previous note, see loadNote() -
+	// can never paint over what's showing now, the same generation-counter pattern
+	// scheduleGhostTextSuggestion() uses for ghostTextGeneration.
+	let aiSpellGeneration = 0;
+	// Skips a redundant AI round-trip when the note's text hasn't actually changed since the
+	// last completed scan (e.g. the debounce fired again after a non-text transaction).
+	let aiSpellLastScannedText: string | null = null;
+	const AI_SPELL_SCAN_DEBOUNCE_MS = 1500;
+
+	function isWordMisspelled(word: string): boolean {
+		if (spellIgnoreSet.has(word.toLowerCase())) return false;
+		if ($appConfig?.spell_check_engine === 'ai') {
+			return aiSpellSuggestions.has(word.toLowerCase());
+		}
+		// Same guards suggestCorrection() applies (too short to bother the user over, or ALL
+		// CAPS and almost always an acronym) - kept in sync so a word never shows underlined by
+		// the whole-document scan without getSuggestion() actually having a fix to offer for it.
+		if (!isDictionaryReady() || word.length < 3 || /^[A-Z]+$/.test(word)) return false;
+		return !isKnownWord(word);
+	}
+
+	function getSuggestion(word: string): string | null {
+		if (spellIgnoreSet.has(word.toLowerCase())) return null;
+		if ($appConfig?.spell_check_engine === 'ai') {
+			return aiSpellSuggestions.get(word.toLowerCase()) ?? null;
+		}
+		return suggestCorrection(word);
+	}
+
+	function getSuggestionsFor(word: string, limit: number): string[] {
+		if (spellIgnoreSet.has(word.toLowerCase())) return [];
+		if ($appConfig?.spell_check_engine === 'ai') {
+			// The AI engine only ever gives one correction per word (it's not asked to rank
+			// alternatives the way Hunspell's suggest() does) - the right-click menu just shows
+			// whatever single suggestion came back, or "No suggestions" if none did.
+			const s = aiSpellSuggestions.get(word.toLowerCase());
+			return s ? [s] : [];
+		}
+		return suggestCorrections(word, limit);
+	}
+
 	/** Fresh, synchronous check of the word right before the cursor - the same boundary-match
 	 *  logic that used to live in scheduleSpellCheck(), but called on demand (from decorations()
 	 *  and from the Tab handler) instead of cached, so its result can never be stale relative to
 	 *  `state`. Returns null if spell-check is off, the dictionary isn't loaded yet, the selection
 	 *  isn't a plain cursor, there's no completed word right before it, or that word is fine. */
 	function computeActiveSpellFix(state: EditorState): { from: number; to: number; suggestion: string } | null {
-		if (!$appConfig?.spell_check_enabled || !isDictionaryReady()) return null;
+		if (!$appConfig?.spell_check_enabled) return null;
+		if ($appConfig.spell_check_engine !== 'ai' && !isDictionaryReady()) return null;
 		const sel = state.selection;
 		if (!sel.empty) return null;
 		const pos = sel.from;
@@ -400,12 +459,11 @@
 		const trimTrail = trailMatch ? trailMatch[0].length : 0;
 		const word = rawWord.slice(0, rawWord.length - trimTrail);
 		if (!word) return null;
-		if (spellIgnoreSet.has(word.toLowerCase())) return null;
 		const wordEndRel = context.length - boundaryLen - trimTrail;
 		const wordStartRel = wordEndRel - word.length;
 		const from = lookbackStart + wordStartRel;
 		const to = lookbackStart + wordEndRel;
-		const suggestion = suggestCorrection(word);
+		const suggestion = getSuggestion(word);
 		if (!suggestion) return null;
 		return { from, to, suggestion };
 	}
@@ -497,22 +555,57 @@
 		return out;
 	}
 
-	/** Walks every text node in the document (skipping code blocks - code isn't prose) looking
-	 *  for misspelled words, the same way computeActiveSpellFix() checks the one word before the
-	 *  cursor. Returns plain {from,to} ranges rather than decorations so the caller can hand them
-	 *  to the plugin as transaction meta. */
-	function scanDocumentForMisspellings(doc: ProseMirrorNode): { from: number; to: number }[] {
-		const ranges: { from: number; to: number }[] = [];
+	/** Every word in the document (skipping code blocks - code isn't prose), as plain
+	 *  {word, from, to} entries - no correctness check here at all, just the cheap traversal +
+	 *  tokenization. Shared by the Basic engine's chunked scan (runSpellCheckScan()) and the AI
+	 *  engine's block collection (collectSpellTokens()), each of which decides what counts as
+	 *  misspelled its own way. */
+	function collectAllWordTokens(doc: ProseMirrorNode): { word: string; from: number; to: number }[] {
+		const tokens: { word: string; from: number; to: number }[] = [];
 		doc.descendants((node, pos) => {
 			if (node.type.name === 'codeBlock') return false;
 			if (!node.isText || !node.text) return true;
 			for (const { word, start, end } of tokenizeWords(node.text)) {
-				if (spellIgnoreSet.has(word.toLowerCase())) continue;
-				if (suggestCorrection(word)) ranges.push({ from: pos + start, to: pos + end });
+				tokens.push({ word, from: pos + start, to: pos + end });
 			}
 			return true;
 		});
-		return ranges;
+		return tokens;
+	}
+
+	/** Like collectAllWordTokens(), but grouped by enclosing top-level textblock (paragraph,
+	 *  heading, list item, ...) instead of flattened - used only by the AI engine, which needs
+	 *  to send the AI actual paragraphs of context rather than a word soup, and to record which
+	 *  paragraph each token came from so the AI's response (a {block, word, suggestion} triple,
+	 *  never a character offset - see aiSpellCheck.ts) can be matched back to the exact
+	 *  positions HelixNotes already computed itself while building the prompt. */
+	function collectSpellTokens(doc: ProseMirrorNode): {
+		promptBlocks: SpellCheckPromptBlock[];
+		tokens: { word: string; from: number; to: number; blockIndex: number }[];
+	} {
+		const promptBlocks: SpellCheckPromptBlock[] = [];
+		const tokens: { word: string; from: number; to: number; blockIndex: number }[] = [];
+		let blockIndex = -1;
+		doc.descendants((node, pos) => {
+			if (node.type.name === 'codeBlock') return false;
+			if (node.isTextblock) {
+				blockIndex++;
+				const thisBlock = blockIndex;
+				let blockText = '';
+				node.forEach((child, childOffset) => {
+					if (!child.isText || !child.text) return;
+					const childPos = pos + 1 + childOffset;
+					blockText += child.text;
+					for (const { word, start, end } of tokenizeWords(child.text)) {
+						tokens.push({ word, from: childPos + start, to: childPos + end, blockIndex: thisBlock });
+					}
+				});
+				if (blockText.trim()) promptBlocks.push({ index: thisBlock, text: blockText });
+				return false;
+			}
+			return true;
+		});
+		return { promptBlocks, tokens };
 	}
 
 	/** Finds the misspelled word (if any) whose range contains document position `pos` - used
@@ -532,8 +625,7 @@
 				const from = nodePos + start;
 				const to = nodePos + end;
 				if (pos < from || pos > to) continue;
-				if (spellIgnoreSet.has(word.toLowerCase())) continue;
-				if (!suggestCorrection(word)) continue;
+				if (!isWordMisspelled(word)) continue;
 				found = { from, to, word };
 				break;
 			}
@@ -548,9 +640,11 @@
 		}
 	}
 
-	function runSpellCheckScan() {
+	let spellScanGeneration = 0;
+
+	async function runSpellCheckScan() {
 		if (!editor || editor.isDestroyed || boundLiveFieldId) return;
-		if (!$appConfig?.spell_check_enabled || !isDictionaryReady()) {
+		if (!$appConfig?.spell_check_enabled || $appConfig.spell_check_engine === 'ai' || !isDictionaryReady()) {
 			clearAllSpellCheck();
 			return;
 		}
@@ -558,7 +652,25 @@
 		// renderer uses to skip its own expensive work) skips the background full-document scan;
 		// the instant per-word check as you type (computeActiveSpellFix() above) still runs.
 		if (isLargeDoc) return;
-		const ranges = scanDocumentForMisspellings(editor.state.doc);
+		const generation = ++spellScanGeneration;
+		const tokens = collectAllWordTokens(editor.state.doc);
+		const ranges: { from: number; to: number }[] = [];
+		// Time-budgeted chunks, yielding to the main thread between them, rather than one long
+		// synchronous walk - isKnownWord() is cheap enough per word that most notes finish in a
+		// single chunk anyway, but a very large note (just under the isLargeDoc cutoff) or a
+		// slower machine never gets to block typing or rendering while this runs.
+		const CHUNK_BUDGET_MS = 8;
+		let i = 0;
+		while (i < tokens.length) {
+			const chunkStart = performance.now();
+			while (i < tokens.length && performance.now() - chunkStart < CHUNK_BUDGET_MS) {
+				const token = tokens[i++];
+				if (isWordMisspelled(token.word)) ranges.push({ from: token.from, to: token.to });
+			}
+			if (generation !== spellScanGeneration || !editor || editor.isDestroyed) return;
+			if (i < tokens.length) await new Promise((resolve) => setTimeout(resolve, 0));
+			if (generation !== spellScanGeneration || !editor || editor.isDestroyed) return;
+		}
 		editor.view.dispatch(editor.state.tr.setMeta(spellCheckPluginKey, { type: 'setErrors', ranges }));
 	}
 
@@ -569,12 +681,90 @@
 	 *  loading, so underlines are already there instead of only appearing once you start typing. */
 	function scheduleSpellCheckScan() {
 		if (spellCheckScanTimer) { clearTimeout(spellCheckScanTimer); spellCheckScanTimer = null; }
+		// Bumped unconditionally (even if this call is about to return early below) so an
+		// in-flight chunked scan from a previous call can never paint over whatever happens
+		// next - same reasoning as ghostTextGeneration in scheduleGhostTextSuggestion().
+		spellScanGeneration++;
 		if (!editor || editor.isDestroyed || boundLiveFieldId) return;
 		if (!$appConfig?.spell_check_enabled) return;
+		if ($appConfig.spell_check_engine === 'ai') {
+			scheduleAiSpellScan();
+			return;
+		}
 		spellCheckScanTimer = setTimeout(() => {
 			spellCheckScanTimer = null;
 			runSpellCheckScan();
 		}, SPELL_CHECK_SCAN_DEBOUNCE_MS);
+	}
+
+	/** AI engine's counterpart to scheduleSpellCheckScan()/runSpellCheckScan() - debounced
+	 *  longer than the Basic engine (spell-check-as-you-type over a network round trip would be
+	 *  both slow and expensive to run on every pause) and skipped entirely if the note's text
+	 *  hasn't changed since the last completed scan. */
+	function scheduleAiSpellScan() {
+		if (aiSpellTimer) { clearTimeout(aiSpellTimer); aiSpellTimer = null; }
+		aiSpellGeneration++;
+		if (!editor || editor.isDestroyed || boundLiveFieldId) return;
+		if (!$appConfig?.spell_check_enabled || $appConfig.spell_check_engine !== 'ai') return;
+		if (!$appConfig?.ai_provider) return;
+		if (isLargeDoc) return;
+		const generation = aiSpellGeneration;
+		aiSpellTimer = setTimeout(() => {
+			aiSpellTimer = null;
+			runAiSpellScan(generation);
+		}, AI_SPELL_SCAN_DEBOUNCE_MS);
+	}
+
+	async function runAiSpellScan(generation: number) {
+		if (!editor || editor.isDestroyed || generation !== aiSpellGeneration) return;
+		const { promptBlocks, tokens } = collectSpellTokens(editor.state.doc);
+		const fullText = promptBlocks.map((b) => b.text).join('\n');
+		if (!fullText.trim()) {
+			aiSpellSuggestions = new Map();
+			aiSpellLastScannedText = fullText;
+			editor.view.dispatch(editor.state.tr.setMeta(spellCheckPluginKey, { type: 'setErrors', ranges: [] }));
+			return;
+		}
+		if (fullText === aiSpellLastScannedText) return;
+		const prompt = buildSpellCheckPrompt(promptBlocks);
+		const requestId = crypto.randomUUID();
+		let accumulated = '';
+		const unlisten = await listen<AiStreamEvent>('ai-stream', (event) => {
+			if (event.payload.request_id !== requestId) return;
+			if (generation !== aiSpellGeneration) { unlisten(); return; }
+			const data = event.payload;
+			if (data.event_type === 'text' && data.text) {
+				accumulated += data.text;
+			} else if (data.event_type === 'done') {
+				unlisten();
+				if (generation !== aiSpellGeneration || !editor || editor.isDestroyed) return;
+				const entries = parseSpellCheckResponse(accumulated);
+				const suggestions = new Map<string, string>();
+				const ranges: { from: number; to: number }[] = [];
+				for (const entry of entries) {
+					const lowerWord = entry.word.toLowerCase();
+					if (spellIgnoreSet.has(lowerWord)) continue;
+					suggestions.set(lowerWord, entry.suggestion);
+					for (const token of tokens) {
+						if (token.blockIndex === entry.block && token.word.toLowerCase() === lowerWord) {
+							ranges.push({ from: token.from, to: token.to });
+						}
+					}
+				}
+				aiSpellSuggestions = suggestions;
+				aiSpellLastScannedText = fullText;
+				editor.view.dispatch(editor.state.tr.setMeta(spellCheckPluginKey, { type: 'setErrors', ranges }));
+			} else if (data.event_type === 'error') {
+				unlisten();
+			}
+		});
+		try {
+			await aiAsk('spell_check', prompt, null, requestId, 4096);
+		} catch {
+			// Silent by design, same as ghost-text - a missing/misconfigured AI provider
+			// shouldn't interrupt typing or show an error where an underline would go.
+			unlisten();
+		}
 	}
 
 	function closeSpellContextMenu() {
@@ -4223,6 +4413,9 @@
 		const revealTarget = taskTarget ? resolveTaskTarget(taskTarget, content) : null;
 		loadedPath = path;
 		refreshSpellIgnoreSet(path);
+		aiSpellGeneration++;
+		aiSpellSuggestions = new Map();
+		aiSpellLastScannedText = null;
 		isLoadingNote = true;
 		clearGhostSuggestion();
 		isLargeDoc = content.length > LARGE_DOC_CHARS;
@@ -5851,7 +6044,7 @@
 			if (hit) {
 				event.preventDefault();
 				event.stopPropagation();
-				const suggestions = suggestCorrections(hit.word, 3);
+				const suggestions = getSuggestionsFor(hit.word, 3);
 				let sx = event.clientX;
 				let sy = event.clientY;
 				const menuWidth = 200;

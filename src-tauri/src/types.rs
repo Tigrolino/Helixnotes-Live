@@ -250,6 +250,13 @@ pub struct AppConfig {
     // no AI provider, so it defaults on.
     #[serde(default = "default_true")]
     pub spell_check_enabled: bool,
+    // Which engine powers spell-check: "basic" (offline, via nspell + the bundled Hunspell
+    // en_US dictionary - the same engine Word/Chrome/LibreOffice use; needs no AI provider) or
+    // "ai" (routes each paragraph through the configured AI provider for context-aware
+    // suggestions - see ai_ask's "spell_check" action). Whether spell-check runs at all is
+    // spell_check_enabled above; this only picks which engine does the checking.
+    #[serde(default = "default_spell_check_engine")]
+    pub spell_check_engine: String,
     #[serde(default)]
     pub default_view_mode: bool,
     #[serde(default)]
@@ -329,6 +336,10 @@ fn default_ghost_text_max_words() -> u32 {
     1
 }
 
+fn default_spell_check_engine() -> String {
+    "basic".to_string()
+}
+
 fn default_system_light_theme() -> String {
     "light".to_string()
 }
@@ -391,6 +402,7 @@ impl Default for AppConfig {
             ghost_text_enabled: false,
             ghost_text_max_words: 1,
             spell_check_enabled: true,
+            spell_check_engine: "basic".to_string(),
             default_view_mode: false,
             new_notes_in_source_mode: false,
             show_tray_icon: false,

@@ -76,6 +76,7 @@
     "markdown-it-sup": "^2.0.0",
     "markdown-it-task-lists": "^2.1.1",
     "mermaid": "^11.16.1",
+    "nspell": "^2.1.5",
     "y-protocols": "^1.0.7",
     "yjs": "^13.6.27"
   },

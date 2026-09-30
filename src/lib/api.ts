@@ -565,11 +565,12 @@ export async function setAiSettings(
   ghostTextEnabled: boolean = false,
   ghostTextMaxWords: number = 1,
   spellCheckEnabled: boolean = true,
+  spellCheckEngine: string = "basic",
 ): Promise<void> {
   return invoke("set_ai_settings", {
     provider, apiKey, model, writingStyle, baseUrl,
     ollamaApiKey, openaiCompatibleBaseUrl, openaiCompatibleApiKey,
-    ghostTextEnabled, ghostTextMaxWords, spellCheckEnabled,
+    ghostTextEnabled, ghostTextMaxWords, spellCheckEnabled, spellCheckEngine,
   });
 }
 

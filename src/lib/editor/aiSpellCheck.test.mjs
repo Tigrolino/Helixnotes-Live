@@ -1,0 +1,83 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+const { buildSpellCheckPrompt, parseSpellCheckResponse } = await import(
+	new URL('./aiSpellCheck.ts', import.meta.url)
+);
+
+test('buildSpellCheckPrompt numbers each block as "<index>: <text>"', () => {
+	const prompt = buildSpellCheckPrompt([
+		{ index: 0, text: 'Teh quick brown fox.' },
+		{ index: 1, text: 'Another paragraph here.' },
+	]);
+	assert.equal(prompt, '0: Teh quick brown fox.\n1: Another paragraph here.');
+});
+
+test('buildSpellCheckPrompt handles an empty block list', () => {
+	assert.equal(buildSpellCheckPrompt([]), '');
+});
+
+test('parseSpellCheckResponse parses a well-formed JSON array', () => {
+	const entries = parseSpellCheckResponse('[{"block": 0, "word": "teh", "suggestion": "the"}]');
+	assert.deepEqual(entries, [{ block: 0, word: 'teh', suggestion: 'the' }]);
+});
+
+test('parseSpellCheckResponse returns [] for an empty array response', () => {
+	assert.deepEqual(parseSpellCheckResponse('[]'), []);
+});
+
+test('parseSpellCheckResponse strips a markdown code fence the model added despite instructions', () => {
+	const raw = '```json\n[{"block": 1, "word": "adn", "suggestion": "and"}]\n```';
+	assert.deepEqual(parseSpellCheckResponse(raw), [{ block: 1, word: 'adn', suggestion: 'and' }]);
+});
+
+test('parseSpellCheckResponse strips a fence with no "json" language tag', () => {
+	const raw = '```\n[{"block": 0, "word": "wolrd", "suggestion": "world"}]\n```';
+	assert.deepEqual(parseSpellCheckResponse(raw), [{ block: 0, word: 'wolrd', suggestion: 'world' }]);
+});
+
+test('parseSpellCheckResponse returns [] for unparseable JSON rather than throwing', () => {
+	assert.deepEqual(parseSpellCheckResponse('not json at all'), []);
+	assert.deepEqual(parseSpellCheckResponse(''), []);
+	assert.deepEqual(parseSpellCheckResponse('{"not": "an array"}'), []);
+});
+
+test('parseSpellCheckResponse drops entries missing a required field', () => {
+	const raw = JSON.stringify([
+		{ block: 0, word: 'teh' }, // missing suggestion
+		{ word: 'adn', suggestion: 'and' }, // missing block
+		{ block: 1, suggestion: 'the' }, // missing word
+		{ block: 2, word: 'recieve', suggestion: 'receive' }, // valid
+	]);
+	assert.deepEqual(parseSpellCheckResponse(raw), [{ block: 2, word: 'recieve', suggestion: 'receive' }]);
+});
+
+test('parseSpellCheckResponse drops an entry whose word and suggestion are the same (case-insensitively)', () => {
+	const raw = JSON.stringify([
+		{ block: 0, word: 'hello', suggestion: 'hello' },
+		{ block: 0, word: 'World', suggestion: 'world' },
+	]);
+	assert.deepEqual(parseSpellCheckResponse(raw), []);
+});
+
+test('parseSpellCheckResponse de-duplicates by (block, lowercased word), keeping the last one', () => {
+	const raw = JSON.stringify([
+		{ block: 0, word: 'teh', suggestion: 'ten' },
+		{ block: 0, word: 'Teh', suggestion: 'the' },
+	]);
+	assert.deepEqual(parseSpellCheckResponse(raw), [{ block: 0, word: 'Teh', suggestion: 'the' }]);
+});
+
+test('parseSpellCheckResponse keeps the same word flagged separately in different blocks', () => {
+	const raw = JSON.stringify([
+		{ block: 0, word: 'teh', suggestion: 'the' },
+		{ block: 3, word: 'teh', suggestion: 'the' },
+	]);
+	const entries = parseSpellCheckResponse(raw);
+	assert.equal(entries.length, 2);
+});
+
+test('parseSpellCheckResponse ignores non-object array entries instead of throwing', () => {
+	const raw = JSON.stringify(['not an object', 42, null, { block: 0, word: 'adn', suggestion: 'and' }]);
+	assert.deepEqual(parseSpellCheckResponse(raw), [{ block: 0, word: 'adn', suggestion: 'and' }]);
+});

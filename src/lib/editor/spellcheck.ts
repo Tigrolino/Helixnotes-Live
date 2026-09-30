@@ -1,23 +1,30 @@
-// Lightweight, dependency-free offline spell checker backing the "Spelling corrections"
-// feature: a flat English wordlist (static/dictionaries/en.txt, see that folder's README
-// for provenance/license) plus a small Norvig-style edit-distance suggester. No AI call, no
-// network access after the one-time local asset fetch, and works with no AI provider
-// configured at all - unlike ghost-text, this has nothing to do with $appConfig.ai_provider.
+// Offline spell checker backing the "Spelling corrections" feature's Basic engine: nspell, a
+// pure-JS Hunspell-compatible implementation, checked against the bundled Hunspell en_US
+// dictionary (static/dictionaries/en.aff + en.dic - see that folder's README for
+// provenance/license) - the same dictionary format and engine family that power spell-check in
+// Word, Chrome, Firefox, and LibreOffice. No AI call, no network access after the one-time
+// local asset fetch, and works with no AI provider configured at all - unlike ghost-text (and
+// the AI spell-check engine in aiSpellCheck.ts), this has nothing to do with
+// $appConfig.ai_provider.
+//
+// nspell's own suggest() ranks candidates using Hunspell's internal heuristics (keyboard
+// adjacency, phonetic similarity, affix-aware edit distance, etc.), which is usually solid but
+// can bury an extremely common correction behind several obscure dictionary words that happen
+// to be an equally "close" edit - raw suggest('teh') puts "ten"/"eh"/"meh"/"tea" ahead of "the",
+// for example, and raw suggest('adn') puts "an" ahead of "and". rerankSuggestions() below
+// re-sorts nspell's own candidate list - it never adds or invents a candidate nspell didn't
+// already surface - to put a common word first and, among ties, prefer whichever edit pattern
+// (transposition/substitution/deletion/insertion) an everyday typo is more likely to be.
 
-const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
-
-// Trailing contraction pieces ("don't" -> "do" + "n't") aren't worth listing as separate
-// dictionary entries - stripped and the stem re-checked before a contraction gets flagged
-// just because the wordlist only has its bare stem.
-const CONTRACTION_SUFFIXES = ["'s", "'t", "'re", "'ll", "'ve", "'d", "'m"];
+import nspell from 'nspell';
 
 // A couple hundred of the most frequent words in English (articles, pronouns, prepositions,
-// conjunctions, and other everyday function/content words) - used only to break ties when
-// more than one dictionary word is an equally-plausible correction (see pickBest() below).
-// The 370k-word dictionary itself has no frequency data, so without this, a tie between a
-// very common word and an obscure one (e.g. "teh" is one transposition away from both "the"
-// and "eth", the letter <eth>) would be broken alphabetically and could easily pick the
-// obscure one.
+// conjunctions, and other everyday function/content words) - used only to break ties when more
+// than one of nspell's own candidates is a plausible correction (see rerankSuggestions() below).
+// nspell/Hunspell has no frequency data of its own, so without this, a tie between a very
+// common word and an obscure one (e.g. "teh" is one transposition away from both "the" and the
+// far rarer "ten"/"tea"/"tel") is broken by nspell's internal heuristics alone, which don't
+// account for which candidate a person is actually more likely to have meant.
 const COMMON_WORDS = new Set([
 	'the', 'of', 'and', 'a', 'to', 'in', 'is', 'you', 'that', 'it', 'he', 'was', 'for', 'on',
 	'are', 'as', 'with', 'his', 'they', 'i', 'at', 'be', 'this', 'have', 'from', 'or', 'one',
@@ -46,31 +53,37 @@ const COMMON_WORDS = new Set([
 	'state', 'once', 'book', 'hear', 'stop', 'without', 'second', 'later', 'miss', 'idea',
 	'enough', 'eat', 'face', 'watch', 'far', 'really', 'almost', 'let', 'above', 'girl',
 	'sometimes', 'mountain', 'cut', 'young', 'talk', 'soon', 'list', 'song', 'being', 'leave',
-	'family', 'hello', 'hi', 'hey', 'help', 'hero', 'okay', 'yes', 'no', 'please', 'thanks'
+	'family', 'hello', 'hi', 'hey', 'help', 'hero', 'okay', 'yes', 'no', 'please', 'thanks',
 ]);
 
-let dictionary: Set<string> | null = null;
-let loadPromise: Promise<Set<string> | null> | null = null;
+/** Minimal shape of the bits of the NSpell instance this file actually uses - avoids pulling in
+ *  nspell's own (nonexistent) type declarations for two methods. */
+interface NSpellInstance {
+	correct(word: string): boolean;
+	suggest(word: string): string[];
+}
 
-/** Fetches and parses the bundled wordlist once; safe to call repeatedly or concurrently -
- *  every caller after the first awaits the same in-flight load. Resolves to null (rather
- *  than throwing) if the fetch fails, so a missing/blocked asset just quietly leaves spell-
- *  check disabled instead of breaking typing. */
-export async function loadDictionary(): Promise<Set<string> | null> {
-	if (dictionary) return dictionary;
+let spell: NSpellInstance | null = null;
+let loadPromise: Promise<NSpellInstance | null> | null = null;
+
+/** Fetches the bundled Hunspell en_US dictionary (en.aff + en.dic) and builds the nspell
+ *  instance once; safe to call repeatedly or concurrently - every caller after the first awaits
+ *  the same in-flight load. Resolves to null (rather than throwing) if the fetch fails, so a
+ *  missing/blocked asset just quietly leaves spell-check disabled instead of breaking typing. */
+export async function loadDictionary(): Promise<NSpellInstance | null> {
+	if (spell) return spell;
 	if (!loadPromise) {
 		loadPromise = (async () => {
 			try {
-				const res = await fetch('/dictionaries/en.txt');
-				if (!res.ok) throw new Error(`Dictionary fetch failed: ${res.status}`);
-				const text = await res.text();
-				const set = new Set<string>();
-				for (const line of text.split('\n')) {
-					const w = line.trim();
-					if (w) set.add(w);
-				}
-				dictionary = set;
-				return set;
+				const [affRes, dicRes] = await Promise.all([
+					fetch('/dictionaries/en.aff'),
+					fetch('/dictionaries/en.dic'),
+				]);
+				if (!affRes.ok) throw new Error(`Dictionary affix fetch failed: ${affRes.status}`);
+				if (!dicRes.ok) throw new Error(`Dictionary word-list fetch failed: ${dicRes.status}`);
+				const [aff, dic] = await Promise.all([affRes.text(), dicRes.text()]);
+				spell = nspell({ aff, dic }) as NSpellInstance;
+				return spell;
 			} catch {
 				loadPromise = null;
 				return null;
@@ -80,208 +93,140 @@ export async function loadDictionary(): Promise<Set<string> | null> {
 	return loadPromise;
 }
 
-/** Whether the dictionary has finished loading and suggestCorrection()/isKnownWord() are
- *  ready to use synchronously. Callers kick off loadDictionary() once (e.g. when spell-check
- *  is turned on or a note is opened) and just skip checking words until this is true. */
+/** Whether the dictionary has finished loading and suggestCorrection()/isKnownWord() are ready
+ *  to use synchronously. Callers kick off loadDictionary() once (e.g. when spell-check is
+ *  turned on or a note is opened) and just skip checking words until this is true. */
 export function isDictionaryReady(): boolean {
-	return dictionary !== null;
+	return spell !== null;
 }
 
-function stripContraction(word: string): string {
-	for (const suf of CONTRACTION_SUFFIXES) {
-		if (word.length > suf.length && word.endsWith(suf)) return word.slice(0, -suf.length);
-	}
-	return word;
-}
-
-/** Whether `word` (as typed, any case) is a recognized word: checked lowercased, and if not
- *  found there, with a trailing contraction piece ("n't", "'re"...) stripped, so "don't" or
- *  "they're" aren't flagged just because the dictionary only has the bare stem. Returns true
- *  (don't flag anything) if the dictionary hasn't loaded yet. */
+/** Whether `word` (as typed, any case) is a recognized word - a thin, cheap wrapper around
+ *  nspell's own correct(), which already handles casing (HELLO/Hello/hello all match "hello"),
+ *  contractions ("don't"/"isn't" are dictionary entries in their own right), and the curly
+ *  right single quote TipTap's Typography extension substitutes for a typed "'" mid-word (the
+ *  bundled dictionary's ICONV table normalizes U+2019 to a plain apostrophe before lookup, so
+ *  no manual normalization is needed here). Returns true (don't flag anything) if the
+ *  dictionary hasn't loaded yet. This is the check scanDocumentForMisspellings() in
+ *  Editor.svelte should use for "is this word wrong" - it's a single dictionary/trie lookup,
+ *  unlike suggestCorrection()'s suggest() call below, which is meaningfully more expensive and
+ *  should only run for the one word actually being corrected. */
 export function isKnownWord(word: string): boolean {
-	if (!dictionary) return true;
-	// TipTap's Typography extension (already on in this app) auto-converts a straight "'"
-	// typed mid-word into a curly right single quote (U+2019) - "don't" ends up stored in the
-	// document as "don\u2019t". Normalize back to a plain apostrophe before lookup so that
-	// doesn't get flagged just because the dictionary and CONTRACTION_SUFFIXES only know the
-	// straight one.
-	const lower = word.toLowerCase().replace(/\u2019/g, "'");
-	if (dictionary.has(lower)) return true;
-	const stem = stripContraction(lower);
-	return stem !== lower && dictionary.has(stem);
+	if (!spell) return true;
+	return spell.correct(word);
 }
 
-// 0 transposition, 1 substitution, 2 deletion, 3 insertion - roughly in order of how common
-// each typo pattern actually is, used to rank candidate corrections when more than one
-// edit-distance-1 word matches the dictionary.
-type EditKind = 0 | 1 | 2 | 3;
+// How two words compare, used only to rank nspell's own suggestion list (rerankSuggestions()
+// below) - 0 transposition, 1 substitution, 2 deletion, 3 insertion, 4 "other" (not a single
+// clean edit between the two, e.g. because nspell reached it via an affix/compound rule rather
+// than a plain character edit). Roughly in order of how common each typo pattern actually is.
+type EditKind = 0 | 1 | 2 | 3 | 4;
 
-/** Every string one single-letter edit away from `word` (one deletion, adjacent-pair
- *  transposition, substitution, or insertion), tagged with the best (lowest) EditKind it was
- *  reached by. Roughly 54*n+25 candidates for a word of length n - cheap enough to generate
- *  and hash-check against the dictionary on every completed word, and (for the edit-distance-2
- *  fallback below) cheap enough to do again for each of those. */
-function edits1(word: string): Map<string, EditKind> {
-	const out = new Map<string, EditKind>();
-	const consider = (candidate: string, kind: EditKind) => {
-		const existing = out.get(candidate);
-		if (existing === undefined || kind < existing) out.set(candidate, kind);
-	};
-	for (let i = 0; i <= word.length; i++) {
-		const left = word.slice(0, i);
-		const right = word.slice(i);
-		if (right.length >= 1) consider(left + right.slice(1), 2); // deletion
-		if (right.length >= 2) consider(left + right[1] + right[0] + right.slice(2), 0); // transposition
-		if (right.length >= 1) {
-			for (const c of LETTERS) {
-				if (c !== right[0]) consider(left + c + right.slice(1), 1); // substitution
-			}
+/** Classifies the edit that turns `a` into `b` (both already lowercased), when it's a single
+ *  clean transposition/substitution/deletion/insertion - cheap to run over nspell's own
+ *  (already short, already-real-word) suggestion list, unlike generating every possible edit of
+ *  a word from scratch. */
+function editKindBetween(a: string, b: string): EditKind {
+	if (a === b) return 4;
+	if (a.length === b.length) {
+		const diff: number[] = [];
+		for (let i = 0; i < a.length; i++) {
+			if (a[i] !== b[i]) diff.push(i);
+			if (diff.length > 2) break;
 		}
-		for (const c of LETTERS) consider(left + c + right, 3); // insertion
-	}
-	return out;
-}
-
-/** Picks one word out of a tied set of equally-plausible candidates: prefers a common word
- *  (see COMMON_WORDS) if any of the candidates are one, since a collision between a common
- *  word and an obscure one is exactly the case where "just pick alphabetically" tends to
- *  pick the wrong one. Falls back to alphabetical among whatever's left for determinism. */
-function pickBest(words: string[]): string {
-	const common = words.filter((w) => COMMON_WORDS.has(w));
-	const pool = common.length ? common : words;
-	return pool.sort()[0];
-}
-
-/** Best-effort single correction for a misspelled `lowerWord`, or null if nothing close
- *  enough was found. Tries every edit-distance-1 variant first, preferring the lowest
- *  EditKind found and breaking ties with pickBest(). Only if none of those are real words
- *  does it fall back to edit-distance-2, which is inherently fuzzier: more than a handful of
- *  equally-plausible matches there means "not confident enough" rather than guessing one. */
-function bestCorrection(lowerWord: string, dict: Set<string>): string | null {
-	const e1 = edits1(lowerWord);
-	let bestKind: EditKind | null = null;
-	let bestWords: string[] = [];
-	for (const [candidate, kind] of e1) {
-		if (!dict.has(candidate)) continue;
-		if (bestKind === null || kind < bestKind) {
-			bestKind = kind;
-			bestWords = [candidate];
-		} else if (kind === bestKind) {
-			bestWords.push(candidate);
+		if (diff.length === 1) return 1; // substitution
+		if (
+			diff.length === 2 &&
+			diff[1] === diff[0] + 1 &&
+			a[diff[0]] === b[diff[1]] &&
+			a[diff[1]] === b[diff[0]]
+		) {
+			return 0; // adjacent transposition
 		}
+		return 4;
 	}
-	if (bestWords.length) return pickBest(bestWords);
-
-	const distance2 = new Set<string>();
-	outer: for (const w1 of e1.keys()) {
-		for (const w2 of edits1(w1).keys()) {
-			if (dict.has(w2)) {
-				distance2.add(w2);
-				if (distance2.size > 4) break outer; // already too many candidates to be confident
-			}
+	if (a.length === b.length + 1) {
+		for (let i = 0; i < a.length; i++) {
+			if (a.slice(0, i) + a.slice(i + 1) === b) return 2; // deletion (a -> b)
 		}
+		return 4;
 	}
-	if (distance2.size === 0 || distance2.size > 4) return null;
-	return pickBest([...distance2]);
+	if (a.length === b.length - 1) {
+		for (let i = 0; i < b.length; i++) {
+			if (b.slice(0, i) + b.slice(i + 1) === a) return 3; // insertion (a -> b)
+		}
+		return 4;
+	}
+	return 4;
 }
 
-const ALL_UPPER_RE = /^[A-Z]+$/;
-
-/** Public entry point: given a word as typed (any case), returns a suggested correction
- *  with capitalization matched to the original, or null if the word looks fine, is too
- *  short/unusual to bother checking, or no confident correction was found. Synchronous -
- *  call loadDictionary() ahead of time and check isDictionaryReady() before relying on this
- *  (it always returns null until the dictionary is loaded, same as "nothing wrong found"). */
-export function suggestCorrection(word: string): string | null {
-	if (!dictionary) return null;
-	// Skip words that can't usefully be spell-checked: too short to bother the user over, or
-	// ALL CAPS (almost always an acronym, not a typo). Anything containing digits, hyphens,
-	// or other punctuation never reaches here in the first place - the caller's word-boundary
-	// regex only pulls out letter(+apostrophe) runs to begin with.
-	if (word.length < 3 || ALL_UPPER_RE.test(word)) return null;
-	if (isKnownWord(word)) return null;
-	const lower = word.toLowerCase().replace(/\u2019/g, "'");
-	const correction = bestCorrection(lower, dictionary);
-	if (!correction || correction === lower) return null;
-	// The wordlist is all-lowercase - re-apply the original word's capitalization so "Teh"
-	// corrects to "The", not "the".
-	if (word[0] !== word[0].toLowerCase()) {
-		return correction[0].toUpperCase() + correction.slice(1);
-	}
-	return correction;
-}
-
-/** A candidate correction together with what it took to reach it from the misspelled word -
- *  used only to rank candidates (see rankedCorrections() below), never returned as-is. */
-type Candidate = { word: string; kind: EditKind; distance: 1 | 2 };
-
-/** Sorts candidates for display. Unlike suggestCorrection()'s single guess - which ranks
- *  purely by EditKind (transposition, then substitution, then deletion, then insertion; see
- *  edits1()) because it only ever returns one answer and a rare-but-"closer" edit pattern is
- *  a reasonable tiebreaker for a single silent guess - a menu of several options is read by a
- *  person, and a 370k-word dictionary pulled from public wordlists has plenty of obscure or
- *  archaic entries sitting at edit-distance 1 (an early version of this ranking offered
- *  "halo"/"held"/"hele"/"helm" for "helo" ahead of the obviously-intended "hello", purely
- *  because they're substitutions and "hello" is an insertion). So a word in COMMON_WORDS is
- *  ranked ahead of one that isn't, full stop, before edit distance or kind are even
- *  considered; those still break ties within each group. */
-function rankCandidates(candidates: Candidate[]): string[] {
-	return [...candidates]
+/** Re-sorts nspell's own suggestion list: a word in COMMON_WORDS first, full stop, before
+ *  anything else is considered; among ties, the edit pattern more likely to be a real typo
+ *  (see EditKind above); and as a final tiebreak, nspell's own original relative order, which
+ *  still encodes useful signal (keyboard adjacency, phonetic similarity) this function doesn't
+ *  otherwise account for. Operates purely on the strings nspell already returned - never adds a
+ *  candidate nspell didn't surface itself. */
+function rerankSuggestions(original: string, suggestions: string[]): string[] {
+	const lowerOriginal = original.toLowerCase();
+	return suggestions
+		.map((word, index) => ({
+			word,
+			index,
+			common: COMMON_WORDS.has(word.toLowerCase()),
+			kind: editKindBetween(lowerOriginal, word.toLowerCase()),
+		}))
 		.sort((a, b) => {
-			const aCommon = COMMON_WORDS.has(a.word);
-			const bCommon = COMMON_WORDS.has(b.word);
-			if (aCommon !== bCommon) return aCommon ? -1 : 1;
-			if (a.distance !== b.distance) return a.distance - b.distance;
+			if (a.common !== b.common) return a.common ? -1 : 1;
 			if (a.kind !== b.kind) return a.kind - b.kind;
-			return a.word < b.word ? -1 : a.word > b.word ? 1 : 0;
+			return a.index - b.index;
 		})
 		.map((c) => c.word);
 }
 
-/** Up to `limit` distinct dictionary words plausibly meant by `lowerWord`, best guesses
- *  first - see rankCandidates() for how "best" is decided. Edit-distance-2 candidates are
- *  only considered if distance-1 didn't fill `limit` on its own. Unlike bestCorrection()
- *  (used by suggestCorrection(), which stays conservative and returns nothing rather than
- *  guess wrong), this is meant to hand several candidates to a person to pick from, so a
- *  genuinely ambiguous typo isn't a reason to hold anything back - it's exactly the case
- *  multiple suggestions are for. */
-function rankedCorrections(lowerWord: string, dict: Set<string>, limit: number): string[] {
-	const e1 = edits1(lowerWord);
-	const seen = new Set<string>();
-	const candidates: Candidate[] = [];
-	for (const [candidate, kind] of e1) {
-		if (candidate === lowerWord || seen.has(candidate) || !dict.has(candidate)) continue;
-		seen.add(candidate);
-		candidates.push({ word: candidate, kind, distance: 1 });
-	}
-	if (candidates.length < limit) {
-		// Bounds the search, not the result - rankCandidates + the slice below still pick the
-		// best `limit` out of however many distance-2 candidates turned up.
-		let distance2Count = 0;
-		outer: for (const [w1, k1] of e1) {
-			for (const [w2, k2] of edits1(w1)) {
-				if (w2 === lowerWord || seen.has(w2) || !dict.has(w2)) continue;
-				seen.add(w2);
-				candidates.push({ word: w2, kind: (Math.max(k1, k2) as EditKind), distance: 2 });
-				if (++distance2Count > 24) break outer;
-			}
-		}
-	}
-	return rankCandidates(candidates).slice(0, limit);
+const ALL_UPPER_RE = /^[A-Z]+$/;
+
+// nspell's suggest() is a meaningfully more expensive call than correct() (it's doing real
+// suggestion generation, not a single dictionary lookup - see the timing note in
+// getRankedSuggestions() below), and the same misspelled word tends to recur a lot within one
+// note (a name, a typo the person keeps making). Cache the reranked list per word rather than
+// recomputing it on every keystroke near that word; capped and cleared-on-overflow rather than
+// LRU-evicted, since a genuine cap hit is rare enough that O(1) beats the bookkeeping.
+const RANKED_CACHE_MAX = 5000;
+const rankedCache = new Map<string, string[]>();
+
+function getRankedSuggestions(word: string): string[] {
+	const cached = rankedCache.get(word);
+	if (cached !== undefined) return cached;
+	// suggest() on this dictionary runs roughly ~1ms/call in practice - fine for the one active
+	// word under the cursor or a right-click menu, but never call this from a whole-document
+	// scan (use isKnownWord()/correct() there instead, which is orders of magnitude cheaper).
+	const ranked = rerankSuggestions(word, spell!.suggest(word));
+	if (rankedCache.size >= RANKED_CACHE_MAX) rankedCache.clear();
+	rankedCache.set(word, ranked);
+	return ranked;
+}
+
+/** Public entry point: given a word as typed (any case), returns a suggested correction, or
+ *  null if the word looks fine, is too short/unusual to bother checking, or the dictionary
+ *  hasn't loaded yet (same as "nothing wrong found"). Capitalization of the result already
+ *  matches the input - nspell's suggest() does this itself. */
+export function suggestCorrection(word: string): string | null {
+	if (!spell) return null;
+	// Skip words that can't usefully be spell-checked: too short to bother the user over, or
+	// ALL CAPS (almost always an acronym, not a typo - though the bundled dictionary already
+	// recognizes plenty of real ones, like "NASA", via correct() below on its own).
+	if (word.length < 3 || ALL_UPPER_RE.test(word)) return null;
+	if (spell.correct(word)) return null;
+	return getRankedSuggestions(word)[0] ?? null;
 }
 
 /** Up to `limit` (default 3) plausible corrections for a misspelled word, best guess first -
  *  for a "pick one" UI (the right-click suggestion menu) rather than suggestCorrection()'s
- *  single conservative guess. Returns [] for a word that isn't misspelled in the first place
- *  (same rules as suggestCorrection(): too short, ALL CAPS, or already a dictionary word),
- *  same as returning null there - the caller shouldn't be showing this menu at all in that
- *  case. Capitalization of each suggestion is matched to the original word. */
+ *  single guess. Returns [] for a word that isn't misspelled in the first place (same rules as
+ *  suggestCorrection()), same as returning null there - the caller shouldn't be showing this
+ *  menu at all in that case. */
 export function suggestCorrections(word: string, limit = 3): string[] {
-	if (!dictionary) return [];
+	if (!spell) return [];
 	if (word.length < 3 || ALL_UPPER_RE.test(word)) return [];
-	if (isKnownWord(word)) return [];
-	const lower = word.toLowerCase().replace(/’/g, "'");
-	const ranked = rankedCorrections(lower, dictionary, limit);
-	const capitalize = word[0] !== word[0].toLowerCase();
-	return ranked.map((w) => (capitalize ? w[0].toUpperCase() + w.slice(1) : w));
+	if (spell.correct(word)) return [];
+	return getRankedSuggestions(word).slice(0, limit);
 }

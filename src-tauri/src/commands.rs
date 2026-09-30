@@ -2408,6 +2408,7 @@ pub fn set_ai_settings(
     ghost_text_enabled: bool,
     ghost_text_max_words: u32,
     spell_check_enabled: bool,
+    spell_check_engine: String,
 ) -> Result<(), String> {
     let mut config = state.config.lock().map_err(|e| e.to_string())?;
     let key = api_key.filter(|k| !k.is_empty());
@@ -2430,6 +2431,13 @@ pub fn set_ai_settings(
     config.ghost_text_enabled = ghost_text_enabled;
     config.ghost_text_max_words = ghost_text_max_words.clamp(1, 3);
     config.spell_check_enabled = spell_check_enabled;
+    // Anything other than the one alternate engine falls back to "basic" - never persist a
+    // typo'd or future/unknown engine name that the frontend then can't match on.
+    config.spell_check_engine = if spell_check_engine == "ai" {
+        "ai".to_string()
+    } else {
+        "basic".to_string()
+    };
     save_app_config(&config)?;
     Ok(())
 }
@@ -2741,6 +2749,44 @@ pub fn ai_ask(
             base_url,
             max_tokens.unwrap_or(48),
             true,
+        );
+        return Ok(());
+    }
+
+    // Spell-check (AI mode): given numbered paragraphs from the note, return the misspelled
+    // words and their corrections as JSON. Gets its own system prompt - and skips the generic
+    // "preserve formatting" one below, which doesn't apply - so the whole response is parseable
+    // JSON. The frontend never trusts an AI-supplied character position (see Editor.svelte's
+    // collectSpellTokens/runAiSpellScan); it only reads the (block, word) pairs from this
+    // response and matches them back against positions it already computed itself while
+    // building the prompt, the same lesson learned from the earlier Tab-corruption bug.
+    if action == "spell_check" {
+        let system_prompt = "You are a spell-checking engine inside a note-taking app called \
+            HelixNotes. You will be given a numbered list of paragraphs from a user's note, one \
+            per line, formatted as \"<number>: <paragraph text>\". Find words that are \
+            genuinely misspelled - real typos, not: technical terms, code identifiers, proper \
+            nouns, names, URLs, abbreviations, slang, or words that are simply uncommon but \
+            correctly spelled. Use the surrounding sentence to judge commonly-confused but \
+            correctly-spelled words (their/there/they're, its/it's, etc.) only when one is \
+            clearly wrong in context - do not flag a homophone just because another exists. For \
+            each misspelling found, report the paragraph number it came from, the misspelled \
+            word exactly as it appears in the text, and your best single-word correction. \
+            Respond with ONLY a JSON array, no markdown code fences, no commentary: \
+            [{\"block\": 0, \"word\": \"teh\", \"suggestion\": \"the\"}, ...]. If \
+            nothing is misspelled in a paragraph, just omit it - if nothing is misspelled at \
+            all, respond with exactly: []"
+            .to_string();
+        crate::ai::ai_request(
+            app,
+            provider,
+            api_key,
+            model,
+            system_prompt,
+            text,
+            request_id,
+            base_url,
+            max_tokens.unwrap_or(4096),
+            false,
         );
         return Ok(());
     }

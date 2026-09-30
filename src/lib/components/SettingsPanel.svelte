@@ -217,7 +217,9 @@
 	let aiWritingStyle = $state($appConfig?.ai_writing_style ?? '');
 	let ghostTextEnabled = $state($appConfig?.ghost_text_enabled ?? false);
 	let ghostTextMaxWords = $state($appConfig?.ghost_text_max_words ?? 1);
-	let spellCheckEnabled = $state($appConfig?.spell_check_enabled ?? true);
+	let spellCheckEngine = $state(
+		$appConfig?.spell_check_enabled === false ? 'off' : ($appConfig?.spell_check_engine ?? 'basic'),
+	);
 	let aiShowKey = $state(false);
 	let aiShowCompatibleKey = $state(false);
 	let aiShowOllamaKey = $state(false);
@@ -250,7 +252,8 @@
 			_openaiCompatibleKey || null,
 			ghostTextEnabled,
 			ghostTextMaxWords,
-			spellCheckEnabled,
+			spellCheckEngine !== 'off',
+			spellCheckEngine === 'off' ? 'basic' : spellCheckEngine,
 		);
 		if ($appConfig) {
 			$appConfig = {
@@ -266,7 +269,8 @@
 				ai_writing_style: aiWritingStyle || null,
 				ghost_text_enabled: ghostTextEnabled,
 				ghost_text_max_words: ghostTextMaxWords,
-				spell_check_enabled: spellCheckEnabled,
+				spell_check_enabled: spellCheckEngine !== 'off',
+				spell_check_engine: spellCheckEngine === 'off' ? 'basic' : spellCheckEngine,
 			};
 		}
 	}
@@ -2368,15 +2372,21 @@
 
 								<div class="settings-section">
 									<h3>Spelling Corrections</h3>
-									<label class="setting-toggle">
-										<span class="setting-label">
-											<span class="setting-name">Flag misspelled words</span>
-											<span class="setting-desc">Underlines a misspelled word right after you type it and shows a suggested fix - press Tab to accept it, or keep typing to ignore it. Checked against a bundled offline dictionary, so this works with no AI provider configured at all.</span>
-										</span>
-										<button class="toggle-switch" class:on={spellCheckEnabled} role="switch" aria-checked={spellCheckEnabled} aria-label="Flag misspelled words" onclick={() => { spellCheckEnabled = !spellCheckEnabled; saveAiSettings(); }}>
-											<span class="toggle-knob"></span>
-										</button>
-									</label>
+									<p class="setting-hint" style="margin-top: 0;">Underlines a misspelled word right after you type it and shows a suggested fix - press Tab to accept it, or right-click it for more options.</p>
+									<div class="setting-options">
+										<button class="option-btn" class:active={spellCheckEngine === 'off'} onclick={() => { if (spellCheckEngine === 'off') return; spellCheckEngine = 'off'; saveAiSettings(); }}>Off</button>
+										<button class="option-btn" class:active={spellCheckEngine === 'basic'} onclick={() => { if (spellCheckEngine === 'basic') return; spellCheckEngine = 'basic'; saveAiSettings(); }}>Basic (offline)</button>
+										<button class="option-btn" class:active={spellCheckEngine === 'ai'} onclick={() => { if (spellCheckEngine === 'ai') return; spellCheckEngine = 'ai'; saveAiSettings(); }}>AI-powered</button>
+									</div>
+									<p class="setting-hint">
+										{#if spellCheckEngine === 'off'}
+											Spell-check is off.
+										{:else if spellCheckEngine === 'basic'}
+											Checked against a bundled offline Hunspell dictionary - the same engine Word, Chrome, and LibreOffice use - so this works with no AI provider configured at all.
+										{:else}
+											Sends each paragraph to your AI provider above for context-aware suggestions (catches things a plain dictionary can't, like "there" vs. "their"). Needs a working AI provider configured above, and sends your note text to it as you write.
+										{/if}
+									</p>
 								</div>
 
 								<div class="settings-section">

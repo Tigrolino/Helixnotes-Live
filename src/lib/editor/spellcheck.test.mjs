@@ -2,15 +2,18 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs';
 
-// spellcheck.ts fetches its wordlist from the app's static assets at runtime
-// (fetch('/dictionaries/en.txt')) - stand that in with the real bundled file read straight off
-// disk, so these tests exercise the actual shipped dictionary rather than a fake stand-in.
-const dictPath = new URL('../../../static/dictionaries/en.txt', import.meta.url);
-const dictText = fs.readFileSync(dictPath, 'utf8');
+// spellcheck.ts fetches the bundled Hunspell dictionary from the app's static assets at runtime
+// (fetch('/dictionaries/en.aff') + fetch('/dictionaries/en.dic')) - stand that in with the real
+// bundled files read straight off disk, so these tests exercise the actual shipped dictionary
+// rather than a fake stand-in.
+const affPath = new URL('../../../static/dictionaries/en.aff', import.meta.url);
+const dicPath = new URL('../../../static/dictionaries/en.dic', import.meta.url);
+const affText = fs.readFileSync(affPath, 'utf8');
+const dicText = fs.readFileSync(dicPath, 'utf8');
 globalThis.fetch = async (url) => {
-	if (String(url).includes('dictionaries/en.txt')) {
-		return { ok: true, text: async () => dictText };
-	}
+	const s = String(url);
+	if (s.includes('dictionaries/en.aff')) return { ok: true, text: async () => affText };
+	if (s.includes('dictionaries/en.dic')) return { ok: true, text: async () => dicText };
 	throw new Error(`unexpected fetch in test: ${url}`);
 };
 
@@ -67,15 +70,15 @@ test('common single-typo transpositions are corrected', () => {
 });
 
 test('missing-letter and extra-letter typos are corrected', () => {
-	assert.equal(suggestCorrection('wrold'), 'world'); // transposition
-	assert.equal(suggestCorrection('wolrd'), 'world'); // transposition
+	assert.equal(suggestCorrection('wrold'), 'world');
+	assert.equal(suggestCorrection('wolrd'), 'world');
 });
 
 test('capitalization of the original word is preserved in the suggestion', () => {
 	assert.equal(suggestCorrection('Teh'), 'The');
 });
 
-test('contractions are recognized and not flagged, even though the wordlist has no apostrophes', () => {
+test('contractions are recognized and not flagged - the bundled Hunspell dictionary carries them as entries in their own right', () => {
 	for (const w of ["don't", "I'm", "they're", "it's", "we've", "isn't", "wouldn't"]) {
 		assert.equal(isKnownWord(w), true, `expected "${w}" to be known`);
 		assert.equal(suggestCorrection(w), null, `expected no suggestion for "${w}"`);
@@ -84,8 +87,9 @@ test('contractions are recognized and not flagged, even though the wordlist has 
 
 test('curly right single quotes (Typography-converted apostrophes) are normalized', () => {
 	// TipTap's Typography extension turns a typed "'" mid-word into U+2019 - "don't" is
-	// actually stored as "don\u2019t".
-	for (const w of ['don\u2019t', 'they\u2019re', 'it\u2019s', 'I\u2019m']) {
+	// actually stored as "don’t". The dictionary's own ICONV table normalizes this before
+	// lookup, so no manual normalization is needed in spellcheck.ts itself.
+	for (const w of ['don’t', 'they’re', 'it’s', 'I’m']) {
 		assert.equal(isKnownWord(w), true, `expected "${w}" to be known`);
 		assert.equal(suggestCorrection(w), null, `expected no suggestion for "${w}"`);
 	}
@@ -116,8 +120,8 @@ test('suggestCorrections returns several ranked candidates for an ambiguous typo
 	const options = suggestCorrections('helo');
 	assert.ok(Array.isArray(options));
 	assert.ok(options.length >= 1 && options.length <= 3);
-	// Both a substitution (help) and a deletion (hello) are one edit away - substitution
-	// ranks first (see EditKind ordering in rankedCorrections()).
+	// "help" (substitution) and "hello" (insertion) are both one edit away and both common
+	// words - substitution ranks first (see EditKind ordering in rerankSuggestions()).
 	assert.equal(options[0], 'help');
 	assert.ok(options.includes('hello'), `expected 'hello' among ${JSON.stringify(options)}`);
 	// No duplicates.
@@ -149,4 +153,11 @@ test('suggestCorrections preserves capitalization across every returned candidat
 
 test('suggestCorrections returns [] for gibberish with nothing close, same as suggestCorrection', () => {
 	assert.deepEqual(suggestCorrections('zxqvwrbpl'), []);
+});
+
+test('a common word beats an obscure one nspell would otherwise rank first (the original "teh"/"eth" tie-break bug)', () => {
+	// Raw Hunspell suggest('adn') ranks "an" ahead of "and" purely on its own internal
+	// heuristics - both are real one-edit-away words, but "and" is what a person overwhelmingly
+	// means by "adn". This is what rerankSuggestions()'s common-word-first pass exists to fix.
+	assert.equal(suggestCorrection('adn'), 'and');
 });

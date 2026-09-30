@@ -146,6 +146,7 @@ export interface AppConfig {
   ghost_text_enabled: boolean;
   ghost_text_max_words: number;
   spell_check_enabled: boolean;
+  spell_check_engine: string;
   default_view_mode: boolean;
   new_notes_in_source_mode: boolean;
   show_tray_icon: boolean;
