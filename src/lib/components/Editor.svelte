@@ -803,11 +803,26 @@
 			} else if (data.event_type === 'error') {
 				unlisten();
 				finishInFlight();
+				// Silent to the user by design (same as ghost-text - a flaky AI provider
+				// shouldn't interrupt typing or pop an error where an underline would go), but
+				// silent to the DEVELOPER too was the real problem: a rejected request (wrong
+				// API key, a max_tokens over the model's real cap, rate limit, ...) previously
+				// looked byte-for-byte identical to "the AI checked and found nothing wrong" -
+				// there was no way to tell those apart. Log it so that distinction is visible.
+				console.error('[ai-spell-check] request failed:', data.error);
 			}
 		});
 		aiSpellScanInFlight = true;
 		try {
-			await aiAsk('spell_check', prompt, null, requestId, 8192);
+			// Deliberately NOT raised above 4096: a couple of providers/models cap max output
+			// tokens below 8192 and reject the request outright if you ask for more - and a
+			// rejected request here fails completely silently (see the 'error' branch above),
+			// which looks indistinguishable from "the AI genuinely found nothing". If a future
+			// report turns out to be truncation on a very large note rather than the model
+			// itself being too conservative, the console.debug/console.error logging above is
+			// what to check before touching this number again - raise it only once the actual
+			// provider's real limit is known, not as a guess.
+			await aiAsk('spell_check', prompt, null, requestId, 4096);
 		} catch {
 			// Silent by design, same as ghost-text - a missing/misconfigured AI provider
 			// shouldn't interrupt typing or show an error where an underline would go.

@@ -2801,7 +2801,7 @@ pub fn ai_ask(
             text,
             request_id,
             base_url,
-            max_tokens.unwrap_or(8192),
+            max_tokens.unwrap_or(4096),
             false,
         );
         return Ok(());
