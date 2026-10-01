@@ -907,7 +907,7 @@
 							// mid-typing, claims those).
 							if (active.suggestions.length > 1) {
 								badge.classList.add('spell-suggestion-badge-multi');
-								badge.title = 'Scroll to see other suggestions';
+								badge.title = 'Page Up/Page Down or scroll to see other suggestions';
 								const count = document.createElement('span');
 								count.className = 'spell-suggestion-badge-count';
 								count.textContent = `${idx + 1}/${active.suggestions.length}`;
@@ -942,6 +942,27 @@
 								if (event.key === 'ArrowUp') { event.preventDefault(); moveSpellSuggestion(-1); return true; }
 								if (event.key === 'Enter') { event.preventDefault(); applySelectedSpellSuggestion(); return true; }
 								if (event.key === 'Escape') { event.preventDefault(); closeSpellContextMenu(); return true; }
+							}
+							// PageUp/PageDown cycle the floating badge's suggestions (when it's showing more
+							// than one) without needing the mouse over it first - deliberately not
+							// ArrowUp/ArrowDown, which still need to do normal cursor/line navigation while
+							// actively typing (see the wheel-cycling comment on the badge in decorations()
+							// above for the same reasoning). Page Up/Down has no competing use while typing
+							// in a note, so it's safe to claim outright whenever a multi-suggestion badge is
+							// showing.
+							if (event.key === 'PageUp' || event.key === 'PageDown') {
+								const paging = computeActiveSpellFix(view.state);
+								if (paging && paging.suggestions.length > 1) {
+									event.preventDefault();
+									const pagingKey = `${paging.from}:${paging.to}`;
+									const curIdx = pagingKey === activeFixKey ? Math.min(activeFixSelectedIndex, paging.suggestions.length - 1) : 0;
+									const n = paging.suggestions.length;
+									activeFixKey = pagingKey;
+									activeFixSelectedIndex = ((curIdx + (event.key === 'PageDown' ? 1 : -1)) % n + n) % n;
+									ignoreNextUpdate = true;
+									view.dispatch(view.state.tr);
+									return true;
+								}
 							}
 							if (event.key !== 'Tab' || event.shiftKey || event.altKey || event.metaKey || event.ctrlKey) return false;
 							// Defer to an autocomplete popup that's already claiming Tab for itself.
