@@ -226,6 +226,7 @@
 	let spellCheckGrammarEnabled = $state($appConfig?.spell_check_grammar_enabled ?? true);
 	let spellCheckCapitalizationEnabled = $state($appConfig?.spell_check_capitalization_enabled ?? true);
 	let spellCheckRepetitionEnabled = $state($appConfig?.spell_check_repetition_enabled ?? true);
+	let spellCheckPunctuationEnabled = $state($appConfig?.spell_check_punctuation_enabled ?? true);
 	let spellSuggestionPopupEnabled = $state($appConfig?.spell_suggestion_popup_enabled ?? true);
 	let autoCapitalizeEnabled = $state($appConfig?.auto_capitalize_enabled ?? false);
 	let aiShowKey = $state(false);
@@ -268,6 +269,7 @@
 			spellCheckGrammarEnabled,
 			spellCheckCapitalizationEnabled,
 			spellCheckRepetitionEnabled,
+			spellCheckPunctuationEnabled,
 			spellSuggestionPopupEnabled,
 			autoCapitalizeEnabled,
 		);
@@ -293,6 +295,7 @@
 				spell_check_grammar_enabled: spellCheckGrammarEnabled,
 				spell_check_capitalization_enabled: spellCheckCapitalizationEnabled,
 				spell_check_repetition_enabled: spellCheckRepetitionEnabled,
+				spell_check_punctuation_enabled: spellCheckPunctuationEnabled,
 				spell_suggestion_popup_enabled: spellSuggestionPopupEnabled,
 				auto_capitalize_enabled: autoCapitalizeEnabled,
 			};
@@ -2265,7 +2268,7 @@
 												<span class="toggle-knob"></span>
 											</button>
 										</label>
-										<p class="setting-hint" style="margin-top: 4px;">These three run locally alongside whichever engine is picked above, even with it set to Basic, and catch things a dictionary lookup can't:</p>
+										<p class="setting-hint" style="margin-top: 4px;">These four run locally alongside whichever engine is picked above, even with it set to Basic, and catch things a dictionary lookup can't:</p>
 										<label class="setting-toggle compact">
 											<span class="setting-label">
 												<span class="setting-name">Grammar (standalone "i" → "I")</span>
@@ -2287,6 +2290,14 @@
 												<span class="setting-name">Repetition (repeated word)</span>
 											</span>
 											<button class="toggle-switch" class:on={spellCheckRepetitionEnabled} role="switch" aria-checked={spellCheckRepetitionEnabled} aria-label="Flag an immediately repeated word" onclick={() => { spellCheckRepetitionEnabled = !spellCheckRepetitionEnabled; saveAiSettings(); }}>
+												<span class="toggle-knob"></span>
+											</button>
+										</label>
+										<label class="setting-toggle compact">
+											<span class="setting-label">
+												<span class="setting-name">Punctuation (missing end punctuation)</span>
+											</span>
+											<button class="toggle-switch" class:on={spellCheckPunctuationEnabled} role="switch" aria-checked={spellCheckPunctuationEnabled} aria-label="Flag a finished-looking sentence with no closing punctuation" onclick={() => { spellCheckPunctuationEnabled = !spellCheckPunctuationEnabled; saveAiSettings(); }}>
 												<span class="toggle-knob"></span>
 											</button>
 										</label>
@@ -2922,7 +2933,7 @@
 		line-height: 1.4;
 	}
 
-	/* A set of related toggles nested under another setting (e.g. the three mechanical spell
+	/* A set of related toggles nested under another setting (e.g. the four mechanical spell
 	   checks under the engine picker) - a touch of indent and a subtle left rule to read as
 	   "part of the setting above" rather than a new unrelated section. */
 	.setting-subgroup {

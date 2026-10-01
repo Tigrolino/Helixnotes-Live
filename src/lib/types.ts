@@ -153,6 +153,7 @@ export interface AppConfig {
   spell_check_grammar_enabled: boolean;
   spell_check_capitalization_enabled: boolean;
   spell_check_repetition_enabled: boolean;
+  spell_check_punctuation_enabled: boolean;
   spell_suggestion_popup_enabled: boolean;
   auto_capitalize_enabled: boolean;
   default_view_mode: boolean;

@@ -2415,6 +2415,7 @@ pub fn set_ai_settings(
     spell_check_grammar_enabled: bool,
     spell_check_capitalization_enabled: bool,
     spell_check_repetition_enabled: bool,
+    spell_check_punctuation_enabled: bool,
     spell_suggestion_popup_enabled: bool,
     auto_capitalize_enabled: bool,
 ) -> Result<(), String> {
@@ -2444,6 +2445,7 @@ pub fn set_ai_settings(
     config.spell_check_grammar_enabled = spell_check_grammar_enabled;
     config.spell_check_capitalization_enabled = spell_check_capitalization_enabled;
     config.spell_check_repetition_enabled = spell_check_repetition_enabled;
+    config.spell_check_punctuation_enabled = spell_check_punctuation_enabled;
     config.spell_suggestion_popup_enabled = spell_suggestion_popup_enabled;
     config.auto_capitalize_enabled = auto_capitalize_enabled;
     config.spell_check_enabled = spell_check_enabled;

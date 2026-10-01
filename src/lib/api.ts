@@ -572,6 +572,7 @@ export async function setAiSettings(
   spellCheckGrammarEnabled: boolean = true,
   spellCheckCapitalizationEnabled: boolean = true,
   spellCheckRepetitionEnabled: boolean = true,
+  spellCheckPunctuationEnabled: boolean = true,
   spellSuggestionPopupEnabled: boolean = true,
   autoCapitalizeEnabled: boolean = false,
 ): Promise<void> {
@@ -581,7 +582,7 @@ export async function setAiSettings(
     ghostTextEnabled, ghostTextMaxWords, spellCheckEnabled, spellCheckEngine,
     mathSuggestionsEnabled, dateTimeSuggestionsEnabled, unitConversionSuggestionsEnabled,
     spellCheckGrammarEnabled, spellCheckCapitalizationEnabled, spellCheckRepetitionEnabled,
-    spellSuggestionPopupEnabled, autoCapitalizeEnabled,
+    spellCheckPunctuationEnabled, spellSuggestionPopupEnabled, autoCapitalizeEnabled,
   });
 }
 

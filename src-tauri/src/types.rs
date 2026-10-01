@@ -281,6 +281,13 @@ pub struct AppConfig {
     pub spell_check_capitalization_enabled: bool,
     #[serde(default = "default_true")]
     pub spell_check_repetition_enabled: bool,
+    // A fourth mechanical check, same independently-toggleable shape as the three above: flags a
+    // paragraph that looks like a finished sentence (4+ words, ends in a letter/number/quote
+    // rather than ./!/?/:/—/–) and offers to append a period. Scoped to plain paragraphs only -
+    // headings and list items are excluded since those are routinely sentence fragments by
+    // design, not missing punctuation.
+    #[serde(default = "default_true")]
+    pub spell_check_punctuation_enabled: bool,
     // Whether the inline Tab-accept suggestion badge shows at all while typing - off still
     // leaves the underlines themselves on (from whichever engine/checks above are enabled), just
     // without the popup badge on top of the active word.
@@ -446,6 +453,7 @@ impl Default for AppConfig {
             spell_check_grammar_enabled: true,
             spell_check_capitalization_enabled: true,
             spell_check_repetition_enabled: true,
+            spell_check_punctuation_enabled: true,
             spell_suggestion_popup_enabled: true,
             auto_capitalize_enabled: false,
             default_view_mode: false,

@@ -397,7 +397,11 @@
 	//    in combined mode is never a plain misspelling by construction.
 	//  - 'capitalization': a lowercase word right after what looks like a sentence boundary.
 	//  - 'repetition': the same word typed twice in a row.
-	type SpellErrorKind = 'spelling' | 'grammar' | 'capitalization' | 'repetition';
+	//  - 'punctuation': a paragraph that looks like a finished sentence but has no closing
+	//    punctuation (collectPunctuationFlags below) - the fix appends a period to the last word
+	//    rather than replacing it, the same "exactly one correction" shape the other mechanical
+	//    checks use, just applied as a suffix instead of a swap.
+	type SpellErrorKind = 'spelling' | 'grammar' | 'capitalization' | 'repetition' | 'punctuation';
 
 	function spellErrorClass(kind: SpellErrorKind): string {
 		return kind === 'spelling' ? 'spell-error' : `spell-error spell-error-${kind}`;
@@ -412,6 +416,7 @@
 			case 'grammar': return 'Grammar';
 			case 'capitalization': return 'Capitalization';
 			case 'repetition': return 'Repetition';
+			case 'punctuation': return 'Punctuation';
 			default: return 'Spelling';
 		}
 	}
@@ -430,16 +435,22 @@
 		return 'spelling';
 	}
 
-	// ── Mechanical (offline, non-AI) checks: lone "i", sentence-start capitalization, and an
-	// immediately-repeated word. NOT a real grammar checker - full subject-verb-agreement and
-	// missing-punctuation detection need more than regexes to do reliably without a flood of false
-	// positives, so those stay the AI engine's job ('ai'/'combined'). These three run alongside
-	// *any* spell-check engine (including with no AI configured at all - see the Basic-engine-
-	// reachable-with-no-AI fix above) since they're cheap, local, and independent of which
-	// dictionary/AI engine is active - gated only on spell_check_enabled itself, not on
-	// spell_check_engine. Each check only ever looks within a single text node's own text, so a
-	// match never spans a formatting-mark boundary (e.g. "the **the**") - a real but rare
-	// limitation, and simpler/safer than threading cross-node positions through here too.
+	// ── Mechanical (offline, non-AI) checks: lone "i", sentence-start capitalization, an
+	// immediately-repeated word, and (below, collectPunctuationFlags/punctuationFlagAt) a
+	// finished-looking paragraph with no closing punctuation. NOT a real grammar checker - full
+	// subject-verb-agreement, and anything needing actual sentence understanding (is this a
+	// statement, a question, an exclamation?), need more than regexes to do reliably without a
+	// flood of false positives, so those stay the AI engine's job ('ai'/'combined'); the
+	// punctuation check here is deliberately narrow (always appends a plain period, never guesses
+	// ?/!) for exactly that reason. These four run alongside *any* spell-check engine (including
+	// with no AI configured at all - see the Basic-engine-reachable-with-no-AI fix above) since
+	// they're cheap, local, and independent of which dictionary/AI engine is active - gated only
+	// on spell_check_enabled itself, not on spell_check_engine. The first three checks only ever
+	// look within a single text node's own text, so a match never spans a formatting-mark boundary
+	// (e.g. "the **the**") - a real but rare limitation, and simpler/safer than threading
+	// cross-node positions through here too. The punctuation check instead looks at a whole
+	// paragraph's concatenated text (it needs to see the paragraph's last word), so it runs
+	// separately over doc.descendants() rather than per text node - see collectPunctuationFlags.
 	const LONE_I_RE = /\bi\b/g;
 	const SENTENCE_BOUNDARY_RE = /[.!?](?:["')\]]*)\s+/g;
 	const REPEATED_WORD_RE = /\b([A-Za-z'’]+)([ \t]+)\1\b/gi;
@@ -562,6 +573,73 @@
 		return out;
 	}
 
+	/** Pure check, no ProseMirror resolve needed: does `text` (a paragraph block's own full text,
+	 *  concatenated) look like a finished sentence that's missing its closing punctuation? Offsets
+	 *  in the result are relative to the start of `text` itself - callers convert to real document
+	 *  positions. Factored out so the whole-document scan (collectPunctuationFlags) and the
+	 *  single-position lookup (punctuationFlagAt, for the right-click menu / active-fix badge) run
+	 *  the exact same check and can never disagree about what counts as a flag.
+	 *
+	 *  Already "closed" (not flagged) if the trimmed text ends in sentence punctuation - optionally
+	 *  trailing a closing quote/paren/bracket - a colon (introducing a list), or an em/en dash
+	 *  (trailing off on purpose). Requires at least 4 words, so a short label or fragment typed as
+	 *  its own paragraph isn't flagged. The fix is always exactly one correction, like every other
+	 *  mechanical check: append a period to the last word, rather than guessing whether a "?" or
+	 *  "!" was actually meant - that guess needs to understand what the sentence is actually
+	 *  saying, which is exactly the kind of judgment this offline, no-context check deliberately
+	 *  leaves to the AI engine (same reasoning MISSING_APOSTROPHE_FIXES and
+	 *  PROPER_NAME_CAPITALIZE_SET give for what they leave out). */
+	function checkParagraphPunctuation(text: string): { offset: number; length: number; suggestion: string } | null {
+		const trimmed = text.replace(/\s+$/, '');
+		if (!trimmed) return null;
+		if (/[.!?:—–]["'’”)\]]*$/.test(trimmed)) return null;
+		const wordMatch = /[A-Za-z0-9'’]+$/.exec(trimmed);
+		if (!wordMatch) return null;
+		if (trimmed.split(/\s+/).length < 4) return null;
+		return { offset: wordMatch.index!, length: wordMatch[0].length, suggestion: wordMatch[0] + '.' };
+	}
+
+	/** Whole-document version of checkParagraphPunctuation() - scoped to 'paragraph' blocks whose
+	 *  parent isn't a list item (a heading is a title and never needs a period; a list item is
+	 *  routinely a sentence fragment on purpose - "Buy milk", not "Buy milk."). Same known
+	 *  limitation as collectMechanicalFlagsForText: textContent concatenates only the text inside
+	 *  the block, so a block containing a non-text inline atom (an image, a hard break) throws off
+	 *  the offset-to-position math for anything after it - rare enough in a plain paragraph to
+	 *  accept, same tradeoff already made there. */
+	function collectPunctuationFlags(doc: ProseMirrorNode): { from: number; to: number; suggestion: string; kind: SpellErrorKind }[] {
+		const out: { from: number; to: number; suggestion: string; kind: SpellErrorKind }[] = [];
+		doc.descendants((node, pos) => {
+			if (node.type.name === 'codeBlock') return false;
+			if (node.type.name !== 'paragraph') return true;
+			const parentType = doc.resolve(pos).parent.type.name;
+			if (parentType === 'listItem' || parentType === 'taskItem') return true;
+			const hit = checkParagraphPunctuation(node.textContent);
+			if (!hit) return true;
+			const from = pos + 1 + hit.offset;
+			out.push({ from, to: from + hit.length, suggestion: hit.suggestion, kind: 'punctuation' });
+			return true;
+		});
+		return out;
+	}
+
+	/** Single-position counterpart to collectPunctuationFlags() - only checks the one paragraph
+	 *  `pos` is actually inside, the same "a hit only ever matters if it's going to contain `pos`"
+	 *  reasoning mechanicalFlagAt() below follows. */
+	function punctuationFlagAt(doc: ProseMirrorNode, pos: number): { from: number; to: number; suggestion: string; kind: SpellErrorKind } | null {
+		const resolved = doc.resolve(pos);
+		const block = resolved.parent;
+		if (block.type.name !== 'paragraph') return null;
+		const parentType = resolved.depth > 1 ? resolved.node(resolved.depth - 1).type.name : null;
+		if (parentType === 'listItem' || parentType === 'taskItem') return null;
+		const hit = checkParagraphPunctuation(block.textContent);
+		if (!hit) return null;
+		const blockStart = resolved.start();
+		const from = blockStart + hit.offset;
+		const to = from + hit.length;
+		if (pos < from || pos > to) return null;
+		return { from, to, suggestion: hit.suggestion, kind: 'punctuation' };
+	}
+
 	/** Whole-document mechanical scan, for the persistent underlines (see runMechanicalScan()) -
 	 *  walks every text node (skipping code blocks) and collects every match as a real document
 	 *  range + kind. */
@@ -576,6 +654,9 @@
 			}
 			return true;
 		});
+		if ($appConfig?.spell_check_punctuation_enabled !== false) {
+			for (const f of collectPunctuationFlags(doc)) out.push({ from: f.from, to: f.to, kind: f.kind });
+		}
 		return out;
 	}
 
@@ -597,7 +678,12 @@
 			}
 			return true;
 		});
-		return found;
+		if (found) return found;
+		if ($appConfig?.spell_check_punctuation_enabled !== false) {
+			const p = punctuationFlagAt(doc, pos);
+			if (p) return { ...p, suggestions: [p.suggestion] };
+		}
+		return null;
 	}
 
 	let mechanicalRanges: { from: number; to: number; kind: SpellErrorKind }[] = [];
@@ -12492,9 +12578,9 @@
 	   spell corrections so they aren't all the same color") - these stack on top of the base
 	   .spell-error rule above (every flagged range always carries both classes - see
 	   spellErrorClass()), so only the color needs overriding here. Plain misspellings keep the
-	   original --warning (amber) color; the three mechanical kinds each get a fixed, visually
-	   distinct color (grammar: blue, capitalization: violet, repetition: teal) rather than a
-	   theme variable, since no existing theme variable fits any of them. */
+	   original --warning (amber) color; the four mechanical kinds each get a fixed, visually
+	   distinct color (grammar: blue, capitalization: violet, repetition: teal, punctuation: pink)
+	   rather than a theme variable, since no existing theme variable fits any of them. */
 	:global(.tiptap-wrapper .tiptap .spell-error-grammar) {
 		text-decoration-color: #3b82f6;
 	}
@@ -12503,6 +12589,9 @@
 	}
 	:global(.tiptap-wrapper .tiptap .spell-error-repetition) {
 		text-decoration-color: #14b8a6;
+	}
+	:global(.tiptap-wrapper .tiptap .spell-error-punctuation) {
+		text-decoration-color: #ec4899;
 	}
 
 	/* Zero-width, out-of-flow anchor for the active spelling suggestion's badge - `display:
@@ -12724,6 +12813,7 @@
 	.spell-context-kind-dot.spell-context-kind-grammar { background: #3b82f6; }
 	.spell-context-kind-dot.spell-context-kind-capitalization { background: #8b5cf6; }
 	.spell-context-kind-dot.spell-context-kind-repetition { background: #14b8a6; }
+	.spell-context-kind-dot.spell-context-kind-punctuation { background: #ec4899; }
 
 	.spell-context-word {
 		font-size: 13px;
