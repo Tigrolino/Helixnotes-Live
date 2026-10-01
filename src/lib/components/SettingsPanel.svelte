@@ -2233,7 +2233,7 @@
 						<div class="tab-content">
 							<div class="settings-section">
 								<h3>Spelling Corrections</h3>
-								<p class="setting-hint" style="margin-top: 0;">Underlines a misspelled word right after you type it and shows a suggested fix - press Tab to accept it, or right-click it for more options.</p>
+								<p class="setting-hint" style="margin-top: 0;">Underlines misspelled words as you type. Press Tab to accept the suggested fix, or right-click for more options.</p>
 								<div class="setting-options">
 									<button class="option-btn" class:active={spellCheckEngine === 'off'} onclick={() => { if (spellCheckEngine === 'off') return; spellCheckEngine = 'off'; saveAiSettings(); }}>Off</button>
 									<button class="option-btn" class:active={spellCheckEngine === 'basic'} onclick={() => { if (spellCheckEngine === 'basic') return; spellCheckEngine = 'basic'; saveAiSettings(); }}>Basic (offline)</button>
@@ -2243,17 +2243,17 @@
 									{/if}
 								</div>
 								{#if !aiProvider}
-									<p class="setting-hint" style="margin-top: 6px;">AI-powered and Combined need an AI provider - set one up in the AI tab to unlock them.</p>
+									<p class="setting-hint" style="margin-top: 6px;">AI-powered and Combined require an AI provider. Set one up in the AI tab to unlock them.</p>
 								{/if}
 								<p class="setting-hint">
 									{#if spellCheckEngine === 'off'}
 										Spell-check is off.
 									{:else if spellCheckEngine === 'basic'}
-										Checked against a bundled offline Hunspell dictionary - the same engine Word, Chrome, and LibreOffice use - so this works with no AI provider configured at all.
+										Checks against an offline Hunspell dictionary, the same engine used by Word, Chrome, and LibreOffice. No AI provider required.
 									{:else if spellCheckEngine === 'combined'}
-										The offline Hunspell dictionary catches plain misspellings on its own, reliably and for free - the AI provider is only asked for what a dictionary can't see (wrong-but-correctly-spelled words like "its" vs. "it's", missing apostrophes, one-word grammar fixes). Needs a working AI provider configured in the AI tab for that part; misspellings alone still work even if it's not.
+										Catches plain misspellings offline with the Hunspell dictionary, and sends anything context-dependent (like "its" vs. "it's") to your AI provider. Misspellings are still caught even without one configured.
 									{:else}
-										Sends each paragraph to your AI provider for context-aware suggestions (catches things a plain dictionary can't, like "there" vs. "their"). Needs a working AI provider configured in the AI tab, and sends your note text to it as you write.
+										Sends each paragraph to your AI provider for context-aware suggestions, like catching "there" vs. "their". Requires an AI provider, and sends your note text to it as you write.
 									{/if}
 								</p>
 
@@ -2262,13 +2262,13 @@
 										<label class="setting-toggle compact">
 											<span class="setting-label">
 												<span class="setting-name">Suggestion popup while typing</span>
-												<span class="setting-desc">The floating badge with a suggested fix, accepted with Tab. Turning this off still keeps the underlines below - it just stops the popup from appearing over the active word.</span>
+												<span class="setting-desc">A floating badge with a suggested fix, accepted with Tab. Turning this off keeps the underlines, just without the popup.</span>
 											</span>
 											<button class="toggle-switch" class:on={spellSuggestionPopupEnabled} role="switch" aria-checked={spellSuggestionPopupEnabled} aria-label="Suggestion popup while typing" onclick={() => { spellSuggestionPopupEnabled = !spellSuggestionPopupEnabled; saveAiSettings(); }}>
 												<span class="toggle-knob"></span>
 											</button>
 										</label>
-										<p class="setting-hint" style="margin-top: 4px;">These four run locally alongside whichever engine is picked above, even with it set to Basic, and catch things a dictionary lookup can't:</p>
+										<p class="setting-hint" style="margin-top: 4px;">These run locally alongside any engine above, including Basic, catching what a dictionary alone can't:</p>
 										<label class="setting-toggle compact">
 											<span class="setting-label">
 												<span class="setting-name">Grammar (standalone "i" → "I")</span>
@@ -2310,8 +2310,8 @@
 								<label class="setting-toggle">
 									<span class="setting-label">
 										<span class="setting-name">Automatically fix capitalization as you type</span>
-										<span class="setting-desc">Corrects a standalone "i", the start of a new sentence, common missing-apostrophe contractions (dont &rarr; don't, im &rarr; I'm, youre &rarr; you're, and similar), and a curated list of common first names (david, sarah, michael, and similar) in place, instead of just flagging them - no Tab needed. Skips genuinely ambiguous ones on purpose - words that are also real words with their own separate meaning (its, cant, wont, well, ill, john, grace, will, mark, and similar) are left untouched rather than risked.</span>
-										<span class="setting-desc" style="margin-top: 4px; display: block;">Independent of Spelling Corrections above: works even with it set to Off.</span>
+										<span class="setting-desc">Fixes capitalization and common contractions in place as you type - no Tab needed. Covers a standalone "i", the start of a sentence, missing apostrophes (dont &rarr; don't), and common first names. Words with an ambiguous meaning of their own (its, cant, well, john, and similar) are left alone.</span>
+										<span class="setting-desc" style="margin-top: 4px; display: block;">Works independently of Spelling Corrections above, even when that's off.</span>
 									</span>
 									<button class="toggle-switch" class:on={autoCapitalizeEnabled} role="switch" aria-checked={autoCapitalizeEnabled} aria-label="Automatically fix capitalization as you type" onclick={() => { autoCapitalizeEnabled = !autoCapitalizeEnabled; saveAiSettings(); }}>
 										<span class="toggle-knob"></span>
@@ -2321,7 +2321,7 @@
 
 							<div class="settings-section">
 								<h3>Quick Suggestions</h3>
-								<p class="setting-hint" style="margin-top: 0;">Small, instant completions computed locally on your device - press Tab to accept. All work with no AI provider configured at all.</p>
+								<p class="setting-hint" style="margin-top: 0;">Instant, local completions - press Tab to accept. No AI provider required.</p>
 								<label class="setting-toggle compact">
 									<span class="setting-label">
 										<span class="setting-name">Math</span>
@@ -2512,7 +2512,7 @@
 									<label class="setting-toggle">
 										<span class="setting-label">
 											<span class="setting-name">Suggest as you type</span>
-											<span class="setting-desc">Shows a gray preview of how your sentence might continue - press Tab to accept, or keep typing to ignore it. Uses your AI provider above, so it sends a short snippet of the note around your cursor on every pause while you write.</span>
+											<span class="setting-desc">Previews how your sentence might continue. Press Tab to accept, or keep typing to ignore it. Uses your AI provider above, sending a short snippet of text around your cursor as you pause.</span>
 										</span>
 										<button class="toggle-switch" class:on={ghostTextEnabled} role="switch" aria-checked={ghostTextEnabled} aria-label="Suggest as you type" onclick={() => { ghostTextEnabled = !ghostTextEnabled; saveAiSettings(); }}>
 											<span class="toggle-knob"></span>
@@ -2523,7 +2523,7 @@
 										<button class="option-btn" class:active={ghostTextMaxWords === 2} onclick={() => { if (ghostTextMaxWords === 2) return; ghostTextMaxWords = 2; saveAiSettings(); }}>2 words</button>
 										<button class="option-btn" class:active={ghostTextMaxWords === 3} onclick={() => { if (ghostTextMaxWords === 3) return; ghostTextMaxWords = 3; saveAiSettings(); }}>3 words</button>
 									</div>
-									<p class="setting-hint">Suggestions show a full sentence (or close to it) at once - this sets how much of it each Tab press fills in. Lower feels closer to typing it yourself one step at a time; higher fills in more per press, with the rest still waiting for your next Tab(s).</p>
+									<p class="setting-hint">Sets how much of the suggestion each Tab press fills in. Lower feels more like typing it yourself; higher fills in more per press.</p>
 								</div>
 
 								<div class="settings-section">
@@ -2764,7 +2764,7 @@
 
 							<div class="settings-section">
 								<h3>Updates</h3>
-								<p class="setting-hint">This is a fork of HelixNotes, so it doesn't check HelixNotes's own update server - that would offer you the wrong build. To get a newer version, check the fork's GitHub releases.</p>
+								<p class="setting-hint">This fork doesn't check the upstream HelixNotes update server, since that would offer the wrong build. Check the fork's GitHub releases for new versions.</p>
 								<a class="import-btn" href="https://github.com/Tigrolino/Helixnotes-Live/releases" target="_blank" rel="noopener">
 									<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 										<path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
