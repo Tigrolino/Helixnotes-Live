@@ -448,9 +448,12 @@
 	// on spell_check_enabled itself, not on spell_check_engine. The first three checks only ever
 	// look within a single text node's own text, so a match never spans a formatting-mark boundary
 	// (e.g. "the **the**") - a real but rare limitation, and simpler/safer than threading
-	// cross-node positions through here too. The punctuation check instead looks at a whole
-	// paragraph's concatenated text (it needs to see the paragraph's last word), so it runs
-	// separately over doc.descendants() rather than per text node - see collectPunctuationFlags.
+	// cross-node positions through here too. The punctuation check instead looks at each visual
+	// line of a paragraph (it needs to see a line's last word - see paragraphLines(), which splits
+	// a paragraph at its hardBreak/Shift+Enter nodes so a stack of short lines sharing one
+	// paragraph - e.g. an address, or a list of short test sentences - gets each line checked on
+	// its own rather than only ever checking the very last one), so it runs separately over
+	// doc.descendants() rather than per text node - see collectPunctuationFlags.
 	const LONE_I_RE = /\bi\b/g;
 	const SENTENCE_BOUNDARY_RE = /[.!?](?:["')\]]*)\s+/g;
 	const REPEATED_WORD_RE = /\b([A-Za-z'’]+)([ \t]+)\1\b/gi;
@@ -599,13 +602,42 @@
 		return { offset: wordMatch.index!, length: wordMatch[0].length, suggestion: wordMatch[0] + '.' };
 	}
 
+	/** Splits a paragraph node's inline content into visual lines at each hardBreak (Shift+Enter) -
+	 *  a plain paragraph (the overwhelmingly common case) comes back as a single line covering the
+	 *  whole block, same as before. Needed because node.textContent flattens a hardBreak to nothing
+	 *  (it contributes no characters), so a multi-line paragraph built with Shift+Enter - several
+	 *  short "sentences" stacked with soft breaks instead of separate paragraphs, e.g. a list of
+	 *  test lines or an address - would otherwise read as one giant run-on string, and only ever get
+	 *  checked against its very last line: everything checkParagraphPunctuation() can see about a
+	 *  prior line is already followed by more text, so it can never look "finished" on its own.
+	 *  Splitting at hardBreak gives each visual line its own independent check and its own correct
+	 *  document position, exactly like separate paragraphs would get. `offset` is relative to the
+	 *  start of the paragraph's own content (0-based), matching node.forEach()'s own offsets, so
+	 *  callers add it to the paragraph's content-start position to get a real document position. */
+	function paragraphLines(node: ProseMirrorNode): { text: string; offset: number }[] {
+		const lines: { text: string; offset: number }[] = [];
+		let text = '';
+		let lineStart = 0;
+		node.forEach((child, offset) => {
+			if (child.type.name === 'hardBreak') {
+				lines.push({ text, offset: lineStart });
+				text = '';
+				lineStart = offset + child.nodeSize;
+			} else if (child.isText) {
+				text += child.text ?? '';
+			}
+			// Any other inline atom (an image, a mention, ...) contributes no characters, same as
+			// node.textContent treats it elsewhere in this file - a rare case in a plain paragraph.
+		});
+		lines.push({ text, offset: lineStart });
+		return lines;
+	}
+
 	/** Whole-document version of checkParagraphPunctuation() - scoped to 'paragraph' blocks whose
 	 *  parent isn't a list item (a heading is a title and never needs a period; a list item is
-	 *  routinely a sentence fragment on purpose - "Buy milk", not "Buy milk."). Same known
-	 *  limitation as collectMechanicalFlagsForText: textContent concatenates only the text inside
-	 *  the block, so a block containing a non-text inline atom (an image, a hard break) throws off
-	 *  the offset-to-position math for anything after it - rare enough in a plain paragraph to
-	 *  accept, same tradeoff already made there. */
+	 *  routinely a sentence fragment on purpose - "Buy milk", not "Buy milk."). Checks each visual
+	 *  line of the paragraph independently (see paragraphLines() above), so a multi-line paragraph
+	 *  built with Shift+Enter can flag more than one line, not just its last. */
 	function collectPunctuationFlags(doc: ProseMirrorNode): { from: number; to: number; suggestion: string; kind: SpellErrorKind }[] {
 		const out: { from: number; to: number; suggestion: string; kind: SpellErrorKind }[] = [];
 		doc.descendants((node, pos) => {
@@ -613,16 +645,19 @@
 			if (node.type.name !== 'paragraph') return true;
 			const parentType = doc.resolve(pos).parent.type.name;
 			if (parentType === 'listItem' || parentType === 'taskItem') return true;
-			const hit = checkParagraphPunctuation(node.textContent);
-			if (!hit) return true;
-			const from = pos + 1 + hit.offset;
-			out.push({ from, to: from + hit.length, suggestion: hit.suggestion, kind: 'punctuation' });
+			const contentStart = pos + 1;
+			for (const line of paragraphLines(node)) {
+				const hit = checkParagraphPunctuation(line.text);
+				if (!hit) continue;
+				const from = contentStart + line.offset + hit.offset;
+				out.push({ from, to: from + hit.length, suggestion: hit.suggestion, kind: 'punctuation' });
+			}
 			return true;
 		});
 		return out;
 	}
 
-	/** Single-position counterpart to collectPunctuationFlags() - only checks the one paragraph
+	/** Single-position counterpart to collectPunctuationFlags() - only checks the one visual line
 	 *  `pos` is actually inside, the same "a hit only ever matters if it's going to contain `pos`"
 	 *  reasoning mechanicalFlagAt() below follows. */
 	function punctuationFlagAt(doc: ProseMirrorNode, pos: number): { from: number; to: number; suggestion: string; kind: SpellErrorKind } | null {
@@ -631,13 +666,15 @@
 		if (block.type.name !== 'paragraph') return null;
 		const parentType = resolved.depth > 1 ? resolved.node(resolved.depth - 1).type.name : null;
 		if (parentType === 'listItem' || parentType === 'taskItem') return null;
-		const hit = checkParagraphPunctuation(block.textContent);
-		if (!hit) return null;
-		const blockStart = resolved.start();
-		const from = blockStart + hit.offset;
-		const to = from + hit.length;
-		if (pos < from || pos > to) return null;
-		return { from, to, suggestion: hit.suggestion, kind: 'punctuation' };
+		const contentStart = resolved.start();
+		for (const line of paragraphLines(block)) {
+			const hit = checkParagraphPunctuation(line.text);
+			if (!hit) continue;
+			const from = contentStart + line.offset + hit.offset;
+			const to = from + hit.length;
+			if (pos >= from && pos <= to) return { from, to, suggestion: hit.suggestion, kind: 'punctuation' };
+		}
+		return null;
 	}
 
 	/** Whole-document mechanical scan, for the persistent underlines (see runMechanicalScan()) -
