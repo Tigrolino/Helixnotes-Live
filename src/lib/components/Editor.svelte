@@ -12466,6 +12466,8 @@
 		position: relative;
 		display: inline-block;
 		width: 0;
+		height: 0;
+		line-height: 0;
 		overflow: visible;
 		white-space: nowrap;
 		vertical-align: baseline;
@@ -12484,6 +12486,13 @@
 	   the word already carries the kind's color, so the badge itself just needs to read as a
 	   quiet, low-key hint rather than another bright pop of color next to the text. Same flat
 	   style for every kind (spelling/grammar/capitalization/repetition) on purpose. */
+	/* Fixed px font-size (not em) on purpose - this badge is inserted as a decoration widget
+	   directly inside whatever block it's flagging a word in, so an em-based size inherited a
+	   heading's much larger font-size and rendered the badge huge on a flagged word in an H1/H2.
+	   A flagged word always reads at ordinary body-text size regardless of its block's own
+	   heading level, so the badge should too. `top` is in em, but resolves against this same
+	   element's own (now-fixed) font-size, not the inherited one, so it stays correctly scaled
+	   to the badge's fixed size rather than the heading's. */
 	:global(.tiptap-wrapper .tiptap .spell-suggestion-badge) {
 		position: absolute;
 		left: 2px;
@@ -12497,7 +12506,8 @@
 		border: 1px solid var(--border-color);
 		border-radius: 4px;
 		padding: 1px 5px;
-		font-size: 0.8em;
+		font-size: 12px;
+		line-height: 1.4;
 		opacity: 0.9;
 		white-space: nowrap;
 		pointer-events: none;
