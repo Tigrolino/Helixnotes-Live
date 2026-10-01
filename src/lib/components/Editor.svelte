@@ -402,12 +402,19 @@
 	// the AI is also told (informationally, per chunk) which words Hunspell already flagged, so
 	// it isn't re-deriving (less reliably) something already handled for free.
 
-	// AI engine's results: lowercased word -> suggestion, built from parseSpellCheckResponse()
-	// entries (see runAiSpellScan()). Flat rather than per-paragraph - the same word spelled
-	// identically meaning two different things in two different paragraphs is a rare enough
-	// edge case that losing per-occurrence precision here is worth the simpler, uniform lookup
-	// shape shared with the Basic engine; the last paragraph scanned wins if they ever disagree.
-	let aiSpellSuggestions = new Map<string, string[]>();
+	// AI engine's results: document position (the flagged token's own `from`) -> suggestions,
+	// built from parseSpellCheckResponse() entries (see runAiSpellScan()). Keyed by position
+	// rather than by word text: the AI's whole job in "ai"/"combined" mode is to flag a word
+	// that's wrong *for its context*, so the same spelling can legitimately need two different
+	// fixes in two different places (or need no fix at all elsewhere) - a word-text-only map
+	// collapsed all of those into one global entry, so every occurrence of a word anywhere in
+	// the note inherited whichever occurrence's suggestion was written last, including
+	// occurrences the AI never actually flagged. That's what produced suggestions that looked
+	// unrelated to the word they were shown on - the fix doesn't belong to that spot at all, it
+	// was meant for a different sentence entirely. A lookup that doesn't have the occurrence's
+	// own position (nothing else in the document needs one) simply finds nothing, rather than
+	// falling back to a possibly-mismatched guess.
+	let aiSpellSuggestions = new Map<number, string[]>();
 	let aiSpellTimer: ReturnType<typeof setTimeout> | null = null;
 	// Drives the bottom-right "Checking spelling..." indicator - true only while this
 	// specific (current-generation) AI request is actually in flight, not during the
@@ -467,39 +474,46 @@
 		return word.length >= 3 && !/^[A-Z]+$/.test(word);
 	}
 
-	function isWordMisspelled(word: string): boolean {
+	// `pos` is the specific occurrence's own `from` position - required for the AI side of
+	// "ai"/"combined" (a context-dependent verdict can only be looked up for the exact
+	// occurrence the AI actually judged), optional for pure Hunspell lookups (a word-only
+	// dictionary check, like `basicCouldFlag`/`isKnownWord`, doesn't depend on where the word
+	// is). A caller that doesn't have a position for an AI-mode lookup gets "not misspelled" /
+	// no suggestion rather than a guess borrowed from some other occurrence of the same word.
+	function isWordMisspelled(word: string, pos?: number): boolean {
 		if (spellIgnoreSet.has(word.toLowerCase())) return false;
 		const engine = $appConfig?.spell_check_engine;
-		if (engine === 'ai') return aiSpellSuggestions.has(word.toLowerCase());
+		if (engine === 'ai') return pos !== undefined && aiSpellSuggestions.has(pos);
 		if (engine === 'combined') {
 			if (isDictionaryReady() && !isKnownWord(word)) return basicCouldFlag(word);
 			// A real dictionary word (or the dictionary isn't loaded yet) - only the AI's
-			// grammar/confused-word/contraction checking could have flagged this one.
-			return aiSpellSuggestions.has(word.toLowerCase());
+			// grammar/confused-word/contraction checking could have flagged this one, and only
+			// at the exact spot it flagged.
+			return pos !== undefined && aiSpellSuggestions.has(pos);
 		}
 		if (!isDictionaryReady() || !basicCouldFlag(word)) return false;
 		return !isKnownWord(word);
 	}
 
-	function getSuggestion(word: string): string | null {
+	function getSuggestion(word: string, pos?: number): string | null {
 		if (spellIgnoreSet.has(word.toLowerCase())) return null;
 		const engine = $appConfig?.spell_check_engine;
-		if (engine === 'ai') return aiSpellSuggestions.get(word.toLowerCase())?.[0] ?? null;
+		if (engine === 'ai') return (pos !== undefined ? aiSpellSuggestions.get(pos)?.[0] : undefined) ?? null;
 		if (engine === 'combined' && isDictionaryReady() && !isKnownWord(word)) {
 			return suggestCorrection(word);
 		}
-		if (engine === 'combined') return aiSpellSuggestions.get(word.toLowerCase())?.[0] ?? null;
+		if (engine === 'combined') return (pos !== undefined ? aiSpellSuggestions.get(pos)?.[0] : undefined) ?? null;
 		return suggestCorrection(word);
 	}
 
-	function getSuggestionsFor(word: string, limit: number): string[] {
+	function getSuggestionsFor(word: string, limit: number, pos?: number): string[] {
 		if (spellIgnoreSet.has(word.toLowerCase())) return [];
 		const engine = $appConfig?.spell_check_engine;
-		if (engine === 'ai') return (aiSpellSuggestions.get(word.toLowerCase()) ?? []).slice(0, limit);
+		if (engine === 'ai') return (pos !== undefined ? aiSpellSuggestions.get(pos) : undefined)?.slice(0, limit) ?? [];
 		if (engine === 'combined' && isDictionaryReady() && !isKnownWord(word)) {
 			return suggestCorrections(word, limit);
 		}
-		if (engine === 'combined') return (aiSpellSuggestions.get(word.toLowerCase()) ?? []).slice(0, limit);
+		if (engine === 'combined') return (pos !== undefined ? aiSpellSuggestions.get(pos) : undefined)?.slice(0, limit) ?? [];
 		return suggestCorrections(word, limit);
 	}
 
@@ -545,7 +559,7 @@
 		const wordStartRel = wordEndRel - word.length;
 		const from = lookbackStart + wordStartRel;
 		const to = lookbackStart + wordEndRel;
-		const suggestion = getSuggestion(word);
+		const suggestion = getSuggestion(word, from);
 		if (!suggestion) return null;
 		return { from, to, suggestion };
 	}
@@ -718,7 +732,7 @@
 				const from = nodePos + start;
 				const to = nodePos + end;
 				if (pos < from || pos > to) continue;
-				if (!isWordMisspelled(word)) continue;
+				if (!isWordMisspelled(word, from)) continue;
 				found = { from, to, word };
 				break;
 			}
@@ -766,7 +780,7 @@
 			const chunkStart = performance.now();
 			while (i < tokens.length && performance.now() - chunkStart < CHUNK_BUDGET_MS) {
 				const token = tokens[i++];
-				if (isWordMisspelled(token.word)) ranges.push({ from: token.from, to: token.to });
+				if (isWordMisspelled(token.word, token.from)) ranges.push({ from: token.from, to: token.to });
 			}
 			if (generation !== spellScanGeneration || !editor || editor.isDestroyed) return;
 			if (i < tokens.length) await new Promise((resolve) => setTimeout(resolve, 0));
@@ -951,7 +965,11 @@
 		if (current.length) chunks.push(current);
 
 		aiSpellScanInFlight = true;
-		const suggestions = new Map<string, string[]>();
+		// Keyed by each matched occurrence's own position, not by word text - see the comment
+		// on the `aiSpellSuggestions` declaration above for why: an entry only ever applies to
+		// the specific token(s) that earned it (same block, same word), never to every spot in
+		// the document where that spelling happens to appear.
+		const suggestions = new Map<number, string[]>();
 		const ranges: { from: number; to: number }[] = [];
 		try {
 			for (let c = 0; c < chunks.length; c++) {
@@ -968,10 +986,10 @@
 				for (const entry of entries) {
 					const lowerWord = entry.word.toLowerCase();
 					if (spellIgnoreSet.has(lowerWord)) continue;
-					suggestions.set(lowerWord, entry.suggestions);
 					for (const token of tokens) {
 						if (token.blockIndex === entry.block && token.word.toLowerCase() === lowerWord) {
 							ranges.push({ from: token.from, to: token.to });
+							suggestions.set(token.from, entry.suggestions);
 						}
 					}
 				}
@@ -6311,7 +6329,7 @@
 			if (hit) {
 				event.preventDefault();
 				event.stopPropagation();
-				const suggestions = getSuggestionsFor(hit.word, 3);
+				const suggestions = getSuggestionsFor(hit.word, 3, hit.from);
 				let sx = event.clientX;
 				let sy = event.clientY;
 				const menuWidth = 200;
