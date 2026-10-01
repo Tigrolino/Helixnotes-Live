@@ -2235,13 +2235,13 @@
 							</div>
 
 							<div class="settings-section">
-								<h3>Math Suggestions</h3>
+								<h3>Quick Suggestions</h3>
 								<label class="setting-toggle">
 									<span class="setting-label">
-										<span class="setting-name">Suggest math results as you type</span>
-										<span class="setting-desc">Finish typing an expression like "12*7" and it suggests "=84" right after it - press Tab to accept. Computed locally on your device, so this works with no AI provider configured at all.</span>
+										<span class="setting-name">Suggest math, dates, and conversions as you type</span>
+										<span class="setting-desc">Finish typing an expression like "12*7" and it suggests "=84" right after it; type "10 km to miles" and it suggests "= 6.21 mi"; type "@today" or "@now" and it suggests today's date or the current time in its place - press Tab to accept any of them. All computed locally on your device, so this works with no AI provider configured at all.</span>
 									</span>
-									<button class="toggle-switch" class:on={mathSuggestionsEnabled} role="switch" aria-checked={mathSuggestionsEnabled} aria-label="Suggest math results as you type" onclick={() => { mathSuggestionsEnabled = !mathSuggestionsEnabled; saveAiSettings(); }}>
+									<button class="toggle-switch" class:on={mathSuggestionsEnabled} role="switch" aria-checked={mathSuggestionsEnabled} aria-label="Suggest math, dates, and conversions as you type" onclick={() => { mathSuggestionsEnabled = !mathSuggestionsEnabled; saveAiSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>

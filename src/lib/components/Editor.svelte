@@ -36,7 +36,7 @@
 	import 'katex/dist/katex.min.css';
 	import { Extension, Node as TiptapNode, Mark as TiptapMark, mergeAttributes } from '@tiptap/core';
 	import { Plugin, PluginKey, EditorState, Selection, TextSelection, type Transaction } from '@tiptap/pm/state';
-	import { Decoration, DecorationSet } from '@tiptap/pm/view';
+	import { Decoration, DecorationSet, EditorView } from '@tiptap/pm/view';
 	import { DOMSerializer, Node as ProseMirrorNode } from '@tiptap/pm/model';
 	import { convertFileSrc } from '@tauri-apps/api/core';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -254,10 +254,14 @@
 				new Plugin({
 					key: ghostTextPluginKey,
 					state: {
-						init: () => null as { text: string; from: number } | null,
+						init: () => null as { text: string; from: number; replaceFrom?: number } | null,
 						apply(tr, value) {
 							const meta = tr.getMeta(ghostTextPluginKey);
-							if (meta) return meta.type === 'clear' ? null : { text: meta.text, from: meta.from };
+							// `replaceFrom`, when set, marks a trigger-word completion (date/time's
+							// "@today" -> the resolved date - see tryDateTimeCompletion()) whose accept
+							// replaces the trigger text itself instead of appending after it - see
+							// acceptGhostSuggestion(). Carried through state the same as text/from.
+							if (meta) return meta.type === 'clear' ? null : { text: meta.text, from: meta.from, replaceFrom: meta.replaceFrom };
 							if (!value) return null;
 							// Any real edit or cursor move invalidates a showing suggestion - it was
 							// written for a document that no longer looks like this.
@@ -381,6 +385,156 @@
 		spellIgnoreSet.add(lower);
 	}
 
+	// What kind of issue a flagged range is - drives both its underline color and its badge color
+	// (see spellErrorClass()/kindBadgeClass() and the CSS below) so different categories of
+	// correction are visually distinguishable, not just "something's underlined here":
+	//  - 'spelling': a real dictionary-unknown word (Basic engine), or whatever the AI flags in
+	//    pure 'ai' mode (where it's doing the whole job, misspellings included).
+	//  - 'grammar': a lone lowercase "i" (collectMechanicalFlags below), or - in 'combined' mode
+	//    specifically - anything the AI flags there, since combined mode routes real dictionary-
+	//    unknown words to Basic and only ever asks the AI about context/grammar/confused-word
+	//    issues in a correctly-spelled word (see the engine-dispatch comment above) - so an AI hit
+	//    in combined mode is never a plain misspelling by construction.
+	//  - 'capitalization': a lowercase word right after what looks like a sentence boundary.
+	//  - 'repetition': the same word typed twice in a row.
+	type SpellErrorKind = 'spelling' | 'grammar' | 'capitalization' | 'repetition';
+
+	function spellErrorClass(kind: SpellErrorKind): string {
+		return kind === 'spelling' ? 'spell-error' : `spell-error spell-error-${kind}`;
+	}
+
+	function badgeClassFor(kind: SpellErrorKind): string {
+		return kind === 'spelling' ? 'spell-suggestion-badge' : `spell-suggestion-badge spell-suggestion-badge-${kind}`;
+	}
+
+	/** Which SpellErrorKind a dictionary/AI hit at `pos` for `word` should be colored as - mirrors
+	 *  isWordMisspelled()'s own engine branching exactly (see the comment on SpellErrorKind above
+	 *  for why 'combined' mode's AI half is always 'grammar') rather than guessing after the fact,
+	 *  since isWordMisspelled() already knows unambiguously which half of a combined-mode check
+	 *  actually matched. */
+	function spellingKindFor(word: string): SpellErrorKind {
+		const engine = $appConfig?.spell_check_engine;
+		if (engine === 'combined') {
+			if (isDictionaryReady() && !isKnownWord(word)) return 'spelling';
+			return 'grammar';
+		}
+		return 'spelling';
+	}
+
+	// ── Mechanical (offline, non-AI) checks: lone "i", sentence-start capitalization, and an
+	// immediately-repeated word. NOT a real grammar checker - full subject-verb-agreement and
+	// missing-punctuation detection need more than regexes to do reliably without a flood of false
+	// positives, so those stay the AI engine's job ('ai'/'combined'). These three run alongside
+	// *any* spell-check engine (including with no AI configured at all - see the Basic-engine-
+	// reachable-with-no-AI fix above) since they're cheap, local, and independent of which
+	// dictionary/AI engine is active - gated only on spell_check_enabled itself, not on
+	// spell_check_engine. Each check only ever looks within a single text node's own text, so a
+	// match never spans a formatting-mark boundary (e.g. "the **the**") - a real but rare
+	// limitation, and simpler/safer than threading cross-node positions through here too.
+	const LONE_I_RE = /\bi\b/g;
+	const SENTENCE_BOUNDARY_RE = /[.!?](?:["')\]]*)\s+/g;
+	const REPEATED_WORD_RE = /\b([A-Za-z'’]+)([ \t]+)\1\b/gi;
+
+	/** Runs all three mechanical checks over a single text node's own text. `basePos` is that
+	 *  text node's own starting document position; `isBlockStart` is whether this text node is
+	 *  the very first thing in its block (so position 0 counts as a sentence start too). Shared by
+	 *  the whole-document scan (collectMechanicalFlags, for the persistent underlines) and the
+	 *  single-position lookup (mechanicalFlagAt, for the right-click menu / active-fix badge /
+	 *  hover) so both agree exactly on what counts as a flag. Respects the per-note ignore list
+	 *  the same way isWordMisspelled() does. */
+	function collectMechanicalFlagsForText(text: string, basePos: number, isBlockStart: boolean): { from: number; to: number; suggestion: string; kind: SpellErrorKind }[] {
+		const out: { from: number; to: number; suggestion: string; kind: SpellErrorKind }[] = [];
+		const taken = new Set<number>();
+
+		LONE_I_RE.lastIndex = 0;
+		let m: RegExpExecArray | null;
+		while ((m = LONE_I_RE.exec(text)) !== null) {
+			if (spellIgnoreSet.has('i')) continue;
+			const from = basePos + m.index;
+			out.push({ from, to: from + 1, suggestion: 'I', kind: 'grammar' });
+			taken.add(from);
+		}
+
+		REPEATED_WORD_RE.lastIndex = 0;
+		while ((m = REPEATED_WORD_RE.exec(text)) !== null) {
+			if (spellIgnoreSet.has(m[0].toLowerCase())) continue;
+			const from = basePos + m.index;
+			out.push({ from, to: from + m[0].length, suggestion: m[1], kind: 'repetition' });
+		}
+
+		const starts: number[] = [];
+		if (isBlockStart) starts.push(0);
+		SENTENCE_BOUNDARY_RE.lastIndex = 0;
+		while ((m = SENTENCE_BOUNDARY_RE.exec(text)) !== null) starts.push(m.index + m[0].length);
+		for (const start of starts) {
+			const wordMatch = /^[A-Za-z']+/.exec(text.slice(start));
+			if (!wordMatch) continue;
+			const word = wordMatch[0];
+			const first = word[0];
+			if (!/[a-z]/.test(first)) continue;
+			if (word.toLowerCase() === 'i') continue; // the lone-"i" check above already owns this one
+			if (spellIgnoreSet.has(word.toLowerCase())) continue;
+			const from = basePos + start;
+			if (taken.has(from)) continue;
+			out.push({ from, to: from + word.length, suggestion: first.toUpperCase() + word.slice(1), kind: 'capitalization' });
+		}
+		return out;
+	}
+
+	/** Whole-document mechanical scan, for the persistent underlines (see runMechanicalScan()) -
+	 *  walks every text node (skipping code blocks) and collects every match as a real document
+	 *  range + kind. */
+	function collectMechanicalFlags(doc: ProseMirrorNode): { from: number; to: number; kind: SpellErrorKind }[] {
+		const out: { from: number; to: number; kind: SpellErrorKind }[] = [];
+		doc.descendants((node, pos) => {
+			if (node.type.name === 'codeBlock') return false;
+			if (!node.isText || !node.text) return true;
+			const isBlockStart = doc.resolve(pos).start() === pos;
+			for (const f of collectMechanicalFlagsForText(node.text, pos, isBlockStart)) {
+				out.push({ from: f.from, to: f.to, kind: f.kind });
+			}
+			return true;
+		});
+		return out;
+	}
+
+	/** Single-position counterpart to collectMechanicalFlags(), for the right-click menu / active-
+	 *  fix badge / hover - only searches a small window around `pos` (same reasoning as
+	 *  misspelledWordAtPos below: a hit only ever matters if it's going to contain `pos` at all). */
+	function mechanicalFlagAt(doc: ProseMirrorNode, pos: number): { from: number; to: number; suggestion: string; kind: SpellErrorKind } | null {
+		const lo = Math.max(0, pos - 80);
+		const hi = Math.min(doc.content.size, pos + 80);
+		let found: { from: number; to: number; suggestion: string; kind: SpellErrorKind } | null = null;
+		doc.nodesBetween(lo, hi, (node, nodePos) => {
+			if (found || node.type.name === 'codeBlock') return false;
+			if (!node.isText || !node.text) return true;
+			const isBlockStart = doc.resolve(nodePos).start() === nodePos;
+			for (const f of collectMechanicalFlagsForText(node.text, nodePos, isBlockStart)) {
+				if (pos >= f.from && pos <= f.to) { found = f; break; }
+			}
+			return true;
+		});
+		return found;
+	}
+
+	let mechanicalRanges: { from: number; to: number; kind: SpellErrorKind }[] = [];
+	let mechanicalScanTimer: ReturnType<typeof setTimeout> | null = null;
+
+	/** Independent of which dictionary/AI engine is active (or whether spell-check is even set to
+	 *  an engine that needs a dictionary/AI at all) - see the comment on the mechanical checks
+	 *  above. Scheduled from the same debounce as the Basic engine's scan (scheduleSpellCheckScan)
+	 *  but never skipped for the 'ai' engine the way the Basic scan is. */
+	function runMechanicalScan() {
+		if (!editor || editor.isDestroyed || boundLiveFieldId) return;
+		if (!$appConfig?.spell_check_enabled) {
+			if (mechanicalRanges.length) { mechanicalRanges = []; dispatchSpellDecorations(); }
+			return;
+		}
+		if (isLargeDoc) return;
+		mechanicalRanges = collectMechanicalFlags(editor.state.doc);
+		dispatchSpellDecorations();
+	}
+
 	// ── Spell-check engine dispatch ──
 	//
 	// Three engines share the rest of this file's spell-check machinery (computeActiveSpellFix,
@@ -478,7 +632,7 @@
 				}
 			}
 			aiSpellEntries = remapped;
-			aiSpellRanges = [...remapped.entries()].map(([from, e]) => ({ from, to: e.to }));
+			aiSpellRanges = [...remapped.entries()].map(([from, e]) => ({ from, to: e.to, kind: aiSpellKind() }));
 		}
 		if (aiDirtyFrom !== null) aiDirtyFrom = transaction.mapping.map(aiDirtyFrom, -1);
 		if (aiDirtyTo !== null) aiDirtyTo = transaction.mapping.map(aiDirtyTo, 1);
@@ -501,29 +655,35 @@
 	// latest result, and dispatchSpellDecorations() unions them into one dispatch - called by
 	// both scans after every update, so a scan finishing later only ever adds to what's showing,
 	// never erases the other scan's results.
-	let basicSpellRanges: { from: number; to: number }[] = [];
-	let aiSpellRanges: { from: number; to: number }[] = [];
+	let basicSpellRanges: { from: number; to: number; kind: SpellErrorKind }[] = [];
+	let aiSpellRanges: { from: number; to: number; kind: SpellErrorKind }[] = [];
+
+	/** Kind an AI-sourced flag should be colored as right now - depends only on which engine is
+	 *  active (see the SpellErrorKind comment above), never on the individual entry. */
+	function aiSpellKind(): SpellErrorKind {
+		return $appConfig?.spell_check_engine === 'combined' ? 'grammar' : 'spelling';
+	}
 
 	function dispatchSpellDecorations() {
 		if (!editor || editor.isDestroyed) return;
 		const engine = $appConfig?.spell_check_engine;
-		let ranges: { from: number; to: number }[];
+		let ranges: { from: number; to: number; kind: SpellErrorKind }[];
 		if (engine === 'combined') {
 			// Expected to rarely overlap in practice - Basic only ever contributes unknown-to-
 			// the-dictionary words and the AI is told not to re-flag those - but de-dup
 			// defensively by exact range in case they ever do.
 			const seen = new Set<string>();
 			ranges = [];
-			for (const r of [...basicSpellRanges, ...aiSpellRanges]) {
+			for (const r of [...basicSpellRanges, ...aiSpellRanges, ...mechanicalRanges]) {
 				const key = `${r.from}:${r.to}`;
 				if (seen.has(key)) continue;
 				seen.add(key);
 				ranges.push(r);
 			}
 		} else if (engine === 'ai') {
-			ranges = aiSpellRanges;
+			ranges = [...aiSpellRanges, ...mechanicalRanges];
 		} else {
-			ranges = basicSpellRanges;
+			ranges = [...basicSpellRanges, ...mechanicalRanges];
 		}
 		editor.view.dispatch(editor.state.tr.setMeta(spellCheckPluginKey, { type: 'setErrors', ranges }));
 	}
@@ -578,17 +738,31 @@
 		return suggestCorrections(word, limit);
 	}
 
-	/** Fresh, synchronous check of the word right before the cursor - the same boundary-match
-	 *  logic that used to live in scheduleSpellCheck(), but called on demand (from decorations()
-	 *  and from the Tab handler) instead of cached, so its result can never be stale relative to
-	 *  `state`. Returns null if spell-check is off, the dictionary isn't loaded yet, the selection
-	 *  isn't a plain cursor, there's no completed word right before it, or that word is fine. */
-	function computeActiveSpellFix(state: EditorState): { from: number; to: number; suggestion: string } | null {
+	/** Fresh, synchronous check of "what's wrong at the cursor, and what would fix it" - called on
+	 *  demand (from decorations() and from the Tab handler) instead of cached, so its result can
+	 *  never be stale relative to `state`. Returns null if spell-check is off, the selection isn't
+	 *  a plain cursor, or there's nothing to fix.
+	 *
+	 *  Two paths, tried in order:
+	 *   1. (item D: "show the entire time the cursor is anywhere over it", not just right after
+	 *      typing it) currentSpellFlagAt() - whatever the last scan already found (dictionary/AI
+	 *      word or a mechanical flag), re-checked fresh so a stale/remapped position is never
+	 *      trusted, and matched as long as the cursor is anywhere within the flagged range, not
+	 *      just at its trailing edge.
+	 *   2. A fallback for a word that was *just* finished being typed (a boundary character right
+	 *      after it) that the debounced scan hasn't caught up to yet - dictionary/AI engines only;
+	 *      the mechanical checks are already always fresh (mechanicalFlagAt recomputes on every
+	 *      call), so they have nothing to catch up on and are fully covered by path 1. */
+	function computeActiveSpellFix(state: EditorState): { from: number; to: number; suggestion: string; kind: SpellErrorKind } | null {
 		if (!$appConfig?.spell_check_enabled) return null;
-		if ($appConfig.spell_check_engine !== 'ai' && !isDictionaryReady()) return null;
 		const sel = state.selection;
 		if (!sel.empty) return null;
 		const pos = sel.from;
+
+		const known = currentSpellFlagAt(state.doc, pos);
+		if (known) return known;
+
+		if ($appConfig.spell_check_engine !== 'ai' && !isDictionaryReady()) return null;
 		// Every offset below is computed as an index into `context` (a plain string) and then
 		// added straight back onto `lookbackStart` to get a real document position - which is
 		// only valid 1:1 if `context` never crosses a block boundary. textBetween() collapses
@@ -622,7 +796,34 @@
 		const to = lookbackStart + wordEndRel;
 		const suggestion = getSuggestion(word, from);
 		if (!suggestion) return null;
-		return { from, to, suggestion };
+		return { from, to, suggestion, kind: spellingKindFor(word) };
+	}
+
+	// Mouse-hover counterpart to the text-cursor-driven badge above (item E: "also if I hover over
+	// it with my actual cursor"), independent of the text cursor's own position. Lives outside
+	// EditorState (a mousemove is never itself a transaction), so it's tracked in plain variables
+	// and the hover badge is force-redrawn via updateHoverSpellPos() below rather than reacting to
+	// state changes the normal way.
+	let hoverSpellPos: number | null = null;
+	let hoverSpellFlagKey: string | null = null;
+
+	/** Called from SpellCheckPlugin's mousemove/mouseleave handlers below. hoverSpellPos lives
+	 *  outside EditorState, so a plain mousemove never makes ProseMirror call decorations() again
+	 *  on its own the way moving the text cursor does - dispatching an empty transaction forces
+	 *  that recompute. ignoreNextUpdate (the same flag/pattern already used elsewhere in this file
+	 *  for a forced redraw) keeps this dispatch from being treated like a real edit: no autosave,
+	 *  outline refresh, ghost-text request, or spell-check rescan. Only actually dispatches when
+	 *  the flagged range under the mouse changes, not on every pixel of mousemove within the same
+	 *  word (or the same empty space) - most mousemove events touch neither. */
+	function updateHoverSpellPos(pos: number | null, view: EditorView) {
+		if (!editor || editor.isDestroyed) return;
+		hoverSpellPos = pos;
+		const flag = pos !== null ? currentSpellFlagAt(view.state.doc, pos) : null;
+		const key = flag ? `${flag.from}:${flag.to}` : null;
+		if (key === hoverSpellFlagKey) return;
+		hoverSpellFlagKey = key;
+		ignoreNextUpdate = true;
+		view.dispatch(view.state.tr);
 	}
 
 	const SpellCheckPlugin = Extension.create({
@@ -645,34 +846,43 @@
 							// 'setErrors': a fresh whole-document scan result replaces the mapped set
 							// outright (it was computed from tr.doc, the current document, so it's not
 							// missing anything the mapped-forward version would have).
-							return DecorationSet.create(tr.doc, (meta.ranges as { from: number; to: number }[]).map((r) =>
-								Decoration.inline(r.from, r.to, { class: 'spell-error' })));
+							return DecorationSet.create(tr.doc, (meta.ranges as { from: number; to: number; kind: SpellErrorKind }[]).map((r) =>
+								Decoration.inline(r.from, r.to, { class: spellErrorClass(r.kind) })));
 						},
 					},
 					props: {
 						decorations(state) {
 							const decoSet = spellCheckPluginKey.getState(state) as DecorationSet | undefined;
 							const base = decoSet ?? DecorationSet.empty;
+							if (!$appConfig?.spell_check_enabled) return base;
 							const active = computeActiveSpellFix(state);
-							if (!active) return base;
-							// Zero-width anchor so the badge floats under the word instead of pushing the
-							// rest of the line over - an earlier version used an inline widget that took
-							// up real space in the text flow and could visibly splice itself into text
-							// right next to it.
-							const anchor = document.createElement('span');
-							anchor.className = 'spell-suggestion-anchor';
-							anchor.setAttribute('contenteditable', 'false');
-							const badge = document.createElement('span');
-							badge.className = 'spell-suggestion-badge';
-							badge.textContent = active.suggestion;
-							anchor.appendChild(badge);
-							// Also decorate the active word directly, in case the debounced whole-
-							// document scan hasn't caught up to it yet - decorations don't mind the same
-							// range being added twice.
-							return base.add(state.doc, [
-								Decoration.inline(active.from, active.to, { class: 'spell-error' }),
-								Decoration.widget(active.to, anchor, { side: 1 }),
-							]);
+							const hoverActive = hoverSpellPos !== null ? currentSpellFlagAt(state.doc, hoverSpellPos) : null;
+							// Don't double up a badge when the mouse happens to be hovering the exact same
+							// range the text cursor is already showing one for.
+							const showHover = !!hoverActive && (!active || hoverActive.from !== active.from || hoverActive.to !== active.to);
+							if (!active && !showHover) return base;
+							const extra: Decoration[] = [];
+							const addFixWidget = (fix: { from: number; to: number; suggestion: string; kind: SpellErrorKind }) => {
+								// Zero-width anchor so the badge floats under the word instead of pushing
+								// the rest of the line over - an earlier version used an inline widget that
+								// took up real space in the text flow and could visibly splice itself into
+								// text right next to it.
+								const anchor = document.createElement('span');
+								anchor.className = 'spell-suggestion-anchor';
+								anchor.setAttribute('contenteditable', 'false');
+								const badge = document.createElement('span');
+								badge.className = badgeClassFor(fix.kind);
+								badge.textContent = fix.suggestion;
+								anchor.appendChild(badge);
+								// Also decorate the flagged range directly, in case the debounced whole-
+								// document scan hasn't caught up to it yet - decorations don't mind the
+								// same range being added twice.
+								extra.push(Decoration.inline(fix.from, fix.to, { class: spellErrorClass(fix.kind) }));
+								extra.push(Decoration.widget(fix.to, anchor, { side: 1 }));
+							};
+							if (active) addFixWidget(active);
+							if (showHover && hoverActive) addFixWidget(hoverActive);
+							return base.add(state.doc, extra);
 						},
 						handleKeyDown(view, event) {
 							if (event.key !== 'Tab' || event.shiftKey || event.altKey || event.metaKey || event.ctrlKey) return false;
@@ -683,6 +893,18 @@
 							event.preventDefault();
 							editor?.chain().focus().insertContentAt({ from: active.from, to: active.to }, active.suggestion).run();
 							return true;
+						},
+						handleDOMEvents: {
+							mousemove(view, event) {
+								if (!$appConfig?.spell_check_enabled) return false;
+								const coords = view.posAtCoords({ left: (event as MouseEvent).clientX, top: (event as MouseEvent).clientY });
+								updateHoverSpellPos(coords ? coords.pos : null, view);
+								return false;
+							},
+							mouseleave(view) {
+								updateHoverSpellPos(null, view);
+								return false;
+							},
 						},
 					},
 				}),
@@ -808,9 +1030,27 @@
 		return found;
 	}
 
+	/** Unifies all three sources of "what's wrong at this position, and what would fix it" into
+	 *  one {from, to, suggestion, kind} result: the active dictionary/AI engine (misspelledWordAtPos
+	 *  + getSuggestion) and the offline mechanical checks (mechanicalFlagAt). Always recomputed
+	 *  fresh from the live document rather than read from a cache - the same "never trust a
+	 *  position without reverifying at the point of use" rule this file follows everywhere else.
+	 *  Used by computeActiveSpellFix (badge + Tab-accept, item D: shows the whole time the cursor
+	 *  is anywhere over the flagged range, not just right after typing it), the right-click menu,
+	 *  and the hover badge (item E). */
+	function currentSpellFlagAt(doc: ProseMirrorNode, pos: number): { from: number; to: number; suggestion: string; kind: SpellErrorKind } | null {
+		const dict = misspelledWordAtPos(doc, pos);
+		if (dict) {
+			const suggestion = getSuggestion(dict.word, dict.from);
+			if (suggestion) return { from: dict.from, to: dict.to, suggestion, kind: spellingKindFor(dict.word) };
+		}
+		return mechanicalFlagAt(doc, pos);
+	}
+
 	function clearAllSpellCheck() {
 		basicSpellRanges = [];
 		aiSpellRanges = [];
+		mechanicalRanges = [];
 		if (editor && !editor.isDestroyed) {
 			editor.view.dispatch(editor.state.tr.setMeta(spellCheckPluginKey, { type: 'clear' }));
 		}
@@ -836,7 +1076,7 @@
 		if (isLargeDoc) return;
 		const generation = ++spellScanGeneration;
 		const tokens = collectAllWordTokens(editor.state.doc);
-		const ranges: { from: number; to: number }[] = [];
+		const ranges: { from: number; to: number; kind: SpellErrorKind }[] = [];
 		// Time-budgeted chunks, yielding to the main thread between them, rather than one long
 		// synchronous walk - isKnownWord() is cheap enough per word that most notes finish in a
 		// single chunk anyway, but a very large note (just under the isLargeDoc cutoff) or a
@@ -847,7 +1087,7 @@
 			const chunkStart = performance.now();
 			while (i < tokens.length && performance.now() - chunkStart < CHUNK_BUDGET_MS) {
 				const token = tokens[i++];
-				if (isWordMisspelled(token.word, token.from)) ranges.push({ from: token.from, to: token.to });
+				if (isWordMisspelled(token.word, token.from)) ranges.push({ from: token.from, to: token.to, kind: 'spelling' });
 			}
 			if (generation !== spellScanGeneration || !editor || editor.isDestroyed) return;
 			if (i < tokens.length) await new Promise((resolve) => setTimeout(resolve, 0));
@@ -867,12 +1107,23 @@
 	 *  claim the same word (see the engine-dispatch comment above isWordMisspelled()). */
 	function scheduleSpellCheckScan() {
 		if (spellCheckScanTimer) { clearTimeout(spellCheckScanTimer); spellCheckScanTimer = null; }
+		if (mechanicalScanTimer) { clearTimeout(mechanicalScanTimer); mechanicalScanTimer = null; }
 		// Bumped unconditionally (even if this call is about to return early below) so an
 		// in-flight chunked scan from a previous call can never paint over whatever happens
 		// next - same reasoning as ghostTextGeneration in scheduleGhostTextSuggestion().
 		spellScanGeneration++;
 		if (!editor || editor.isDestroyed || boundLiveFieldId) return;
-		if (!$appConfig?.spell_check_enabled) return;
+		if (!$appConfig?.spell_check_enabled) {
+			if (mechanicalRanges.length) { mechanicalRanges = []; dispatchSpellDecorations(); }
+			return;
+		}
+		// The mechanical checks run independent of which dictionary/AI engine is chosen below
+		// (including the 'ai'-only engine, which skips the Basic scan entirely) - see the comment
+		// on the mechanical checks' declaration above for why.
+		mechanicalScanTimer = setTimeout(() => {
+			mechanicalScanTimer = null;
+			runMechanicalScan();
+		}, SPELL_CHECK_SCAN_DEBOUNCE_MS);
 		const engine = $appConfig.spell_check_engine;
 		if (engine === 'ai' || engine === 'combined') scheduleAiSpellScan();
 		if (engine === 'ai') return;
@@ -1037,6 +1288,7 @@
 		// transaction - see its declaration above) and is carried over untouched rather than
 		// being re-derived - this is what makes "fix one line" recheck just that line instead of
 		// resending (and re-trusting a weak model to re-judge) the whole note every time.
+		const kind = aiSpellKind();
 		let promptBlocks = allPromptBlocks;
 		let carriedEntries: [number, { to: number; word: string; suggestions: string[] }][] = [];
 		if (dirtyFrom !== null && dirtyTo !== null && aiSpellLastScannedText !== null) {
@@ -1087,7 +1339,7 @@
 		// previous scan untouched (see carriedEntries above), so a partial rescan never has to
 		// momentarily forget what it already knew about the rest of the note.
 		const suggestions = new Map<number, { to: number; word: string; suggestions: string[] }>(carriedEntries);
-		const ranges: { from: number; to: number }[] = carriedEntries.map(([from, e]) => ({ from, to: e.to }));
+		const ranges: { from: number; to: number; kind: SpellErrorKind }[] = carriedEntries.map(([from, e]) => ({ from, to: e.to, kind }));
 		try {
 			for (let c = 0; c < chunks.length; c++) {
 				if (generation !== aiSpellGeneration || !editor || editor.isDestroyed) return;
@@ -1105,7 +1357,7 @@
 					if (spellIgnoreSet.has(lowerWord)) continue;
 					for (const token of tokens) {
 						if (token.blockIndex === entry.block && token.word.toLowerCase() === lowerWord) {
-							ranges.push({ from: token.from, to: token.to });
+							ranges.push({ from: token.from, to: token.to, kind });
 							suggestions.set(token.from, { to: token.to, word: token.word, suggestions: entry.suggestions });
 						}
 					}
@@ -1154,6 +1406,7 @@
 		ignoreWordForNote(loadedPath, spellContextMenu.word);
 		closeSpellContextMenu();
 		runSpellCheckScan();
+		runMechanicalScan();
 	}
 
 	function clearGhostSuggestion() {
@@ -1167,10 +1420,25 @@
 
 	function acceptGhostSuggestion(): boolean {
 		if (!editor) return false;
-		const value = ghostTextPluginKey.getState(editor.state) as { text: string; from: number } | null;
+		const value = ghostTextPluginKey.getState(editor.state) as { text: string; from: number; replaceFrom?: number } | null;
 		if (!value) return false;
 		const sel = editor.state.selection;
 		if (!sel.empty || sel.from !== value.from) return false;
+		if (value.replaceFrom !== undefined) {
+			// Trigger-word completions (date/time's "@today" -> the resolved date) replace the
+			// trigger text itself instead of appending after it, unlike every other source of
+			// ghost text here (AI continuations, math, unit conversion), which only ever insert at
+			// the cursor - see tryDateTimeCompletion()/scheduleGhostTextSuggestion(). A single-shot
+			// accept: no TypeSeer word-cap buffering or speculative prefetch, since there's no
+			// "rest of the sentence" left over once the trigger is resolved. The plugin's own
+			// apply() (above) already guarantees nothing has edited or moved the selection since
+			// this suggestion was computed, so the trigger text is still exactly what it was.
+			const { replaceFrom } = value;
+			if (replaceFrom >= 0 && replaceFrom < value.from) {
+				editor.chain().focus().insertContentAt({ from: replaceFrom, to: value.from }, value.text).run();
+			}
+			return true;
+		}
 		// TypeSeer-style: only the configured word cap is actually inserted by this Tab press -
 		// whatever's left of the buffered suggestion stays showing as ghost text, ready for the
 		// next Tab, with no new request needed until it runs out.
@@ -1288,20 +1556,28 @@
 		return haystack.includes(needle);
 	}
 
-	function showGhostSuggestion(rawText: string, pos: number, generation: number, isMath = false) {
+	function showGhostSuggestion(rawText: string, pos: number, generation: number, isMath = false, replaceFrom?: number) {
 		if (!editor || editor.isDestroyed || generation !== ghostTextGeneration) return;
 		const sel = editor.state.selection;
 		if (!sel.empty || sel.from !== pos) return;
-		const charBefore = pos > 0 ? editor.state.doc.textBetween(pos - 1, pos) : '';
-		const recentContext = editor.state.doc.textBetween(Math.max(0, pos - 40), pos, '\n', '\n');
-		const cleaned = cleanCompletion(rawText, charBefore, recentContext, isMath);
+		let cleaned: string;
+		if (replaceFrom !== undefined) {
+			// A trigger-word replacement (date/time - see tryDateTimeCompletion): rawText is
+			// already the exact, final text to show/insert, so none of the AI-completion cleanup
+			// below applies - that's all about taming a raw model completion, and this isn't one.
+			cleaned = rawText;
+		} else {
+			const charBefore = pos > 0 ? editor.state.doc.textBetween(pos - 1, pos) : '';
+			const recentContext = editor.state.doc.textBetween(Math.max(0, pos - 40), pos, '\n', '\n');
+			cleaned = cleanCompletion(rawText, charBefore, recentContext, isMath);
+		}
 		if (!cleaned) return;
 		if (!isMath) {
 			const lookbackStart = Math.max(0, pos - (60 + GHOST_TEXT_REPEAT_LOOKBACK_CHARS));
 			const repeatCheckContext = editor.state.doc.textBetween(lookbackStart, pos, '\n', '\n');
 			if (isRepeatingSuggestion(repeatCheckContext, cleaned)) return;
 		}
-		editor.view.dispatch(editor.state.tr.setMeta(ghostTextPluginKey, { type: 'set', text: cleaned, from: pos }));
+		editor.view.dispatch(editor.state.tr.setMeta(ghostTextPluginKey, { type: 'set', text: cleaned, from: pos, replaceFrom }));
 	}
 
 	async function requestGhostTextSuggestion(generation: number, pos: number) {
@@ -1491,6 +1767,99 @@
 		return m[2] ? formatted : '=' + formatted;
 	}
 
+	// "@today"/"@now"/"@date"/"@time" at the cursor, resolved locally (no AI call involved) to an
+	// actual date/time and - unlike math, which appends its "=6" result after what you typed -
+	// REPLACES the trigger text itself, since a trigger word like "@today" is meant to disappear
+	// once resolved, not sit next to the date it resolved to. See acceptGhostSuggestion()'s
+	// replaceFrom handling for the other half of this. Requires a preceding boundary character (or
+	// start of block) so it never fires mid-word (e.g. an email-ish "contact@today.com" is never a
+	// match - the RE is anchored at the end of the text and "@today" there isn't followed by ".com").
+	const DATE_TRIGGER_RE = /(?:^|[\s([{])@(today|now|date|time)$/i;
+
+	/** Returns the trigger text to replace ("@today") and the resolved value to replace it with,
+	 *  or null if the text doesn't end in one of the four recognized triggers. */
+	function tryDateTimeCompletion(text: string): { trigger: string; result: string } | null {
+		const m = DATE_TRIGGER_RE.exec(text);
+		if (!m) return null;
+		const kind = m[1].toLowerCase();
+		const trigger = '@' + m[1];
+		const now = new Date();
+		const result = (kind === 'today' || kind === 'date')
+			? now.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+			: now.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+		return { trigger, result };
+	}
+
+	// Unit conversion: "10 km to miles", "5kg in lbs", "98.6 f to c" at the cursor gets an instant
+	// "= 6.21 mi" style suggestion appended after it, computed locally - same "=<result>" visual
+	// language as tryMathCompletion() above (and for the same reason: cleanCompletion() skips its
+	// leading-space logic for anything starting with "="), just with a unit label instead of a
+	// bare number. Length/mass/volume convert through a fixed ratio to a base unit; temperature
+	// needs its own formula (not a ratio from zero) and is handled separately below.
+	type UnitCategory = 'length' | 'mass' | 'volume';
+	const UNIT_ALIASES: Record<string, { category: UnitCategory; toBase: number; label: string }> = {
+		mm: { category: 'length', toBase: 0.001, label: 'mm' }, millimeter: { category: 'length', toBase: 0.001, label: 'mm' }, millimeters: { category: 'length', toBase: 0.001, label: 'mm' },
+		cm: { category: 'length', toBase: 0.01, label: 'cm' }, centimeter: { category: 'length', toBase: 0.01, label: 'cm' }, centimeters: { category: 'length', toBase: 0.01, label: 'cm' },
+		m: { category: 'length', toBase: 1, label: 'm' }, meter: { category: 'length', toBase: 1, label: 'm' }, meters: { category: 'length', toBase: 1, label: 'm' },
+		km: { category: 'length', toBase: 1000, label: 'km' }, kilometer: { category: 'length', toBase: 1000, label: 'km' }, kilometers: { category: 'length', toBase: 1000, label: 'km' },
+		in: { category: 'length', toBase: 0.0254, label: 'in' }, inch: { category: 'length', toBase: 0.0254, label: 'in' }, inches: { category: 'length', toBase: 0.0254, label: 'in' },
+		ft: { category: 'length', toBase: 0.3048, label: 'ft' }, foot: { category: 'length', toBase: 0.3048, label: 'ft' }, feet: { category: 'length', toBase: 0.3048, label: 'ft' },
+		yd: { category: 'length', toBase: 0.9144, label: 'yd' }, yard: { category: 'length', toBase: 0.9144, label: 'yd' }, yards: { category: 'length', toBase: 0.9144, label: 'yd' },
+		mi: { category: 'length', toBase: 1609.344, label: 'mi' }, mile: { category: 'length', toBase: 1609.344, label: 'mi' }, miles: { category: 'length', toBase: 1609.344, label: 'mi' },
+		mg: { category: 'mass', toBase: 0.001, label: 'mg' },
+		g: { category: 'mass', toBase: 1, label: 'g' }, gram: { category: 'mass', toBase: 1, label: 'g' }, grams: { category: 'mass', toBase: 1, label: 'g' },
+		kg: { category: 'mass', toBase: 1000, label: 'kg' }, kilogram: { category: 'mass', toBase: 1000, label: 'kg' }, kilograms: { category: 'mass', toBase: 1000, label: 'kg' },
+		oz: { category: 'mass', toBase: 28.349523125, label: 'oz' }, ounce: { category: 'mass', toBase: 28.349523125, label: 'oz' }, ounces: { category: 'mass', toBase: 28.349523125, label: 'oz' },
+		lb: { category: 'mass', toBase: 453.59237, label: 'lb' }, lbs: { category: 'mass', toBase: 453.59237, label: 'lb' }, pound: { category: 'mass', toBase: 453.59237, label: 'lb' }, pounds: { category: 'mass', toBase: 453.59237, label: 'lb' },
+		ml: { category: 'volume', toBase: 1, label: 'ml' }, milliliter: { category: 'volume', toBase: 1, label: 'ml' }, milliliters: { category: 'volume', toBase: 1, label: 'ml' },
+		l: { category: 'volume', toBase: 1000, label: 'l' }, liter: { category: 'volume', toBase: 1000, label: 'l' }, liters: { category: 'volume', toBase: 1000, label: 'l' }, litre: { category: 'volume', toBase: 1000, label: 'l' }, litres: { category: 'volume', toBase: 1000, label: 'l' },
+		tsp: { category: 'volume', toBase: 4.92892, label: 'tsp' }, teaspoon: { category: 'volume', toBase: 4.92892, label: 'tsp' }, teaspoons: { category: 'volume', toBase: 4.92892, label: 'tsp' },
+		tbsp: { category: 'volume', toBase: 14.7868, label: 'tbsp' }, tablespoon: { category: 'volume', toBase: 14.7868, label: 'tbsp' }, tablespoons: { category: 'volume', toBase: 14.7868, label: 'tbsp' },
+		cup: { category: 'volume', toBase: 236.588, label: 'cup' }, cups: { category: 'volume', toBase: 236.588, label: 'cup' },
+		floz: { category: 'volume', toBase: 29.5735, label: 'fl oz' },
+		gal: { category: 'volume', toBase: 3785.41, label: 'gal' }, gallon: { category: 'volume', toBase: 3785.41, label: 'gal' }, gallons: { category: 'volume', toBase: 3785.41, label: 'gal' },
+	};
+	const TEMP_UNITS = new Set(['c', 'celsius', '°c', 'f', 'fahrenheit', '°f', 'k', 'kelvin']);
+	const UNIT_CONVERT_RE = /(-?\d+(?:\.\d+)?)\s*([a-zA-Z°]+)\s+(?:to|in|->|as)\s+([a-zA-Z°]+)\.?$/i;
+
+	function convertTemperature(value: number, from: string, to: string): number | null {
+		const toCelsius = (v: number, unit: string): number | null => {
+			if (unit === 'c' || unit === 'celsius') return v;
+			if (unit === 'f' || unit === 'fahrenheit') return (v - 32) * 5 / 9;
+			if (unit === 'k' || unit === 'kelvin') return v - 273.15;
+			return null;
+		};
+		const celsius = toCelsius(value, from);
+		if (celsius === null) return null;
+		if (to === 'c' || to === 'celsius') return celsius;
+		if (to === 'f' || to === 'fahrenheit') return celsius * 9 / 5 + 32;
+		if (to === 'k' || to === 'kelvin') return celsius + 273.15;
+		return null;
+	}
+
+	/** Returns "= 6.21 mi" (or the temperature equivalent), or null if the text doesn't end in a
+	 *  recognized "<number> <unit> to/in <unit>" shape, either unit is unrecognized, or the two
+	 *  units aren't the same kind of thing (can't convert kg to miles). */
+	function tryUnitConversion(text: string): string | null {
+		const m = UNIT_CONVERT_RE.exec(text);
+		if (!m) return null;
+		const value = parseFloat(m[1]);
+		if (!Number.isFinite(value)) return null;
+		const fromRaw = m[2].toLowerCase();
+		const toRaw = m[3].toLowerCase();
+		if (TEMP_UNITS.has(fromRaw) && TEMP_UNITS.has(toRaw)) {
+			const normTo = toRaw.replace('°', '');
+			const result = convertTemperature(value, fromRaw.replace('°', ''), normTo);
+			if (result === null) return null;
+			return `= ${formatMathResult(result)}°${normTo.charAt(0).toUpperCase()}`;
+		}
+		const from = UNIT_ALIASES[fromRaw];
+		const to = UNIT_ALIASES[toRaw];
+		if (!from || !to || from.category !== to.category) return null;
+		const result = (value * from.toBase) / to.toBase;
+		return `= ${formatMathResult(result)} ${to.label}`;
+	}
+
 	/** Called on every editor update; debounces a ghost-text request for the current cursor
 	 *  position once typing pauses. A no-op unless at least one of the two features below is on,
 	 *  this isn't a live note, and the cursor sits at the end of a plain paragraph or heading
@@ -1498,18 +1867,18 @@
 	 *
 	 *  Two independent features share this one scheduling function, since both key off the exact
 	 *  same "cursor at the end of a textblock, pausing while typing" moment, but they're gated
-	 *  separately: a trailing math expression (math_suggestions_enabled) resolves to an instant
-	 *  local result - evalMathExpression() below, no AI provider needed or consulted at all -
-	 *  while everything else (ghost_text_enabled) is a sentence continuation that has to go
-	 *  through the configured AI provider. A math expression takes priority when both are on and
+	 *  separately: local, instant completions (math_suggestions_enabled - math, date/time
+	 *  triggers, unit conversion, all below) resolve with no AI provider needed or consulted at
+	 *  all, while everything else (ghost_text_enabled) is a sentence continuation that has to go
+	 *  through the configured AI provider. A local completion takes priority when both are on and
 	 *  the cursor happens to be positioned after one, since there's nothing an AI continuation
-	 *  could usefully add to "2+2".  */
+	 *  could usefully add to "2+2" or "@today". */
 	function scheduleGhostTextSuggestion() {
 		if (ghostTextTimer) { clearTimeout(ghostTextTimer); ghostTextTimer = null; }
 		ghostTextGeneration++;
 		const ghostTextOn = !!$appConfig?.ghost_text_enabled;
-		const mathOn = !!$appConfig?.math_suggestions_enabled;
-		if (!ghostTextOn && !mathOn) return;
+		const localSuggestionsOn = !!$appConfig?.math_suggestions_enabled;
+		if (!ghostTextOn && !localSuggestionsOn) return;
 		if (!editor || boundLiveFieldId || editor.view.composing) return;
 		const sel = editor.state.selection;
 		if (!sel.empty) return;
@@ -1520,7 +1889,17 @@
 		if (block.textContent.trim().length < 3) return;
 		const generation = ghostTextGeneration;
 		const pos = resolvedFrom.pos;
-		if (mathOn) {
+		if (localSuggestionsOn) {
+			const dateSuggestion = tryDateTimeCompletion(block.textContent);
+			if (dateSuggestion !== null) {
+				showGhostSuggestion(dateSuggestion.result, pos, generation, true, pos - dateSuggestion.trigger.length);
+				return;
+			}
+			const unitSuggestion = tryUnitConversion(block.textContent);
+			if (unitSuggestion !== null) {
+				showGhostSuggestion(unitSuggestion, pos, generation, true);
+				return;
+			}
 			const mathSuggestion = tryMathCompletion(block.textContent);
 			if (mathSuggestion !== null) {
 				showGhostSuggestion(mathSuggestion, pos, generation, true);
@@ -4804,6 +5183,9 @@
 		aiDirtyTo = null;
 		basicSpellRanges = [];
 		aiSpellRanges = [];
+		mechanicalRanges = [];
+		hoverSpellPos = null;
+		hoverSpellFlagKey = null;
 		// A right-click spell-fix menu left open from the previous note would otherwise linger
 		// with a {from, to} range into a document that's about to be replaced entirely - the
 		// onUpdate remap below would catch this too (the word can't possibly still match after a
@@ -6457,11 +6839,15 @@
 		if (spellSpan && editor && $appConfig?.spell_check_enabled) {
 			const coords = editor.view.posAtCoords({ left: event.clientX, top: event.clientY });
 			const pos = coords ? coords.pos : editor.view.posAtDOM(spellSpan, 0);
-			const hit = misspelledWordAtPos(editor.state.doc, pos);
-			if (hit) {
+			const dictHit = misspelledWordAtPos(editor.state.doc, pos);
+			const mechHit = !dictHit ? mechanicalFlagAt(editor.state.doc, pos) : null;
+			if (dictHit || mechHit) {
 				event.preventDefault();
 				event.stopPropagation();
-				const suggestions = getSuggestionsFor(hit.word, 3, hit.from);
+				const from = dictHit ? dictHit.from : mechHit!.from;
+				const to = dictHit ? dictHit.to : mechHit!.to;
+				const word = dictHit ? dictHit.word : editor.state.doc.textBetween(mechHit!.from, mechHit!.to);
+				const suggestions = dictHit ? getSuggestionsFor(dictHit.word, 3, dictHit.from) : [mechHit!.suggestion];
 				let sx = event.clientX;
 				let sy = event.clientY;
 				const menuWidth = 200;
@@ -6470,7 +6856,7 @@
 				if (sy + menuHeight > window.innerHeight) sy = window.innerHeight - menuHeight - 8;
 				if (sx < 4) sx = 4;
 				if (sy < 4) sy = 4;
-				spellContextMenu = { x: sx, y: sy, from: hit.from, to: hit.to, word: hit.word, suggestions };
+				spellContextMenu = { x: sx, y: sy, from, to, word, suggestions };
 				return;
 			}
 		}
@@ -11836,6 +12222,23 @@
 		text-underline-offset: 3px;
 	}
 
+	/* Different kinds of correction get different underline colors (item C: "multiple types of
+	   spell corrections so they aren't all the same color") - these stack on top of the base
+	   .spell-error rule above (every flagged range always carries both classes - see
+	   spellErrorClass()), so only the color needs overriding here. Plain misspellings keep the
+	   original --warning (amber) color; the three mechanical kinds each get a fixed, visually
+	   distinct color (grammar: blue, capitalization: violet, repetition: teal) rather than a
+	   theme variable, since no existing theme variable fits any of them. */
+	:global(.tiptap-wrapper .tiptap .spell-error-grammar) {
+		text-decoration-color: #3b82f6;
+	}
+	:global(.tiptap-wrapper .tiptap .spell-error-capitalization) {
+		text-decoration-color: #8b5cf6;
+	}
+	:global(.tiptap-wrapper .tiptap .spell-error-repetition) {
+		text-decoration-color: #14b8a6;
+	}
+
 	/* Zero-width, out-of-flow anchor for the active spelling suggestion's badge - `display:
 	   inline-block; width: 0` keeps it from taking any space in the text flow (so it can never
 	   glue itself into the word it's anchored to or push later text over, the way an earlier
@@ -11874,6 +12277,20 @@
 		white-space: nowrap;
 		pointer-events: none;
 		user-select: none;
+	}
+
+	/* Badge color variants matching the underline colors above. */
+	:global(.tiptap-wrapper .tiptap .spell-suggestion-badge-grammar) {
+		color: #3b82f6;
+		border-color: #3b82f6;
+	}
+	:global(.tiptap-wrapper .tiptap .spell-suggestion-badge-capitalization) {
+		color: #8b5cf6;
+		border-color: #8b5cf6;
+	}
+	:global(.tiptap-wrapper .tiptap .spell-suggestion-badge-repetition) {
+		color: #14b8a6;
+		border-color: #14b8a6;
 	}
 
 	:global(.tiptap-wrapper .tiptap > .is-empty::before) {
