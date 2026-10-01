@@ -1119,7 +1119,11 @@
 		if (spellIgnoreSet.has(lower)) return;
 
 		if (lower === 'i' && rawWord !== 'I') {
-			editor.chain().insertContentAt({ from, to }, 'I').run();
+			// updateSelection: false - this edit sits *behind* the cursor (which is already past
+			// the boundary char, e.g. the space just typed), so we want ProseMirror's default
+			// same-length step mapping to keep the cursor exactly where it was, not TipTap's normal
+			// "jump to end of inserted content" behavior (which would yank it back into the word).
+			editor.chain().insertContentAt({ from, to }, 'I', { updateSelection: false }).run();
 			return;
 		}
 
@@ -1137,7 +1141,10 @@
 			}
 		}
 		if (!atSentenceStart) return;
-		editor.chain().insertContentAt({ from, to: from + 1 }, first.toUpperCase()).run();
+		// Same reasoning as the lone-"i" branch above: keep the cursor where it already was
+		// (past the boundary char) instead of letting TipTap pull it back to right after the
+		// single capitalized letter.
+		editor.chain().insertContentAt({ from, to: from + 1 }, first.toUpperCase(), { updateSelection: false }).run();
 	}
 
 	function clearAllSpellCheck() {
