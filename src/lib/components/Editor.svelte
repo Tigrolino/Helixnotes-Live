@@ -36,7 +36,7 @@
 	import 'katex/dist/katex.min.css';
 	import { Extension, Node as TiptapNode, Mark as TiptapMark, mergeAttributes } from '@tiptap/core';
 	import { Plugin, PluginKey, EditorState, Selection, TextSelection, type Transaction } from '@tiptap/pm/state';
-	import { Decoration, DecorationSet, EditorView } from '@tiptap/pm/view';
+	import { Decoration, DecorationSet } from '@tiptap/pm/view';
 	import { DOMSerializer, Node as ProseMirrorNode } from '@tiptap/pm/model';
 	import { convertFileSrc } from '@tauri-apps/api/core';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -448,9 +448,9 @@
 	 *  text node's own starting document position; `isBlockStart` is whether this text node is
 	 *  the very first thing in its block (so position 0 counts as a sentence start too). Shared by
 	 *  the whole-document scan (collectMechanicalFlags, for the persistent underlines) and the
-	 *  single-position lookup (mechanicalFlagAt, for the right-click menu / active-fix badge /
-	 *  hover) so both agree exactly on what counts as a flag. Respects the per-note ignore list
-	 *  the same way isWordMisspelled() does. */
+	 *  single-position lookup (mechanicalFlagAt, for the right-click menu / active-fix badge) so
+	 *  both agree exactly on what counts as a flag. Respects the per-note ignore list the same way
+	 *  isWordMisspelled() does. */
 	function collectMechanicalFlagsForText(text: string, basePos: number, isBlockStart: boolean): { from: number; to: number; suggestion: string; kind: SpellErrorKind }[] {
 		const out: { from: number; to: number; suggestion: string; kind: SpellErrorKind }[] = [];
 		const taken = new Set<number>();
@@ -520,8 +520,8 @@
 	}
 
 	/** Single-position counterpart to collectMechanicalFlags(), for the right-click menu / active-
-	 *  fix badge / hover - only searches a small window around `pos` (same reasoning as
-	 *  misspelledWordAtPos below: a hit only ever matters if it's going to contain `pos` at all). */
+	 *  fix badge - only searches a small window around `pos` (same reasoning as misspelledWordAtPos
+	 *  below: a hit only ever matters if it's going to contain `pos` at all). */
 	function mechanicalFlagAt(doc: ProseMirrorNode, pos: number): { from: number; to: number; suggestion: string; kind: SpellErrorKind } | null {
 		const lo = Math.max(0, pos - 80);
 		const hi = Math.min(doc.content.size, pos + 80);
@@ -826,33 +826,6 @@
 		return { from, to, suggestion, kind: spellingKindFor(word) };
 	}
 
-	// Mouse-hover counterpart to the text-cursor-driven badge above (item E: "also if I hover over
-	// it with my actual cursor"), independent of the text cursor's own position. Lives outside
-	// EditorState (a mousemove is never itself a transaction), so it's tracked in plain variables
-	// and the hover badge is force-redrawn via updateHoverSpellPos() below rather than reacting to
-	// state changes the normal way.
-	let hoverSpellPos: number | null = null;
-	let hoverSpellFlagKey: string | null = null;
-
-	/** Called from SpellCheckPlugin's mousemove/mouseleave handlers below. hoverSpellPos lives
-	 *  outside EditorState, so a plain mousemove never makes ProseMirror call decorations() again
-	 *  on its own the way moving the text cursor does - dispatching an empty transaction forces
-	 *  that recompute. ignoreNextUpdate (the same flag/pattern already used elsewhere in this file
-	 *  for a forced redraw) keeps this dispatch from being treated like a real edit: no autosave,
-	 *  outline refresh, ghost-text request, or spell-check rescan. Only actually dispatches when
-	 *  the flagged range under the mouse changes, not on every pixel of mousemove within the same
-	 *  word (or the same empty space) - most mousemove events touch neither. */
-	function updateHoverSpellPos(pos: number | null, view: EditorView) {
-		if (!editor || editor.isDestroyed) return;
-		hoverSpellPos = pos;
-		const flag = pos !== null ? currentSpellFlagAt(view.state.doc, pos) : null;
-		const key = flag ? `${flag.from}:${flag.to}` : null;
-		if (key === hoverSpellFlagKey) return;
-		hoverSpellFlagKey = key;
-		ignoreNextUpdate = true;
-		view.dispatch(view.state.tr);
-	}
-
 	const SpellCheckPlugin = Extension.create({
 		name: 'spellCheck',
 		addProseMirrorPlugins() {
@@ -884,32 +857,25 @@
 							if (!$appConfig?.spell_check_enabled) return base;
 							if ($appConfig?.spell_suggestion_popup_enabled === false) return base;
 							const active = computeActiveSpellFix(state);
-							const hoverActive = hoverSpellPos !== null ? currentSpellFlagAt(state.doc, hoverSpellPos) : null;
-							// Don't double up a badge when the mouse happens to be hovering the exact same
-							// range the text cursor is already showing one for.
-							const showHover = !!hoverActive && (!active || hoverActive.from !== active.from || hoverActive.to !== active.to);
-							if (!active && !showHover) return base;
-							const extra: Decoration[] = [];
-							const addFixWidget = (fix: { from: number; to: number; suggestion: string; kind: SpellErrorKind }) => {
-								// Zero-width anchor so the badge floats under the word instead of pushing
-								// the rest of the line over - an earlier version used an inline widget that
-								// took up real space in the text flow and could visibly splice itself into
-								// text right next to it.
-								const anchor = document.createElement('span');
-								anchor.className = 'spell-suggestion-anchor';
-								anchor.setAttribute('contenteditable', 'false');
-								const badge = document.createElement('span');
-								badge.className = badgeClassFor(fix.kind);
-								badge.textContent = fix.suggestion;
-								anchor.appendChild(badge);
-								// Also decorate the flagged range directly, in case the debounced whole-
-								// document scan hasn't caught up to it yet - decorations don't mind the
-								// same range being added twice.
-								extra.push(Decoration.inline(fix.from, fix.to, { class: spellErrorClass(fix.kind) }));
-								extra.push(Decoration.widget(fix.to, anchor, { side: 1 }));
-							};
-							if (active) addFixWidget(active);
-							if (showHover && hoverActive) addFixWidget(hoverActive);
+							if (!active) return base;
+							// Zero-width anchor so the badge floats under the word instead of pushing
+							// the rest of the line over - an earlier version used an inline widget that
+							// took up real space in the text flow and could visibly splice itself into
+							// text right next to it.
+							const anchor = document.createElement('span');
+							anchor.className = 'spell-suggestion-anchor';
+							anchor.setAttribute('contenteditable', 'false');
+							const badge = document.createElement('span');
+							badge.className = badgeClassFor(active.kind);
+							badge.textContent = active.suggestion;
+							anchor.appendChild(badge);
+							// Also decorate the flagged range directly, in case the debounced whole-
+							// document scan hasn't caught up to it yet - decorations don't mind the
+							// same range being added twice.
+							const extra: Decoration[] = [
+								Decoration.inline(active.from, active.to, { class: spellErrorClass(active.kind) }),
+								Decoration.widget(active.to, anchor, { side: 1 }),
+							];
 							return base.add(state.doc, extra);
 						},
 						handleKeyDown(view, event) {
@@ -931,18 +897,6 @@
 							event.preventDefault();
 							editor?.chain().focus().insertContentAt({ from: active.from, to: active.to }, active.suggestion).run();
 							return true;
-						},
-						handleDOMEvents: {
-							mousemove(view, event) {
-								if (!$appConfig?.spell_check_enabled || $appConfig?.spell_suggestion_popup_enabled === false) return false;
-								const coords = view.posAtCoords({ left: (event as MouseEvent).clientX, top: (event as MouseEvent).clientY });
-								updateHoverSpellPos(coords ? coords.pos : null, view);
-								return false;
-							},
-							mouseleave(view) {
-								updateHoverSpellPos(null, view);
-								return false;
-							},
 						},
 					},
 				}),
@@ -1074,8 +1028,8 @@
 	 *  fresh from the live document rather than read from a cache - the same "never trust a
 	 *  position without reverifying at the point of use" rule this file follows everywhere else.
 	 *  Used by computeActiveSpellFix (badge + Tab-accept, item D: shows the whole time the cursor
-	 *  is anywhere over the flagged range, not just right after typing it), the right-click menu,
-	 *  and the hover badge (item E). */
+	 *  is anywhere over the flagged range, not just right after typing it) and the right-click
+	 *  menu. */
 	function currentSpellFlagAt(doc: ProseMirrorNode, pos: number): { from: number; to: number; suggestion: string; kind: SpellErrorKind } | null {
 		const dict = misspelledWordAtPos(doc, pos);
 		if (dict) {
@@ -5322,8 +5276,6 @@
 		basicSpellRanges = [];
 		aiSpellRanges = [];
 		mechanicalRanges = [];
-		hoverSpellPos = null;
-		hoverSpellFlagKey = null;
 		// A right-click spell-fix menu left open from the previous note would otherwise linger
 		// with a {from, to} range into a document that's about to be replaced entirely - the
 		// onUpdate remap below would catch this too (the word can't possibly still match after a
@@ -12420,35 +12372,25 @@
 	   on the same line, right after the word, keeps it visually anchored to the word it's
 	   actually for regardless of how much more text follows - the small negative `top` only
 	   nudges it up enough to clear the wavy underline beneath the word. */
+	/* Deliberately neutral/gray rather than a loud, kind-colored outline - the underline beneath
+	   the word already carries the kind's color, so the badge itself just needs to read as a
+	   quiet, low-key hint rather than another bright pop of color next to the text. Same flat
+	   style for every kind (spelling/grammar/capitalization/repetition) on purpose. */
 	:global(.tiptap-wrapper .tiptap .spell-suggestion-badge) {
 		position: absolute;
 		left: 2px;
 		top: -0.1em;
 		z-index: 5;
-		color: var(--warning);
-		background: var(--bg-primary);
-		border: 1px solid var(--warning);
+		color: var(--text-secondary);
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border-color);
 		border-radius: 4px;
 		padding: 1px 5px;
 		font-size: 0.8em;
-		opacity: 0.95;
+		opacity: 0.9;
 		white-space: nowrap;
 		pointer-events: none;
 		user-select: none;
-	}
-
-	/* Badge color variants matching the underline colors above. */
-	:global(.tiptap-wrapper .tiptap .spell-suggestion-badge-grammar) {
-		color: #3b82f6;
-		border-color: #3b82f6;
-	}
-	:global(.tiptap-wrapper .tiptap .spell-suggestion-badge-capitalization) {
-		color: #8b5cf6;
-		border-color: #8b5cf6;
-	}
-	:global(.tiptap-wrapper .tiptap .spell-suggestion-badge-repetition) {
-		color: #14b8a6;
-		border-color: #14b8a6;
 	}
 
 	:global(.tiptap-wrapper .tiptap > .is-empty::before) {
