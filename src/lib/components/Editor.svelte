@@ -1114,16 +1114,21 @@
 		const wordEndRel = context.length - boundaryLen;
 		const wordStartRel = wordEndRel - rawWord.length;
 		const from = lookbackStart + wordStartRel;
-		const to = lookbackStart + wordEndRel;
 		const lower = rawWord.toLowerCase();
 		if (spellIgnoreSet.has(lower)) return;
 
-		if (lower === 'i' && rawWord !== 'I') {
+		// Lone "i" ("i" -> "I") and "i"-contractions ("i'm"/"i've"/"i'll"/"i'd" -> "I'm"/"I've"/...).
+		// Both only ever touch the single leading letter, so `to` is always `from + 1` here -
+		// never the end of the whole word (which matters for the contraction case, where the word
+		// is longer than one character).
+		const isLoneI = lower === 'i' && rawWord !== 'I';
+		const isIContraction = rawWord[0] === 'i' && rawWord.length > 1 && (rawWord[1] === '\'' || rawWord[1] === '’');
+		if (isLoneI || isIContraction) {
 			// updateSelection: false - this edit sits *behind* the cursor (which is already past
 			// the boundary char, e.g. the space just typed), so we want ProseMirror's default
 			// same-length step mapping to keep the cursor exactly where it was, not TipTap's normal
 			// "jump to end of inserted content" behavior (which would yank it back into the word).
-			editor.chain().insertContentAt({ from, to }, 'I', { updateSelection: false }).run();
+			editor.chain().insertContentAt({ from, to: from + 1 }, 'I', { updateSelection: false }).run();
 			return;
 		}
 
