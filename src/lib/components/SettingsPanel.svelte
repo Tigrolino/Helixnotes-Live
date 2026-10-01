@@ -18,7 +18,7 @@
 
 	const modKey = navigator.platform.startsWith('Mac') ? '⌘' : 'Ctrl';
 
-	type Tab = 'general' | 'editor' | 'styling' | 'import' | 'backup' | 'maintenance' | 'ai' | 'sync' | 'collaboration' | 'updates';
+	type Tab = 'general' | 'editor' | 'styling' | 'import' | 'backup' | 'maintenance' | 'writing' | 'ai' | 'sync' | 'collaboration' | 'updates';
 	let activeTab = $state<Tab>('styling');
 
 	let appVersion = $state('...');
@@ -1238,6 +1238,12 @@
 						</svg>
 						Maintenance
 					</button>
+					<button class="tab-btn" class:active={activeTab === 'writing'} onclick={() => activeTab = 'writing'}>
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/>
+						</svg>
+						Writing
+					</button>
 					<button class="tab-btn" class:active={activeTab === 'ai'} onclick={() => activeTab = 'ai'}>
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 							<path d="M12 8V4l-2-2"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M9 13v2"/><path d="M15 13v2"/>
@@ -2223,37 +2229,31 @@
 							</div>
 						</div>
 
-					{:else if activeTab === 'ai'}
+					{:else if activeTab === 'writing'}
 						<div class="tab-content">
-							<div class="settings-section">
-								<h3>Provider</h3>
-								<div class="setting-options" style="flex-wrap: wrap;">
-									<button class="option-btn" class:active={!aiProvider} onclick={() => { if (!aiProvider) return; aiProvider = null; aiTestMessage = null; saveAiSettings(); }}>Disabled</button>
-									<button class="option-btn" class:active={aiProvider === 'ollama'} onclick={() => { if (aiProvider === 'ollama') return; aiProvider = 'ollama'; aiModel = 'gemma3:4b'; aiTestMessage = null; saveAiSettings(); }}>Ollama</button>
-									<button class="option-btn" class:active={aiProvider === 'anthropic'} onclick={() => { if (aiProvider === 'anthropic') return; aiProvider = 'anthropic'; aiModel = 'claude-sonnet-4-6'; aiTestMessage = null; saveAiSettings(); }}>Anthropic</button>
-									<button class="option-btn" class:active={aiProvider === 'openai'} onclick={() => { if (aiProvider === 'openai') return; aiProvider = 'openai'; aiModel = 'gpt-5.5'; aiTestMessage = null; saveAiSettings(); }}>OpenAI</button>
-									<button class="option-btn" class:active={aiProvider === 'openai_compatible'} onclick={() => { if (aiProvider === 'openai_compatible') return; aiProvider = 'openai_compatible'; aiModel = ''; aiTestMessage = null; saveAiSettings(); }}>OpenAI Compatible</button>
-								</div>
-							</div>
-
 							<div class="settings-section">
 								<h3>Spelling Corrections</h3>
 								<p class="setting-hint" style="margin-top: 0;">Underlines a misspelled word right after you type it and shows a suggested fix - press Tab to accept it, or right-click it for more options.</p>
 								<div class="setting-options">
 									<button class="option-btn" class:active={spellCheckEngine === 'off'} onclick={() => { if (spellCheckEngine === 'off') return; spellCheckEngine = 'off'; saveAiSettings(); }}>Off</button>
 									<button class="option-btn" class:active={spellCheckEngine === 'basic'} onclick={() => { if (spellCheckEngine === 'basic') return; spellCheckEngine = 'basic'; saveAiSettings(); }}>Basic (offline)</button>
-									<button class="option-btn" class:active={spellCheckEngine === 'ai'} onclick={() => { if (spellCheckEngine === 'ai') return; spellCheckEngine = 'ai'; saveAiSettings(); }}>AI-powered</button>
-									<button class="option-btn" class:active={spellCheckEngine === 'combined'} onclick={() => { if (spellCheckEngine === 'combined') return; spellCheckEngine = 'combined'; saveAiSettings(); }}>Combined</button>
+									{#if aiProvider}
+										<button class="option-btn" class:active={spellCheckEngine === 'ai'} onclick={() => { if (spellCheckEngine === 'ai') return; spellCheckEngine = 'ai'; saveAiSettings(); }}>AI-powered</button>
+										<button class="option-btn" class:active={spellCheckEngine === 'combined'} onclick={() => { if (spellCheckEngine === 'combined') return; spellCheckEngine = 'combined'; saveAiSettings(); }}>Combined</button>
+									{/if}
 								</div>
+								{#if !aiProvider}
+									<p class="setting-hint" style="margin-top: 6px;">AI-powered and Combined need an AI provider - set one up in the AI tab to unlock them.</p>
+								{/if}
 								<p class="setting-hint">
 									{#if spellCheckEngine === 'off'}
 										Spell-check is off.
 									{:else if spellCheckEngine === 'basic'}
 										Checked against a bundled offline Hunspell dictionary - the same engine Word, Chrome, and LibreOffice use - so this works with no AI provider configured at all.
 									{:else if spellCheckEngine === 'combined'}
-										The offline Hunspell dictionary catches plain misspellings on its own, reliably and for free - the AI provider above is only asked for what a dictionary can't see (wrong-but-correctly-spelled words like "its" vs. "it's", missing apostrophes, one-word grammar fixes). Needs a working AI provider configured above for that part; misspellings alone still work even if it's not.
+										The offline Hunspell dictionary catches plain misspellings on its own, reliably and for free - the AI provider is only asked for what a dictionary can't see (wrong-but-correctly-spelled words like "its" vs. "it's", missing apostrophes, one-word grammar fixes). Needs a working AI provider configured in the AI tab for that part; misspellings alone still work even if it's not.
 									{:else}
-										Sends each paragraph to your AI provider above for context-aware suggestions (catches things a plain dictionary can't, like "there" vs. "their"). Needs a working AI provider configured above, and sends your note text to it as you write.
+										Sends each paragraph to your AI provider for context-aware suggestions (catches things a plain dictionary can't, like "there" vs. "their"). Needs a working AI provider configured in the AI tab, and sends your note text to it as you write.
 									{/if}
 								</p>
 
@@ -2349,6 +2349,20 @@
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
+							</div>
+						</div>
+
+					{:else if activeTab === 'ai'}
+						<div class="tab-content">
+							<div class="settings-section">
+								<h3>Provider</h3>
+								<div class="setting-options" style="flex-wrap: wrap;">
+									<button class="option-btn" class:active={!aiProvider} onclick={() => { if (!aiProvider) return; aiProvider = null; aiTestMessage = null; saveAiSettings(); }}>Disabled</button>
+									<button class="option-btn" class:active={aiProvider === 'ollama'} onclick={() => { if (aiProvider === 'ollama') return; aiProvider = 'ollama'; aiModel = 'gemma3:4b'; aiTestMessage = null; saveAiSettings(); }}>Ollama</button>
+									<button class="option-btn" class:active={aiProvider === 'anthropic'} onclick={() => { if (aiProvider === 'anthropic') return; aiProvider = 'anthropic'; aiModel = 'claude-sonnet-4-6'; aiTestMessage = null; saveAiSettings(); }}>Anthropic</button>
+									<button class="option-btn" class:active={aiProvider === 'openai'} onclick={() => { if (aiProvider === 'openai') return; aiProvider = 'openai'; aiModel = 'gpt-5.5'; aiTestMessage = null; saveAiSettings(); }}>OpenAI</button>
+									<button class="option-btn" class:active={aiProvider === 'openai_compatible'} onclick={() => { if (aiProvider === 'openai_compatible') return; aiProvider = 'openai_compatible'; aiModel = ''; aiTestMessage = null; saveAiSettings(); }}>OpenAI Compatible</button>
+								</div>
 							</div>
 
 							{#if aiProvider}
