@@ -35,7 +35,7 @@
 	import katex from 'katex';
 	import 'katex/dist/katex.min.css';
 	import { Extension, Node as TiptapNode, Mark as TiptapMark, mergeAttributes } from '@tiptap/core';
-	import { Plugin, PluginKey, EditorState, Selection, TextSelection } from '@tiptap/pm/state';
+	import { Plugin, PluginKey, EditorState, Selection, TextSelection, type Transaction } from '@tiptap/pm/state';
 	import { Decoration, DecorationSet } from '@tiptap/pm/view';
 	import { DOMSerializer, Node as ProseMirrorNode } from '@tiptap/pm/model';
 	import { convertFileSrc } from '@tauri-apps/api/core';
@@ -402,19 +402,28 @@
 	// the AI is also told (informationally, per chunk) which words Hunspell already flagged, so
 	// it isn't re-deriving (less reliably) something already handled for free.
 
-	// AI engine's results: document position (the flagged token's own `from`) -> suggestions,
-	// built from parseSpellCheckResponse() entries (see runAiSpellScan()). Keyed by position
-	// rather than by word text: the AI's whole job in "ai"/"combined" mode is to flag a word
-	// that's wrong *for its context*, so the same spelling can legitimately need two different
-	// fixes in two different places (or need no fix at all elsewhere) - a word-text-only map
-	// collapsed all of those into one global entry, so every occurrence of a word anywhere in
-	// the note inherited whichever occurrence's suggestion was written last, including
-	// occurrences the AI never actually flagged. That's what produced suggestions that looked
-	// unrelated to the word they were shown on - the fix doesn't belong to that spot at all, it
-	// was meant for a different sentence entirely. A lookup that doesn't have the occurrence's
-	// own position (nothing else in the document needs one) simply finds nothing, rather than
-	// falling back to a possibly-mismatched guess.
-	let aiSpellSuggestions = new Map<number, string[]>();
+	// AI engine's results: document position (the flagged token's own `from`) -> {to, word,
+	// suggestions}, built from parseSpellCheckResponse() entries (see runAiSpellScan()). Keyed
+	// by position rather than by word text: the AI's whole job in "ai"/"combined" mode is to
+	// flag a word that's wrong *for its context*, so the same spelling can legitimately need two
+	// different fixes in two different places (or need no fix at all elsewhere) - a word-text-
+	// only map collapsed all of those into one global entry, so every occurrence of a word
+	// anywhere in the note inherited whichever occurrence's suggestion was written last,
+	// including occurrences the AI never actually flagged. A lookup with no matching position
+	// simply finds nothing, rather than falling back to a possibly-mismatched guess.
+	//
+	// Unlike the ProseMirror decorations (which ProseMirror itself keeps aligned with the live
+	// document via decoSet.map() on every transaction - see SpellCheckPlugin below), nothing
+	// remapped *this* map's keys across edits until now, so a position computed fresh "now" (by
+	// computeActiveSpellFix()/misspelledWordAtPos(), from the current document) would stop
+	// matching this map's keys (computed "then", from whatever the document looked like when the
+	// scan finished) the moment any edit anywhere in the note shifted later positions - the
+	// underline would still be showing (ProseMirror kept that in sync fine), but the suggestion
+	// lookup behind it would silently come back empty, which looked like "it says something's
+	// wrong but right-clicking does nothing". The onUpdate handler below now remaps this map's
+	// entries through every transaction the same way spellContextMenu already does, so it never
+	// goes stale between AI scans.
+	let aiSpellEntries = new Map<number, { to: number; word: string; suggestions: string[] }>();
 	let aiSpellTimer: ReturnType<typeof setTimeout> | null = null;
 	// Drives the bottom-right "Checking spelling..." indicator - true only while this
 	// specific (current-generation) AI request is actually in flight, not during the
@@ -430,6 +439,58 @@
 	// last completed scan (e.g. the debounce fired again after a non-text transaction).
 	let aiSpellLastScannedText: string | null = null;
 	const AI_SPELL_SCAN_DEBOUNCE_MS = 1500;
+
+	// Union of every document range edited since the last completed AI scan, kept live across
+	// edits the same way spellContextMenu/aiSpellEntries are (remapped through each transaction's
+	// mapping in onUpdate, never recomputed from scratch) and extended on every doc-changing
+	// transaction to also cover that transaction's own changed range. runAiSpellScan() uses this
+	// to resolve just the paragraph(s) touched since last time and only resend those to the AI,
+	// instead of the whole note on every pass - both because re-sending (and re-trusting a weak
+	// model to re-judge) paragraphs nothing happened to is wasted work, and because it's exactly
+	// what "fix one line and it rechecks the whole document" was complaining about. Null means
+	// "nothing pending" - either nothing has changed yet, or the last scan already consumed
+	// everything up to this point - and is also the signal runAiSpellScan() uses to fall back to
+	// scanning the whole note (first scan ever, note just loaded, engine just switched on).
+	let aiDirtyFrom: number | null = null;
+	let aiDirtyTo: number | null = null;
+
+	/** Called from onUpdate for every doc-changing transaction - keeps aiSpellEntries' positions
+	 *  (so a later lookup never goes looking at a stale offset - see that declaration above) and
+	 *  the aiDirtyFrom/aiDirtyTo range (so runAiSpellScan() knows what to resend) aligned with the
+	 *  live document, the same way ProseMirror keeps the decoration set itself aligned via
+	 *  decoSet.map(). Two independent jobs:
+	 *  (1) remap every existing entry's own position forward, or drop it if the word there no
+	 *  longer matches what was originally flagged there (typed over, deleted, ...) - the same
+	 *  "remap or drop" check the spellContextMenu block above already does for the same reason.
+	 *  (2) extend the running dirty range with whatever *this* transaction's own steps actually
+	 *  changed, composed through every later step's map in the same transaction so a multi-step
+	 *  transaction (rare - typically paste, or a single keystroke's coalesced steps) ends up
+	 *  expressed in the final document's coordinates, not some intermediate one. */
+	function trackAiSpellStateForTransaction(transaction: Transaction) {
+		if (aiSpellEntries.size && editor) {
+			const remapped = new Map<number, { to: number; word: string; suggestions: string[] }>();
+			for (const [from, entry] of aiSpellEntries) {
+				const mappedFrom = transaction.mapping.map(from, -1);
+				const mappedTo = transaction.mapping.map(entry.to, 1);
+				if (mappedFrom < mappedTo &&
+					editor.state.doc.textBetween(mappedFrom, mappedTo).toLowerCase() === entry.word.toLowerCase()) {
+					remapped.set(mappedFrom, { to: mappedTo, word: entry.word, suggestions: entry.suggestions });
+				}
+			}
+			aiSpellEntries = remapped;
+			aiSpellRanges = [...remapped.entries()].map(([from, e]) => ({ from, to: e.to }));
+		}
+		if (aiDirtyFrom !== null) aiDirtyFrom = transaction.mapping.map(aiDirtyFrom, -1);
+		if (aiDirtyTo !== null) aiDirtyTo = transaction.mapping.map(aiDirtyTo, 1);
+		transaction.mapping.maps.forEach((stepMap, i) => {
+			stepMap.forEach((_oldStart: number, _oldEnd: number, newStart: number, newEnd: number) => {
+				const mappedStart = transaction.mapping.slice(i + 1).map(newStart, -1);
+				const mappedEnd = transaction.mapping.slice(i + 1).map(newEnd, 1);
+				aiDirtyFrom = aiDirtyFrom === null ? mappedStart : Math.min(aiDirtyFrom, mappedStart);
+				aiDirtyTo = aiDirtyTo === null ? mappedEnd : Math.max(aiDirtyTo, mappedEnd);
+			});
+		});
+	}
 
 	// "combined" mode runs the Basic scan (runSpellCheckScan()) and the AI scan (runAiSpellScan())
 	// independently and concurrently - each on its own generation counter, its own debounce - so
@@ -483,13 +544,13 @@
 	function isWordMisspelled(word: string, pos?: number): boolean {
 		if (spellIgnoreSet.has(word.toLowerCase())) return false;
 		const engine = $appConfig?.spell_check_engine;
-		if (engine === 'ai') return pos !== undefined && aiSpellSuggestions.has(pos);
+		if (engine === 'ai') return pos !== undefined && aiSpellEntries.has(pos);
 		if (engine === 'combined') {
 			if (isDictionaryReady() && !isKnownWord(word)) return basicCouldFlag(word);
 			// A real dictionary word (or the dictionary isn't loaded yet) - only the AI's
 			// grammar/confused-word/contraction checking could have flagged this one, and only
 			// at the exact spot it flagged.
-			return pos !== undefined && aiSpellSuggestions.has(pos);
+			return pos !== undefined && aiSpellEntries.has(pos);
 		}
 		if (!isDictionaryReady() || !basicCouldFlag(word)) return false;
 		return !isKnownWord(word);
@@ -498,22 +559,22 @@
 	function getSuggestion(word: string, pos?: number): string | null {
 		if (spellIgnoreSet.has(word.toLowerCase())) return null;
 		const engine = $appConfig?.spell_check_engine;
-		if (engine === 'ai') return (pos !== undefined ? aiSpellSuggestions.get(pos)?.[0] : undefined) ?? null;
+		if (engine === 'ai') return (pos !== undefined ? aiSpellEntries.get(pos)?.suggestions[0] : undefined) ?? null;
 		if (engine === 'combined' && isDictionaryReady() && !isKnownWord(word)) {
 			return suggestCorrection(word);
 		}
-		if (engine === 'combined') return (pos !== undefined ? aiSpellSuggestions.get(pos)?.[0] : undefined) ?? null;
+		if (engine === 'combined') return (pos !== undefined ? aiSpellEntries.get(pos)?.suggestions[0] : undefined) ?? null;
 		return suggestCorrection(word);
 	}
 
 	function getSuggestionsFor(word: string, limit: number, pos?: number): string[] {
 		if (spellIgnoreSet.has(word.toLowerCase())) return [];
 		const engine = $appConfig?.spell_check_engine;
-		if (engine === 'ai') return (pos !== undefined ? aiSpellSuggestions.get(pos) : undefined)?.slice(0, limit) ?? [];
+		if (engine === 'ai') return (pos !== undefined ? aiSpellEntries.get(pos)?.suggestions : undefined)?.slice(0, limit) ?? [];
 		if (engine === 'combined' && isDictionaryReady() && !isKnownWord(word)) {
 			return suggestCorrections(word, limit);
 		}
-		if (engine === 'combined') return (pos !== undefined ? aiSpellSuggestions.get(pos) : undefined)?.slice(0, limit) ?? [];
+		if (engine === 'combined') return (pos !== undefined ? aiSpellEntries.get(pos)?.suggestions : undefined)?.slice(0, limit) ?? [];
 		return suggestCorrections(word, limit);
 	}
 
@@ -678,15 +739,21 @@
 	function collectSpellTokens(doc: ProseMirrorNode): {
 		promptBlocks: SpellCheckPromptBlock[];
 		tokens: { word: string; from: number; to: number; blockIndex: number }[];
+		blockSpans: { index: number; from: number; to: number }[];
 	} {
 		const promptBlocks: SpellCheckPromptBlock[] = [];
 		const tokens: { word: string; from: number; to: number; blockIndex: number }[] = [];
+		const blockSpans: { index: number; from: number; to: number }[] = [];
 		let blockIndex = -1;
 		doc.descendants((node, pos) => {
 			if (node.type.name === 'codeBlock') return false;
 			if (node.isTextblock) {
 				blockIndex++;
 				const thisBlock = blockIndex;
+				// The whole node's own span (not just its text content) - covers an empty or
+				// newly-split paragraph too, so a dirty range landing in a block with no word
+				// tokens of its own yet still resolves to a real block below rather than nothing.
+				blockSpans.push({ index: thisBlock, from: pos, to: pos + node.nodeSize });
 				let blockText = '';
 				node.forEach((child, childOffset) => {
 					if (!child.isText || !child.text) {
@@ -712,7 +779,7 @@
 			}
 			return true;
 		});
-		return { promptBlocks, tokens };
+		return { promptBlocks, tokens, blockSpans };
 	}
 
 	/** Finds the misspelled word (if any) whose range contains document position `pos` - used
@@ -936,16 +1003,64 @@
 		if (!editor || editor.isDestroyed || generation !== aiSpellGeneration) return;
 		const engine = $appConfig?.spell_check_engine;
 		const action = engine === 'combined' ? 'spell_check_combined' : 'spell_check';
-		const { promptBlocks, tokens } = collectSpellTokens(editor.state.doc);
-		const fullText = promptBlocks.map((b) => b.text).join('\n');
+		const { promptBlocks: allPromptBlocks, tokens, blockSpans } = collectSpellTokens(editor.state.doc);
+		const fullText = allPromptBlocks.map((b) => b.text).join('\n');
 		if (!fullText.trim()) {
-			aiSpellSuggestions = new Map();
+			aiSpellEntries = new Map();
 			aiSpellLastScannedText = fullText;
 			aiSpellRanges = [];
+			aiDirtyFrom = null;
+			aiDirtyTo = null;
 			dispatchSpellDecorations();
 			return;
 		}
-		if (fullText === aiSpellLastScannedText) return;
+		if (fullText === aiSpellLastScannedText) {
+			aiDirtyFrom = null;
+			aiDirtyTo = null;
+			return;
+		}
+
+		// Snapshot and clear the dirty range immediately, before the first await below - an edit
+		// landing while this scan is in flight starts accumulating a fresh range of its own (via
+		// onUpdate), rather than being folded into this scan's already-in-progress range and then
+		// erased out from under it when this scan finishes.
+		const dirtyFrom = aiDirtyFrom;
+		const dirtyTo = aiDirtyTo;
+		aiDirtyFrom = null;
+		aiDirtyTo = null;
+
+		// A known dirty range (and a previous scan to narrow against - the very first scan of a
+		// freshly loaded note, or the first since switching the engine on, has nothing to narrow
+		// against and always does the whole note) means only the paragraph(s) actually touched
+		// since last time need to go back to the AI. Every other entry already has a correct,
+		// live-remapped position (onUpdate keeps aiSpellEntries in sync with the document on every
+		// transaction - see its declaration above) and is carried over untouched rather than
+		// being re-derived - this is what makes "fix one line" recheck just that line instead of
+		// resending (and re-trusting a weak model to re-judge) the whole note every time.
+		let promptBlocks = allPromptBlocks;
+		let carriedEntries: [number, { to: number; word: string; suggestions: string[] }][] = [];
+		if (dirtyFrom !== null && dirtyTo !== null && aiSpellLastScannedText !== null) {
+			const dirtyBlockIndexes = new Set(
+				blockSpans.filter((b) => b.to >= dirtyFrom && b.from <= dirtyTo).map((b) => b.index),
+			);
+			promptBlocks = allPromptBlocks.filter((b) => dirtyBlockIndexes.has(b.index));
+			// An entry belonging to a block about to be rescanned is dropped - that rescan is
+			// authoritative for its own block, even where it finds nothing wrong anymore. Every
+			// entry whose block isn't being rescanned (or whose block can no longer be found at
+			// all, which shouldn't happen but is treated the same as "not in the dirty set" rather
+			// than crashing) passes through unchanged.
+			carriedEntries = [...aiSpellEntries].filter(([from]) => {
+				const span = blockSpans.find((b) => from >= b.from && from < b.to);
+				return !span || !dirtyBlockIndexes.has(span.index);
+			});
+			if (!promptBlocks.length) {
+				// The edit landed somewhere with no actual paragraph content (pure whitespace, or
+				// a block collectSpellTokens skips) - nothing new to ask the AI, but still record
+				// the new baseline text so the next edit's unchanged-text fast path stays accurate.
+				aiSpellLastScannedText = fullText;
+				return;
+			}
+		}
 
 		// Group consecutive paragraphs into chunks under the char budget - always at least one
 		// block per chunk even if that single block alone is over budget (an oversized paragraph
@@ -966,11 +1081,13 @@
 
 		aiSpellScanInFlight = true;
 		// Keyed by each matched occurrence's own position, not by word text - see the comment
-		// on the `aiSpellSuggestions` declaration above for why: an entry only ever applies to
-		// the specific token(s) that earned it (same block, same word), never to every spot in
-		// the document where that spelling happens to appear.
-		const suggestions = new Map<number, string[]>();
-		const ranges: { from: number; to: number }[] = [];
+		// on the `aiSpellEntries` declaration above for why: an entry only ever applies to the
+		// specific token(s) that earned it (same block, same word), never to every spot in the
+		// document where that spelling happens to appear. Seeded with whatever survived from the
+		// previous scan untouched (see carriedEntries above), so a partial rescan never has to
+		// momentarily forget what it already knew about the rest of the note.
+		const suggestions = new Map<number, { to: number; word: string; suggestions: string[] }>(carriedEntries);
+		const ranges: { from: number; to: number }[] = carriedEntries.map(([from, e]) => ({ from, to: e.to }));
 		try {
 			for (let c = 0; c < chunks.length; c++) {
 				if (generation !== aiSpellGeneration || !editor || editor.isDestroyed) return;
@@ -989,15 +1106,15 @@
 					for (const token of tokens) {
 						if (token.blockIndex === entry.block && token.word.toLowerCase() === lowerWord) {
 							ranges.push({ from: token.from, to: token.to });
-							suggestions.set(token.from, entry.suggestions);
+							suggestions.set(token.from, { to: token.to, word: token.word, suggestions: entry.suggestions });
 						}
 					}
 				}
-				// Paint results as each chunk finishes rather than waiting for the whole note -
+				// Paint results as each chunk finishes rather than waiting for the whole scan -
 				// a copy of the accumulated (never replaced) maps/arrays so an earlier chunk's
 				// underlines stay up while a later chunk is still in flight, and so the note
 				// isn't left showing nothing at all for the full duration of a long scan.
-				aiSpellSuggestions = new Map(suggestions);
+				aiSpellEntries = new Map(suggestions);
 				aiSpellRanges = [...ranges];
 				dispatchSpellDecorations();
 			}
@@ -4668,9 +4785,11 @@
 		loadedPath = path;
 		refreshSpellIgnoreSet(path);
 		aiSpellGeneration++;
-		aiSpellSuggestions = new Map();
+		aiSpellEntries = new Map();
 		aiSpellLastScannedText = null;
 		aiSpellScanInFlight = false;
+		aiDirtyFrom = null;
+		aiDirtyTo = null;
 		basicSpellRanges = [];
 		aiSpellRanges = [];
 		// A right-click spell-fix menu left open from the previous note would otherwise linger
@@ -6087,6 +6206,7 @@
 				if (!isMobile && showOutline) scheduleOutline();
 				if (showInfo) scheduleCounts();
 				scheduleGhostTextSuggestion();
+				if (transaction.docChanged) trackAiSpellStateForTransaction(transaction);
 				scheduleSpellCheckScan();
 			},
 		});
