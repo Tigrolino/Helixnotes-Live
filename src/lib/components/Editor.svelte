@@ -58,7 +58,7 @@
 	import { clearFormatting } from '$lib/editor/clearFormatting';
 	import { serializeInlineMarkdown } from '$lib/editor/markdown';
 	import { restoreTitleHeading, stripTitleHeading, type HiddenTitleHeading } from '$lib/editor/titleVisibility';
-	import { loadDictionary, isDictionaryReady, isKnownWord, suggestCorrection, suggestCorrections } from '$lib/editor/spellcheck';
+	import { loadDictionary, isDictionaryReady, isKnownWord, suggestCorrections } from '$lib/editor/spellcheck';
 	import { buildSpellCheckPrompt, parseSpellCheckResponse, type SpellCheckPromptBlock, type SpellCheckEntry } from '$lib/editor/aiSpellCheck';
 	import { tagIterationKey } from '$lib/utils/tag-styles';
 	import { replaceWithWikiLink } from '$lib/editor/wikiLinks';
@@ -522,16 +522,18 @@
 	/** Single-position counterpart to collectMechanicalFlags(), for the right-click menu / active-
 	 *  fix badge - only searches a small window around `pos` (same reasoning as misspelledWordAtPos
 	 *  below: a hit only ever matters if it's going to contain `pos` at all). */
-	function mechanicalFlagAt(doc: ProseMirrorNode, pos: number): { from: number; to: number; suggestion: string; kind: SpellErrorKind } | null {
+	function mechanicalFlagAt(doc: ProseMirrorNode, pos: number): { from: number; to: number; suggestion: string; suggestions: string[]; kind: SpellErrorKind } | null {
 		const lo = Math.max(0, pos - 80);
 		const hi = Math.min(doc.content.size, pos + 80);
-		let found: { from: number; to: number; suggestion: string; kind: SpellErrorKind } | null = null;
+		let found: { from: number; to: number; suggestion: string; suggestions: string[]; kind: SpellErrorKind } | null = null;
 		doc.nodesBetween(lo, hi, (node, nodePos) => {
 			if (found || node.type.name === 'codeBlock') return false;
 			if (!node.isText || !node.text) return true;
 			const isBlockStart = doc.resolve(nodePos).start() === nodePos;
 			for (const f of collectMechanicalFlagsForText(node.text, nodePos, isBlockStart)) {
-				if (pos >= f.from && pos <= f.to) { found = f; break; }
+				// A mechanical check only ever has the one fixed-form correction - unlike a real
+				// misspelling, there's no second-guess candidate to offer alongside it.
+				if (pos >= f.from && pos <= f.to) { found = { ...f, suggestions: [f.suggestion] }; break; }
 			}
 			return true;
 		});
@@ -562,8 +564,8 @@
 	// the whole-document scan, the right-click menu): "basic" (spellcheck.ts, offline via
 	// nspell), "ai" (this block, routed through the configured AI provider), and "combined"
 	// (both at once - see below). Everything else in this file calls
-	// isWordMisspelled()/getSuggestion()/getSuggestionsFor() rather than either engine directly,
-	// so it doesn't need to know which is active.
+	// isWordMisspelled()/getSuggestionsFor() rather than either engine directly, so it doesn't
+	// need to know which is active.
 	//
 	// "combined" mode's division of labor: Hunspell reliably owns any word it doesn't recognize
 	// at all (a plain misspelling - that's exactly what a dictionary lookup is for), and the AI
@@ -737,17 +739,6 @@
 		return !isKnownWord(word);
 	}
 
-	function getSuggestion(word: string, pos?: number): string | null {
-		if (spellIgnoreSet.has(word.toLowerCase())) return null;
-		const engine = $appConfig?.spell_check_engine;
-		if (engine === 'ai') return (pos !== undefined ? aiSpellEntries.get(pos)?.suggestions[0] : undefined) ?? null;
-		if (engine === 'combined' && isDictionaryReady() && !isKnownWord(word)) {
-			return suggestCorrection(word);
-		}
-		if (engine === 'combined') return (pos !== undefined ? aiSpellEntries.get(pos)?.suggestions[0] : undefined) ?? null;
-		return suggestCorrection(word);
-	}
-
 	function getSuggestionsFor(word: string, limit: number, pos?: number): string[] {
 		if (spellIgnoreSet.has(word.toLowerCase())) return [];
 		const engine = $appConfig?.spell_check_engine;
@@ -774,7 +765,7 @@
 	 *      after it) that the debounced scan hasn't caught up to yet - dictionary/AI engines only;
 	 *      the mechanical checks are already always fresh (mechanicalFlagAt recomputes on every
 	 *      call), so they have nothing to catch up on and are fully covered by path 1. */
-	function computeActiveSpellFix(state: EditorState): { from: number; to: number; suggestion: string; kind: SpellErrorKind } | null {
+	function computeActiveSpellFix(state: EditorState): { from: number; to: number; suggestion: string; suggestions: string[]; kind: SpellErrorKind } | null {
 		if (!$appConfig?.spell_check_enabled) return null;
 		// "Suggestion popup while typing" (Settings) - off still leaves the underlines themselves
 		// on (those come from dispatchSpellDecorations/mechanicalRanges/basicSpellRanges/
@@ -821,10 +812,18 @@
 		const wordStartRel = wordEndRel - word.length;
 		const from = lookbackStart + wordStartRel;
 		const to = lookbackStart + wordEndRel;
-		const suggestion = getSuggestion(word, from);
-		if (!suggestion) return null;
-		return { from, to, suggestion, kind: spellingKindFor(word) };
+		const suggestions = getSuggestionsFor(word, 3, from);
+		if (!suggestions.length) return null;
+		return { from, to, suggestion: suggestions[0], suggestions, kind: spellingKindFor(word) };
 	}
+
+	// Which of the active fix's up-to-3 suggestions the floating badge is currently showing -
+	// plain variables rather than EditorState, since this is pure display state with no effect on
+	// the document (same reasoning hoverSpellPos used to follow before it was removed). Keyed by
+	// the flagged range's own {from, to} and reset to 0 whenever that range changes, so scrolling
+	// through one word's options never carries over to the next word the cursor lands on.
+	let activeFixKey: string | null = null;
+	let activeFixSelectedIndex = 0;
 
 	const SpellCheckPlugin = Extension.create({
 		name: 'spellCheck',
@@ -858,6 +857,15 @@
 							if ($appConfig?.spell_suggestion_popup_enabled === false) return base;
 							const active = computeActiveSpellFix(state);
 							if (!active) return base;
+							// A new flagged range (a different word, or the same word at a shifted
+							// position) always starts back at its own best (first) suggestion.
+							const key = `${active.from}:${active.to}`;
+							if (key !== activeFixKey) {
+								activeFixKey = key;
+								activeFixSelectedIndex = 0;
+							}
+							const idx = Math.min(activeFixSelectedIndex, active.suggestions.length - 1);
+							const shown = active.suggestions[idx] ?? active.suggestion;
 							// Zero-width anchor so the badge floats under the word instead of pushing
 							// the rest of the line over - an earlier version used an inline widget that
 							// took up real space in the text flow and could visibly splice itself into
@@ -867,7 +875,28 @@
 							anchor.setAttribute('contenteditable', 'false');
 							const badge = document.createElement('span');
 							badge.className = badgeClassFor(active.kind);
-							badge.textContent = active.suggestion;
+							badge.textContent = shown;
+							// More than one candidate: show a small count and let the mouse wheel cycle
+							// through them while hovering the badge (arrow keys stay reserved for real
+							// cursor/line navigation here - only the right-click menu, which isn't
+							// mid-typing, claims those).
+							if (active.suggestions.length > 1) {
+								badge.classList.add('spell-suggestion-badge-multi');
+								badge.title = 'Scroll to see other suggestions';
+								const count = document.createElement('span');
+								count.className = 'spell-suggestion-badge-count';
+								count.textContent = `${idx + 1}/${active.suggestions.length}`;
+								badge.appendChild(count);
+								badge.addEventListener('wheel', (event) => {
+									event.preventDefault();
+									event.stopPropagation();
+									if (!editor || editor.isDestroyed) return;
+									const n = active.suggestions.length;
+									activeFixSelectedIndex = ((idx + (event.deltaY > 0 ? 1 : -1)) % n + n) % n;
+									ignoreNextUpdate = true;
+									editor.view.dispatch(editor.view.state.tr);
+								}, { passive: false });
+							}
 							anchor.appendChild(badge);
 							// Also decorate the flagged range directly, in case the debounced whole-
 							// document scan hasn't caught up to it yet - decorations don't mind the
@@ -895,7 +924,13 @@
 							const active = computeActiveSpellFix(view.state);
 							if (!active) return false;
 							event.preventDefault();
-							editor?.chain().focus().insertContentAt({ from: active.from, to: active.to }, active.suggestion).run();
+							// Accept whichever suggestion the badge is actually showing right now (the
+							// user may have scrolled past suggestions[0] via the wheel), not always the
+							// first/best guess.
+							const key = `${active.from}:${active.to}`;
+							const idx = key === activeFixKey ? Math.min(activeFixSelectedIndex, active.suggestions.length - 1) : 0;
+							const chosen = active.suggestions[idx] ?? active.suggestion;
+							editor?.chain().focus().insertContentAt({ from: active.from, to: active.to }, chosen).run();
 							return true;
 						},
 					},
@@ -1030,11 +1065,13 @@
 	 *  Used by computeActiveSpellFix (badge + Tab-accept, item D: shows the whole time the cursor
 	 *  is anywhere over the flagged range, not just right after typing it) and the right-click
 	 *  menu. */
-	function currentSpellFlagAt(doc: ProseMirrorNode, pos: number): { from: number; to: number; suggestion: string; kind: SpellErrorKind } | null {
+	function currentSpellFlagAt(doc: ProseMirrorNode, pos: number): { from: number; to: number; suggestion: string; suggestions: string[]; kind: SpellErrorKind } | null {
 		const dict = misspelledWordAtPos(doc, pos);
 		if (dict) {
-			const suggestion = getSuggestion(dict.word, dict.from);
-			if (suggestion) return { from: dict.from, to: dict.to, suggestion, kind: spellingKindFor(dict.word) };
+			const suggestions = getSuggestionsFor(dict.word, 3, dict.from);
+			if (suggestions.length) {
+				return { from: dict.from, to: dict.to, suggestion: suggestions[0], suggestions, kind: spellingKindFor(dict.word) };
+			}
 		}
 		return mechanicalFlagAt(doc, pos);
 	}
@@ -5276,6 +5313,8 @@
 		basicSpellRanges = [];
 		aiSpellRanges = [];
 		mechanicalRanges = [];
+		activeFixKey = null;
+		activeFixSelectedIndex = 0;
 		// A right-click spell-fix menu left open from the previous note would otherwise linger
 		// with a {from, to} range into a document that's about to be replaced entirely - the
 		// onUpdate remap below would catch this too (the word can't possibly still match after a
@@ -12381,6 +12420,9 @@
 		left: 2px;
 		top: -0.1em;
 		z-index: 5;
+		display: flex;
+		align-items: center;
+		gap: 5px;
 		color: var(--text-secondary);
 		background: var(--bg-tertiary);
 		border: 1px solid var(--border-color);
@@ -12391,6 +12433,21 @@
 		white-space: nowrap;
 		pointer-events: none;
 		user-select: none;
+	}
+
+	/* More than one candidate: the badge becomes a small interactive target (pointer-events:
+	   auto, just for its own small area) so the mouse wheel can cycle through suggestions while
+	   hovering it, without turning the rest of the text underneath unclickable. */
+	:global(.tiptap-wrapper .tiptap .spell-suggestion-badge-multi) {
+		pointer-events: auto;
+		cursor: ns-resize;
+	}
+
+	:global(.tiptap-wrapper .tiptap .spell-suggestion-badge-count) {
+		color: var(--text-tertiary);
+		font-size: 0.85em;
+		border-left: 1px solid var(--border-color);
+		padding-left: 5px;
 	}
 
 	:global(.tiptap-wrapper .tiptap > .is-empty::before) {
