@@ -444,6 +444,31 @@
 	const SENTENCE_BOUNDARY_RE = /[.!?](?:["')\]]*)\s+/g;
 	const REPEATED_WORD_RE = /\b([A-Za-z'’]+)([ \t]+)\1\b/gi;
 
+	/** Auto-Capitalize's other half (see runAutoCapitalize()): common contractions typed without
+	 *  their apostrophe, lowercase-typed-form -> correctly-apostrophized form. Deliberately only
+	 *  the ones that are NOT also a real standalone English word (checked against the bundled
+	 *  dictionary, not just by eye - "cant" and "wont" look safe but are real words too: "thieves'
+	 *  cant", "as is his wont") - "im", "dont", "youre" have no legitimate other meaning, so fixing
+	 *  them is always safe regardless of context. Words left OUT on purpose because they're
+	 *  genuinely ambiguous without reading the rest of the sentence (exactly the kind of judgment
+	 *  call left to the AI grammar engine, never guessed at here): "its"/"it's", "lets"/"let's",
+	 *  "well"/"we'll", "ill"/"I'll", "hell"/"he'll", "shell"/"she'll", "wed"/"we'd", "id"/"I'd",
+	 *  "cant"/"can't", "wont"/"won't", "whats"/"what's". Each value is written in its own correct
+	 *  casing already ("I'm", never "i'm") since "I"-contractions always capitalize regardless of
+	 *  sentence position - runAutoCapitalize() only additionally capitalizes the first letter when
+	 *  the word is at a sentence start, which for an already-capital "I'm" is a no-op. */
+	const MISSING_APOSTROPHE_FIXES: Record<string, string> = {
+		im: "I'm", ive: "I've",
+		dont: "don't", shant: "shan't", neednt: "needn't", mustnt: "mustn't",
+		isnt: "isn't", arent: "aren't", wasnt: "wasn't", werent: "weren't",
+		hasnt: "hasn't", havent: "haven't", hadnt: "hadn't", doesnt: "doesn't", didnt: "didn't",
+		couldnt: "couldn't", wouldnt: "wouldn't", shouldnt: "shouldn't",
+		youre: "you're", theyre: "they're", weve: "we've", youve: "you've", theyve: "they've",
+		youll: "you'll", theyll: "they'll", youd: "you'd", theyd: "they'd",
+		whos: "who's", thats: "that's", heres: "here's", theres: "there's",
+		aint: "ain't",
+	};
+
 	/** Runs all three mechanical checks over a single text node's own text. `basePos` is that
 	 *  text node's own starting document position; `isBlockStart` is whether this text node is
 	 *  the very first thing in its block (so position 0 counts as a sentence start too). Shared by
@@ -1076,8 +1101,25 @@
 		return mechanicalFlagAt(doc, pos);
 	}
 
+	/** Whether the word starting at `from` (in `doc`, whose enclosing block starts at `blockStart`)
+	 *  sits at a sentence start: either the very beginning of its block, or immediately after what
+	 *  looks like a sentence boundary in the text just before it. Shared by runAutoCapitalize()'s
+	 *  plain-capitalization fix and its missing-apostrophe fix below - both need the same answer
+	 *  to the same question ("does this word's first letter need to be a capital here"). */
+	function isAtSentenceStart(doc: ProseMirrorNode, blockStart: number, from: number): boolean {
+		if (from === blockStart) return true;
+		const beforeWord = doc.textBetween(Math.max(blockStart, from - 20), from, '\n', '\n');
+		SENTENCE_BOUNDARY_RE.lastIndex = 0;
+		let bm: RegExpExecArray | null;
+		while ((bm = SENTENCE_BOUNDARY_RE.exec(beforeWord)) !== null) {
+			if (bm.index + bm[0].length === beforeWord.length) return true;
+		}
+		return false;
+	}
+
 	/** Auto-Capitalize (Settings) - a separate, independent setting from Spelling Corrections
-	 *  above: it fixes a standalone "i" and a lowercase sentence-start word IN PLACE as you type,
+	 *  above: it fixes a standalone "i", a lowercase sentence-start word, and an unambiguous
+	 *  missing-apostrophe contraction (MISSING_APOSTROPHE_FIXES above) IN PLACE as you type,
 	 *  rather than just flagging them, and works even with spell-check turned off entirely (it's
 	 *  not gated on spell_check_enabled at all - this is an autocorrect, not a spell-check
 	 *  feature). Called from onUpdate for every doc-changing transaction.
@@ -1123,20 +1165,26 @@
 			return;
 		}
 
+		// Missing-apostrophe contractions ("dont" -> "don't", "im" -> "I'm", ...) - a whole-word
+		// swap rather than the single-letter edits above, but the same updateSelection: false
+		// reasoning still applies (and still holds even though this one changes the word's length:
+		// ProseMirror's default step-mapped selection follows an insert/delete correctly on its
+		// own - updateSelection: true is what would override that with "jump to the end", which is
+		// what we're avoiding). Re-capitalized below (not baked into the map) if this word also
+		// turns out to be at a sentence start.
+		const apostropheFix = MISSING_APOSTROPHE_FIXES[lower];
+		if (apostropheFix !== undefined) {
+			const to = from + rawWord.length;
+			const replacement = isAtSentenceStart(doc, blockStart, from)
+				? apostropheFix[0].toUpperCase() + apostropheFix.slice(1)
+				: apostropheFix;
+			editor.chain().insertContentAt({ from, to }, replacement, { updateSelection: false }).run();
+			return;
+		}
+
 		const first = rawWord[0];
 		if (!/[a-z]/.test(first)) return;
-		// Sentence start: either the very beginning of this block, or immediately after what
-		// looks like a sentence boundary in the text just before this word.
-		let atSentenceStart = from === blockStart;
-		if (!atSentenceStart) {
-			const beforeWord = doc.textBetween(Math.max(blockStart, from - 20), from, '\n', '\n');
-			SENTENCE_BOUNDARY_RE.lastIndex = 0;
-			let bm: RegExpExecArray | null;
-			while ((bm = SENTENCE_BOUNDARY_RE.exec(beforeWord)) !== null) {
-				if (bm.index + bm[0].length === beforeWord.length) { atSentenceStart = true; break; }
-			}
-		}
-		if (!atSentenceStart) return;
+		if (!isAtSentenceStart(doc, blockStart, from)) return;
 		// Same reasoning as the lone-"i" branch above: keep the cursor where it already was
 		// (past the boundary char) instead of letting TipTap pull it back to right after the
 		// single capitalized letter.
