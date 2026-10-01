@@ -2233,7 +2233,7 @@
 						<div class="tab-content">
 							<div class="settings-section">
 								<h3>Spelling Corrections</h3>
-								<p class="setting-hint" style="margin-top: 0;">Underlines misspelled words as you type. Press Tab to accept the suggested fix, or right-click for more options.</p>
+								<p class="setting-hint" style="margin-top: 0;">Underlines misspelled words and suggests fixes as you type</p>
 								<div class="setting-options">
 									<button class="option-btn" class:active={spellCheckEngine === 'off'} onclick={() => { if (spellCheckEngine === 'off') return; spellCheckEngine = 'off'; saveAiSettings(); }}>Off</button>
 									<button class="option-btn" class:active={spellCheckEngine === 'basic'} onclick={() => { if (spellCheckEngine === 'basic') return; spellCheckEngine = 'basic'; saveAiSettings(); }}>Basic (offline)</button>
@@ -2243,17 +2243,17 @@
 									{/if}
 								</div>
 								{#if !aiProvider}
-									<p class="setting-hint" style="margin-top: 6px;">AI-powered and Combined require an AI provider. Set one up in the AI tab to unlock them.</p>
+									<p class="setting-hint" style="margin-top: 6px;">Requires an AI provider - set one up in the AI tab</p>
 								{/if}
 								<p class="setting-hint">
 									{#if spellCheckEngine === 'off'}
-										Spell-check is off.
+										Spell-check is off
 									{:else if spellCheckEngine === 'basic'}
-										Checks against an offline Hunspell dictionary, the same engine used by Word, Chrome, and LibreOffice. No AI provider required.
+										Offline dictionary check, the same engine as Word and Chrome
 									{:else if spellCheckEngine === 'combined'}
-										Catches plain misspellings offline with the Hunspell dictionary, and sends anything context-dependent (like "its" vs. "it's") to your AI provider. Misspellings are still caught even without one configured.
+										Offline dictionary, plus AI for context-dependent mistakes
 									{:else}
-										Sends each paragraph to your AI provider for context-aware suggestions, like catching "there" vs. "their". Requires an AI provider, and sends your note text to it as you write.
+										AI-powered, context-aware suggestions
 									{/if}
 								</p>
 
@@ -2262,13 +2262,13 @@
 										<label class="setting-toggle compact">
 											<span class="setting-label">
 												<span class="setting-name">Suggestion popup while typing</span>
-												<span class="setting-desc">A floating badge with a suggested fix, accepted with Tab. Turning this off keeps the underlines, just without the popup.</span>
+												<span class="setting-desc">A floating fix suggestion, accepted with Tab</span>
 											</span>
 											<button class="toggle-switch" class:on={spellSuggestionPopupEnabled} role="switch" aria-checked={spellSuggestionPopupEnabled} aria-label="Suggestion popup while typing" onclick={() => { spellSuggestionPopupEnabled = !spellSuggestionPopupEnabled; saveAiSettings(); }}>
 												<span class="toggle-knob"></span>
 											</button>
 										</label>
-										<p class="setting-hint" style="margin-top: 4px;">These run locally alongside any engine above, including Basic, catching what a dictionary alone can't:</p>
+										<p class="setting-hint" style="margin-top: 4px;">Additional local checks:</p>
 										<label class="setting-toggle compact">
 											<span class="setting-label">
 												<span class="setting-name">Grammar (standalone "i" → "I")</span>
@@ -2310,8 +2310,8 @@
 								<label class="setting-toggle">
 									<span class="setting-label">
 										<span class="setting-name">Automatically fix capitalization as you type</span>
-										<span class="setting-desc">Fixes capitalization and common contractions in place as you type - no Tab needed. Covers a standalone "i", the start of a sentence, missing apostrophes (dont &rarr; don't), and common first names. Words with an ambiguous meaning of their own (its, cant, well, john, and similar) are left alone.</span>
-										<span class="setting-desc" style="margin-top: 4px; display: block;">Works independently of Spelling Corrections above, even when that's off.</span>
+										<span class="setting-desc">Fixes capitalization, contractions, and names as you type - no Tab needed</span>
+										<span class="setting-desc" style="margin-top: 4px; display: block;">Works even with Spelling Corrections off</span>
 									</span>
 									<button class="toggle-switch" class:on={autoCapitalizeEnabled} role="switch" aria-checked={autoCapitalizeEnabled} aria-label="Automatically fix capitalization as you type" onclick={() => { autoCapitalizeEnabled = !autoCapitalizeEnabled; saveAiSettings(); }}>
 										<span class="toggle-knob"></span>
@@ -2321,11 +2321,11 @@
 
 							<div class="settings-section">
 								<h3>Quick Suggestions</h3>
-								<p class="setting-hint" style="margin-top: 0;">Instant, local completions - press Tab to accept. No AI provider required.</p>
+								<p class="setting-hint" style="margin-top: 0;">Instant local completions, accepted with Tab</p>
 								<label class="setting-toggle compact">
 									<span class="setting-label">
 										<span class="setting-name">Math</span>
-										<span class="setting-desc">Finish typing an expression like "12*7" and it suggests "=84" right after it.</span>
+										<span class="setting-desc">Finish an expression like "12*7" to get "=84"</span>
 									</span>
 									<button class="toggle-switch" class:on={mathSuggestionsEnabled} role="switch" aria-checked={mathSuggestionsEnabled} aria-label="Suggest math results as you type" onclick={() => { mathSuggestionsEnabled = !mathSuggestionsEnabled; saveAiSettings(); }}>
 										<span class="toggle-knob"></span>
@@ -2334,7 +2334,7 @@
 								<label class="setting-toggle compact">
 									<span class="setting-label">
 										<span class="setting-name">Date & time</span>
-										<span class="setting-desc">Type "@today", "@now", "@date", or "@time" and it suggests today's date or the current time in its place.</span>
+										<span class="setting-desc">Type "@today", "@now", "@date", or "@time" for the current date or time</span>
 									</span>
 									<button class="toggle-switch" class:on={dateTimeSuggestionsEnabled} role="switch" aria-checked={dateTimeSuggestionsEnabled} aria-label="Suggest date and time for @today/@now triggers" onclick={() => { dateTimeSuggestionsEnabled = !dateTimeSuggestionsEnabled; saveAiSettings(); }}>
 										<span class="toggle-knob"></span>
@@ -2343,7 +2343,7 @@
 								<label class="setting-toggle compact">
 									<span class="setting-label">
 										<span class="setting-name">Unit conversion</span>
-										<span class="setting-desc">Type "10 km to miles" and it suggests "= 6.21 mi" right after it.</span>
+										<span class="setting-desc">Type "10 km to miles" to get "= 6.21 mi"</span>
 									</span>
 									<button class="toggle-switch" class:on={unitConversionSuggestionsEnabled} role="switch" aria-checked={unitConversionSuggestionsEnabled} aria-label="Suggest unit conversions as you type" onclick={() => { unitConversionSuggestionsEnabled = !unitConversionSuggestionsEnabled; saveAiSettings(); }}>
 										<span class="toggle-knob"></span>
@@ -2512,7 +2512,7 @@
 									<label class="setting-toggle">
 										<span class="setting-label">
 											<span class="setting-name">Suggest as you type</span>
-											<span class="setting-desc">Previews how your sentence might continue. Press Tab to accept, or keep typing to ignore it. Uses your AI provider above, sending a short snippet of text around your cursor as you pause.</span>
+											<span class="setting-desc">Previews how your sentence might continue, accepted with Tab (uses your AI provider above)</span>
 										</span>
 										<button class="toggle-switch" class:on={ghostTextEnabled} role="switch" aria-checked={ghostTextEnabled} aria-label="Suggest as you type" onclick={() => { ghostTextEnabled = !ghostTextEnabled; saveAiSettings(); }}>
 											<span class="toggle-knob"></span>
@@ -2523,7 +2523,7 @@
 										<button class="option-btn" class:active={ghostTextMaxWords === 2} onclick={() => { if (ghostTextMaxWords === 2) return; ghostTextMaxWords = 2; saveAiSettings(); }}>2 words</button>
 										<button class="option-btn" class:active={ghostTextMaxWords === 3} onclick={() => { if (ghostTextMaxWords === 3) return; ghostTextMaxWords = 3; saveAiSettings(); }}>3 words</button>
 									</div>
-									<p class="setting-hint">Sets how much of the suggestion each Tab press fills in. Lower feels more like typing it yourself; higher fills in more per press.</p>
+									<p class="setting-hint">How much of the suggestion each Tab press fills in</p>
 								</div>
 
 								<div class="settings-section">
