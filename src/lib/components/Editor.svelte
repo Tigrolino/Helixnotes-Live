@@ -383,11 +383,24 @@
 
 	// ── Spell-check engine dispatch ──
 	//
-	// Two engines share the rest of this file's spell-check machinery (computeActiveSpellFix,
+	// Three engines share the rest of this file's spell-check machinery (computeActiveSpellFix,
 	// the whole-document scan, the right-click menu): "basic" (spellcheck.ts, offline via
-	// nspell) and "ai" (this block, routed through the configured AI provider). Everything else
-	// in this file calls isWordMisspelled()/getSuggestion()/getSuggestionsFor() rather than
-	// either engine directly, so it doesn't need to know which one is active.
+	// nspell), "ai" (this block, routed through the configured AI provider), and "combined"
+	// (both at once - see below). Everything else in this file calls
+	// isWordMisspelled()/getSuggestion()/getSuggestionsFor() rather than either engine directly,
+	// so it doesn't need to know which is active.
+	//
+	// "combined" mode's division of labor: Hunspell reliably owns any word it doesn't recognize
+	// at all (a plain misspelling - that's exactly what a dictionary lookup is for), and the AI
+	// is asked a deliberately narrower question than in "ai" mode - not "what's wrong with this
+	// note", but "what's wrong that a dictionary lookup can't see" (a real, correctly-spelled
+	// word used wrong for its context - grammar, confused words, missing apostrophes). A given
+	// word is routed to exactly one of the two based on Hunspell's own verdict on it
+	// (isKnownWord()), so the two can never both claim ownership of the same word and disagree -
+	// unknown-to-the-dictionary words are Basic's call end to end (detection AND suggestion),
+	// known-but-wrong words are the AI's. See runAiSpellScan()'s combined-mode branch for how
+	// the AI is also told (informationally, per chunk) which words Hunspell already flagged, so
+	// it isn't re-deriving (less reliably) something already handled for free.
 
 	// AI engine's results: lowercased word -> suggestion, built from parseSpellCheckResponse()
 	// entries (see runAiSpellScan()). Flat rather than per-paragraph - the same word spelled
@@ -411,31 +424,82 @@
 	let aiSpellLastScannedText: string | null = null;
 	const AI_SPELL_SCAN_DEBOUNCE_MS = 1500;
 
+	// "combined" mode runs the Basic scan (runSpellCheckScan()) and the AI scan (runAiSpellScan())
+	// independently and concurrently - each on its own generation counter, its own debounce - so
+	// neither has to wait on the other. Both dispatch decorations through the same
+	// spellCheckPluginKey, which replaces its whole decoration set on every 'setErrors' meta
+	// (see SpellCheckPlugin below), so if each scan dispatched its own ranges directly, whichever
+	// one finished later would wipe out the other's underlines. These two arrays hold each scan's
+	// latest result, and dispatchSpellDecorations() unions them into one dispatch - called by
+	// both scans after every update, so a scan finishing later only ever adds to what's showing,
+	// never erases the other scan's results.
+	let basicSpellRanges: { from: number; to: number }[] = [];
+	let aiSpellRanges: { from: number; to: number }[] = [];
+
+	function dispatchSpellDecorations() {
+		if (!editor || editor.isDestroyed) return;
+		const engine = $appConfig?.spell_check_engine;
+		let ranges: { from: number; to: number }[];
+		if (engine === 'combined') {
+			// Expected to rarely overlap in practice - Basic only ever contributes unknown-to-
+			// the-dictionary words and the AI is told not to re-flag those - but de-dup
+			// defensively by exact range in case they ever do.
+			const seen = new Set<string>();
+			ranges = [];
+			for (const r of [...basicSpellRanges, ...aiSpellRanges]) {
+				const key = `${r.from}:${r.to}`;
+				if (seen.has(key)) continue;
+				seen.add(key);
+				ranges.push(r);
+			}
+		} else if (engine === 'ai') {
+			ranges = aiSpellRanges;
+		} else {
+			ranges = basicSpellRanges;
+		}
+		editor.view.dispatch(editor.state.tr.setMeta(spellCheckPluginKey, { type: 'setErrors', ranges }));
+	}
+
+	// Same guards suggestCorrection()/suggestCorrections() apply (too short to bother the user
+	// over, or ALL CAPS and almost always an acronym) - kept in sync so a word never shows
+	// underlined by the whole-document scan without Basic actually having a fix to offer for it.
+	function basicCouldFlag(word: string): boolean {
+		return word.length >= 3 && !/^[A-Z]+$/.test(word);
+	}
+
 	function isWordMisspelled(word: string): boolean {
 		if (spellIgnoreSet.has(word.toLowerCase())) return false;
-		if ($appConfig?.spell_check_engine === 'ai') {
+		const engine = $appConfig?.spell_check_engine;
+		if (engine === 'ai') return aiSpellSuggestions.has(word.toLowerCase());
+		if (engine === 'combined') {
+			if (isDictionaryReady() && !isKnownWord(word)) return basicCouldFlag(word);
+			// A real dictionary word (or the dictionary isn't loaded yet) - only the AI's
+			// grammar/confused-word/contraction checking could have flagged this one.
 			return aiSpellSuggestions.has(word.toLowerCase());
 		}
-		// Same guards suggestCorrection() applies (too short to bother the user over, or ALL
-		// CAPS and almost always an acronym) - kept in sync so a word never shows underlined by
-		// the whole-document scan without getSuggestion() actually having a fix to offer for it.
-		if (!isDictionaryReady() || word.length < 3 || /^[A-Z]+$/.test(word)) return false;
+		if (!isDictionaryReady() || !basicCouldFlag(word)) return false;
 		return !isKnownWord(word);
 	}
 
 	function getSuggestion(word: string): string | null {
 		if (spellIgnoreSet.has(word.toLowerCase())) return null;
-		if ($appConfig?.spell_check_engine === 'ai') {
-			return aiSpellSuggestions.get(word.toLowerCase())?.[0] ?? null;
+		const engine = $appConfig?.spell_check_engine;
+		if (engine === 'ai') return aiSpellSuggestions.get(word.toLowerCase())?.[0] ?? null;
+		if (engine === 'combined' && isDictionaryReady() && !isKnownWord(word)) {
+			return suggestCorrection(word);
 		}
+		if (engine === 'combined') return aiSpellSuggestions.get(word.toLowerCase())?.[0] ?? null;
 		return suggestCorrection(word);
 	}
 
 	function getSuggestionsFor(word: string, limit: number): string[] {
 		if (spellIgnoreSet.has(word.toLowerCase())) return [];
-		if ($appConfig?.spell_check_engine === 'ai') {
-			return (aiSpellSuggestions.get(word.toLowerCase()) ?? []).slice(0, limit);
+		const engine = $appConfig?.spell_check_engine;
+		if (engine === 'ai') return (aiSpellSuggestions.get(word.toLowerCase()) ?? []).slice(0, limit);
+		if (engine === 'combined' && isDictionaryReady() && !isKnownWord(word)) {
+			return suggestCorrections(word, limit);
 		}
+		if (engine === 'combined') return (aiSpellSuggestions.get(word.toLowerCase()) ?? []).slice(0, limit);
 		return suggestCorrections(word, limit);
 	}
 
@@ -664,6 +728,8 @@
 	}
 
 	function clearAllSpellCheck() {
+		basicSpellRanges = [];
+		aiSpellRanges = [];
 		if (editor && !editor.isDestroyed) {
 			editor.view.dispatch(editor.state.tr.setMeta(spellCheckPluginKey, { type: 'clear' }));
 		}
@@ -673,8 +739,14 @@
 
 	async function runSpellCheckScan() {
 		if (!editor || editor.isDestroyed || boundLiveFieldId) return;
-		if (!$appConfig?.spell_check_enabled || $appConfig.spell_check_engine === 'ai' || !isDictionaryReady()) {
-			clearAllSpellCheck();
+		const engine = $appConfig?.spell_check_engine;
+		if (!$appConfig?.spell_check_enabled || engine === 'ai' || !isDictionaryReady()) {
+			// For 'ai' mode specifically this also clears the AI side - for 'combined' or
+			// 'basic', spell-check being off or the dictionary not being ready yet means Basic
+			// has nothing to contribute, but doesn't touch whatever the AI side has already
+			// found (clearAllSpellCheck() is the only thing that resets both at once).
+			basicSpellRanges = [];
+			dispatchSpellDecorations();
 			return;
 		}
 		// A very large note (isLargeDoc, >100k characters - the same threshold the math-block
@@ -700,14 +772,18 @@
 			if (i < tokens.length) await new Promise((resolve) => setTimeout(resolve, 0));
 			if (generation !== spellScanGeneration || !editor || editor.isDestroyed) return;
 		}
-		editor.view.dispatch(editor.state.tr.setMeta(spellCheckPluginKey, { type: 'setErrors', ranges }));
+		basicSpellRanges = ranges;
+		dispatchSpellDecorations();
 	}
 
 	/** Debounced whole-document spelling scan, like a word processor's background spellcheck -
 	 *  underlines every misspelled word in the note, not just the one at the cursor. Called on
 	 *  every editor update (debounced so fast typing doesn't re-walk the whole document on every
 	 *  keystroke) and once immediately whenever a note finishes loading or the dictionary finishes
-	 *  loading, so underlines are already there instead of only appearing once you start typing. */
+	 *  loading, so underlines are already there instead of only appearing once you start typing.
+	 *  'combined' mode runs both the Basic scan below and the AI scan (scheduleAiSpellScan()) -
+	 *  independently and concurrently, each on its own debounce/generation - since they can never
+	 *  claim the same word (see the engine-dispatch comment above isWordMisspelled()). */
 	function scheduleSpellCheckScan() {
 		if (spellCheckScanTimer) { clearTimeout(spellCheckScanTimer); spellCheckScanTimer = null; }
 		// Bumped unconditionally (even if this call is about to return early below) so an
@@ -716,10 +792,9 @@
 		spellScanGeneration++;
 		if (!editor || editor.isDestroyed || boundLiveFieldId) return;
 		if (!$appConfig?.spell_check_enabled) return;
-		if ($appConfig.spell_check_engine === 'ai') {
-			scheduleAiSpellScan();
-			return;
-		}
+		const engine = $appConfig.spell_check_engine;
+		if (engine === 'ai' || engine === 'combined') scheduleAiSpellScan();
+		if (engine === 'ai') return;
 		spellCheckScanTimer = setTimeout(() => {
 			spellCheckScanTimer = null;
 			runSpellCheckScan();
@@ -734,7 +809,8 @@
 		if (aiSpellTimer) { clearTimeout(aiSpellTimer); aiSpellTimer = null; }
 		aiSpellGeneration++;
 		if (!editor || editor.isDestroyed || boundLiveFieldId) return;
-		if (!$appConfig?.spell_check_enabled || $appConfig.spell_check_engine !== 'ai') return;
+		const engine = $appConfig?.spell_check_engine;
+		if (!$appConfig?.spell_check_enabled || (engine !== 'ai' && engine !== 'combined')) return;
 		if (!$appConfig?.ai_provider) return;
 		if (isLargeDoc) return;
 		const generation = aiSpellGeneration;
@@ -762,6 +838,7 @@
 	 *  failure here previously looked identical to "the AI found nothing", which is exactly what
 	 *  made the max_tokens regression invisible. */
 	async function requestSpellCheckChunk(
+		action: string,
 		prompt: string,
 		chunkLabel: string,
 	): Promise<SpellCheckEntry[]> {
@@ -807,7 +884,7 @@
 				if (settled) { fn(); return; }
 				unlisten = fn;
 			});
-			aiAsk('spell_check', prompt, null, requestId, 4096).catch(() => {
+			aiAsk(action, prompt, null, requestId, 4096).catch(() => {
 				// Silent by design, same as ghost-text - a missing/misconfigured AI provider
 				// shouldn't interrupt typing or show an error where an underline would go.
 				finish([]);
@@ -815,14 +892,43 @@
 		});
 	}
 
+	/** Combined mode only: the words Hunspell already flagged within one chunk's blocks, as a
+	 *  short informational list to prepend to that chunk's prompt - see the "spell_check_combined"
+	 *  system prompt (commands.rs) for how the model is told to use it (don't re-report these;
+	 *  find what's wrong with everything else instead). Telling the model what's already handled,
+	 *  rather than just asking it not to flag misspellings in the abstract, measurably reduces a
+	 *  weaker model re-deriving (less reliably) something Hunspell already got right for free. */
+	function alreadyFlaggedWordsForChunk(
+		chunkBlocks: SpellCheckPromptBlock[],
+		tokens: { word: string; from: number; to: number; blockIndex: number }[],
+	): string[] {
+		if (!isDictionaryReady()) return [];
+		const blockIndexes = new Set(chunkBlocks.map((b) => b.index));
+		const seen = new Set<string>();
+		const words: string[] = [];
+		for (const token of tokens) {
+			if (!blockIndexes.has(token.blockIndex)) continue;
+			if (!basicCouldFlag(token.word)) continue;
+			if (isKnownWord(token.word)) continue;
+			const lower = token.word.toLowerCase();
+			if (seen.has(lower)) continue;
+			seen.add(lower);
+			words.push(token.word);
+		}
+		return words;
+	}
+
 	async function runAiSpellScan(generation: number) {
 		if (!editor || editor.isDestroyed || generation !== aiSpellGeneration) return;
+		const engine = $appConfig?.spell_check_engine;
+		const action = engine === 'combined' ? 'spell_check_combined' : 'spell_check';
 		const { promptBlocks, tokens } = collectSpellTokens(editor.state.doc);
 		const fullText = promptBlocks.map((b) => b.text).join('\n');
 		if (!fullText.trim()) {
 			aiSpellSuggestions = new Map();
 			aiSpellLastScannedText = fullText;
-			editor.view.dispatch(editor.state.tr.setMeta(spellCheckPluginKey, { type: 'setErrors', ranges: [] }));
+			aiSpellRanges = [];
+			dispatchSpellDecorations();
 			return;
 		}
 		if (fullText === aiSpellLastScannedText) return;
@@ -850,8 +956,14 @@
 		try {
 			for (let c = 0; c < chunks.length; c++) {
 				if (generation !== aiSpellGeneration || !editor || editor.isDestroyed) return;
-				const prompt = buildSpellCheckPrompt(chunks[c]);
-				const entries = await requestSpellCheckChunk(prompt, `chunk ${c + 1}/${chunks.length}`);
+				let prompt = buildSpellCheckPrompt(chunks[c]);
+				if (engine === 'combined') {
+					const already = alreadyFlaggedWordsForChunk(chunks[c], tokens);
+					if (already.length) {
+						prompt = `Already flagged as misspelled by a separate dictionary checker (do not report these - they're already handled): ${already.join(', ')}\n\n${prompt}`;
+					}
+				}
+				const entries = await requestSpellCheckChunk(action, prompt, `chunk ${c + 1}/${chunks.length}`);
 				if (generation !== aiSpellGeneration || !editor || editor.isDestroyed) return;
 				for (const entry of entries) {
 					const lowerWord = entry.word.toLowerCase();
@@ -868,7 +980,8 @@
 				// underlines stay up while a later chunk is still in flight, and so the note
 				// isn't left showing nothing at all for the full duration of a long scan.
 				aiSpellSuggestions = new Map(suggestions);
-				editor.view.dispatch(editor.state.tr.setMeta(spellCheckPluginKey, { type: 'setErrors', ranges: [...ranges] }));
+				aiSpellRanges = [...ranges];
+				dispatchSpellDecorations();
 			}
 			aiSpellLastScannedText = fullText;
 		} finally {
@@ -4540,6 +4653,8 @@
 		aiSpellSuggestions = new Map();
 		aiSpellLastScannedText = null;
 		aiSpellScanInFlight = false;
+		basicSpellRanges = [];
+		aiSpellRanges = [];
 		// A right-click spell-fix menu left open from the previous note would otherwise linger
 		// with a {from, to} range into a document that's about to be replaced entirely - the
 		// onUpdate remap below would catch this too (the word can't possibly still match after a

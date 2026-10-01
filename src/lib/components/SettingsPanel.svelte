@@ -2377,12 +2377,15 @@
 										<button class="option-btn" class:active={spellCheckEngine === 'off'} onclick={() => { if (spellCheckEngine === 'off') return; spellCheckEngine = 'off'; saveAiSettings(); }}>Off</button>
 										<button class="option-btn" class:active={spellCheckEngine === 'basic'} onclick={() => { if (spellCheckEngine === 'basic') return; spellCheckEngine = 'basic'; saveAiSettings(); }}>Basic (offline)</button>
 										<button class="option-btn" class:active={spellCheckEngine === 'ai'} onclick={() => { if (spellCheckEngine === 'ai') return; spellCheckEngine = 'ai'; saveAiSettings(); }}>AI-powered</button>
+										<button class="option-btn" class:active={spellCheckEngine === 'combined'} onclick={() => { if (spellCheckEngine === 'combined') return; spellCheckEngine = 'combined'; saveAiSettings(); }}>Combined</button>
 									</div>
 									<p class="setting-hint">
 										{#if spellCheckEngine === 'off'}
 											Spell-check is off.
 										{:else if spellCheckEngine === 'basic'}
 											Checked against a bundled offline Hunspell dictionary - the same engine Word, Chrome, and LibreOffice use - so this works with no AI provider configured at all.
+										{:else if spellCheckEngine === 'combined'}
+											The offline Hunspell dictionary catches plain misspellings on its own, reliably and for free - the AI provider above is only asked for what a dictionary can't see (wrong-but-correctly-spelled words like "its" vs. "it's", missing apostrophes, one-word grammar fixes). Needs a working AI provider configured above for that part; misspellings alone still work even if it's not.
 										{:else}
 											Sends each paragraph to your AI provider above for context-aware suggestions (catches things a plain dictionary can't, like "there" vs. "their"). Needs a working AI provider configured above, and sends your note text to it as you write.
 										{/if}

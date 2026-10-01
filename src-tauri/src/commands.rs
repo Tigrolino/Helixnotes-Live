@@ -2431,10 +2431,12 @@ pub fn set_ai_settings(
     config.ghost_text_enabled = ghost_text_enabled;
     config.ghost_text_max_words = ghost_text_max_words.clamp(1, 3);
     config.spell_check_enabled = spell_check_enabled;
-    // Anything other than the one alternate engine falls back to "basic" - never persist a
+    // Anything other than the known alternate engines falls back to "basic" - never persist a
     // typo'd or future/unknown engine name that the frontend then can't match on.
     config.spell_check_engine = if spell_check_engine == "ai" {
         "ai".to_string()
+    } else if spell_check_engine == "combined" {
+        "combined".to_string()
     } else {
         "basic".to_string()
     };
@@ -2792,6 +2794,72 @@ pub fn ai_ask(
             balanced and properly closed: \
             [{\"block\": 0, \"word\": \"teh\", \"suggestions\": [\"the\", \"ten\", \"tea\"]}, \
             {\"block\": 2, \"word\": \"dont\", \"suggestions\": [\"don't\"]}, ...]. If a \
+            paragraph has no problems, omit it from the array - if nothing is wrong anywhere in \
+            the whole list, respond with exactly: []"
+            .to_string();
+        crate::ai::ai_request(
+            app,
+            provider,
+            api_key,
+            model,
+            system_prompt,
+            text,
+            request_id,
+            base_url,
+            max_tokens.unwrap_or(4096),
+            false,
+        );
+        return Ok(());
+    }
+
+    // "Combined" engine mode: a separate offline dictionary checker (Hunspell, via nspell) is
+    // already running locally and reliably owns plain misspellings - this prompt is deliberately
+    // narrower than the "spell_check" one above, asking the AI for only what a dictionary lookup
+    // structurally cannot see (a word can be spelled perfectly and still be the wrong word).
+    // Narrowing the task like this isn't just tidier division of labor - a smaller/weaker model
+    // asked to do five different kinds of analysis across a whole note at once (as the plain
+    // "spell_check" prompt does) was observed, in live testing, to be unreliable in ways a
+    // narrower, single-purpose task may not be: abandoning the task to summarize content instead,
+    // or re-deriving (with mediocre accuracy) misspellings a dictionary already gets right for
+    // free. The user message may be prefixed with a line listing words a separate checker already
+    // flagged in that chunk - purely informational, telling the model what it doesn't need to
+    // re-derive, never a position or a claim about where in the text it occurs.
+    if action == "spell_check_combined" {
+        let system_prompt = "You are a proofreading engine inside a note-taking app called \
+            HelixNotes, working alongside a separate offline dictionary spell-checker that \
+            already reliably catches plain misspellings and typos on its own. Your job is \
+            narrower and different: find problems a dictionary lookup cannot see, because \
+            every word involved is already a real, correctly-spelled word - the dictionary has \
+            nothing to flag, but the word is still wrong for its context. You will be given a \
+            numbered list of paragraphs from a user's note, one per line, formatted as \
+            \"<number>: <paragraph text>\" - occasionally preceded by one line naming words the \
+            dictionary checker already flagged in that text (informational only - never \
+            report those words again, they're already handled elsewhere). Go through EVERY \
+            paragraph and catch every one of the following that you find: \
+            (1) commonly confused words that are real, correctly-spelled words but wrong for \
+            the context, e.g. \"its\" vs \"it's\", \"their\"/\"there\"/\"they're\", \
+            \"your\"/\"you're\", \"then\"/\"than\"; \
+            (2) missing apostrophes in contractions, e.g. \"dont\" -> \"don't\", \"isnt\" -> \
+            \"isn't\", \"cant\" -> \"can't\", \"youre\" -> \"you're\", \"theyre\" -> \"they're\", \
+            \"shouldnt\" -> \"shouldn't\", \"whats\" -> \"what's\"; \
+            (3) grammar mistakes fixable by changing one real word to another real word, e.g. \
+            subject-verb agreement (\"This sentence are\" -> \"is\", \"I has\" -> \"have\", \
+            \"We was\" -> \"were\", \"the deadline were\" -> \"was\"); \
+            (4) a word accidentally typed twice in a row (\"the the\", \"is is\"). \
+            Do NOT flag a word just because it looks unusual, uncommon, or like it might be \
+            misspelled - that is the dictionary checker's job, not yours, and flagging it here \
+            would just be a wrong or duplicate report. Do NOT flag: technical terms, code \
+            identifiers, proper nouns, names, URLs, or a homophone that's actually correct in \
+            context. Be thorough - check every paragraph independently, finding a problem in \
+            one is not a reason to stop or skip the rest. For each problem found, report the \
+            paragraph number it came from, the exact wrong word as it appears in the text \
+            (always a single, real, correctly-spelled word), and up to 3 single-word \
+            corrections, best guess first. Respond with ONLY a JSON array, no markdown code \
+            fences, no commentary, and never truncate the list. Use plain straight \
+            double-quote characters (\") for every JSON string - never curly or smart quotes \
+            (\u{201c} \u{201d}) - and make sure the array's own brackets are balanced and \
+            properly closed: [{\"block\": 2, \"word\": \"dont\", \"suggestions\": [\"don't\"]}, \
+            {\"block\": 5, \"word\": \"was\", \"suggestions\": [\"were\"]}, ...]. If a \
             paragraph has no problems, omit it from the array - if nothing is wrong anywhere in \
             the whole list, respond with exactly: []"
             .to_string();
