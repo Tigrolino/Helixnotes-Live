@@ -407,6 +407,15 @@
 		return kind === 'spelling' ? 'spell-suggestion-badge' : `spell-suggestion-badge spell-suggestion-badge-${kind}`;
 	}
 
+	function kindLabel(kind: SpellErrorKind): string {
+		switch (kind) {
+			case 'grammar': return 'Grammar';
+			case 'capitalization': return 'Capitalization';
+			case 'repetition': return 'Repetition';
+			default: return 'Spelling';
+		}
+	}
+
 	/** Which SpellErrorKind a dictionary/AI hit at `pos` for `word` should be colored as - mirrors
 	 *  isWordMisspelled()'s own engine branching exactly (see the comment on SpellErrorKind above
 	 *  for why 'combined' mode's AI half is always 'grammar') rather than guessing after the fact,
@@ -445,38 +454,50 @@
 	function collectMechanicalFlagsForText(text: string, basePos: number, isBlockStart: boolean): { from: number; to: number; suggestion: string; kind: SpellErrorKind }[] {
 		const out: { from: number; to: number; suggestion: string; kind: SpellErrorKind }[] = [];
 		const taken = new Set<number>();
+		// Each of the three checks below is independently toggleable in Settings (Spelling
+		// Corrections) - defaulting to on (!== false) so an older/partial config that predates
+		// these fields behaves the same as before they existed.
+		const grammarOn = $appConfig?.spell_check_grammar_enabled !== false;
+		const capitalizationOn = $appConfig?.spell_check_capitalization_enabled !== false;
+		const repetitionOn = $appConfig?.spell_check_repetition_enabled !== false;
 
-		LONE_I_RE.lastIndex = 0;
 		let m: RegExpExecArray | null;
-		while ((m = LONE_I_RE.exec(text)) !== null) {
-			if (spellIgnoreSet.has('i')) continue;
-			const from = basePos + m.index;
-			out.push({ from, to: from + 1, suggestion: 'I', kind: 'grammar' });
-			taken.add(from);
+		if (grammarOn) {
+			LONE_I_RE.lastIndex = 0;
+			while ((m = LONE_I_RE.exec(text)) !== null) {
+				if (spellIgnoreSet.has('i')) continue;
+				const from = basePos + m.index;
+				out.push({ from, to: from + 1, suggestion: 'I', kind: 'grammar' });
+				taken.add(from);
+			}
 		}
 
-		REPEATED_WORD_RE.lastIndex = 0;
-		while ((m = REPEATED_WORD_RE.exec(text)) !== null) {
-			if (spellIgnoreSet.has(m[0].toLowerCase())) continue;
-			const from = basePos + m.index;
-			out.push({ from, to: from + m[0].length, suggestion: m[1], kind: 'repetition' });
+		if (repetitionOn) {
+			REPEATED_WORD_RE.lastIndex = 0;
+			while ((m = REPEATED_WORD_RE.exec(text)) !== null) {
+				if (spellIgnoreSet.has(m[0].toLowerCase())) continue;
+				const from = basePos + m.index;
+				out.push({ from, to: from + m[0].length, suggestion: m[1], kind: 'repetition' });
+			}
 		}
 
-		const starts: number[] = [];
-		if (isBlockStart) starts.push(0);
-		SENTENCE_BOUNDARY_RE.lastIndex = 0;
-		while ((m = SENTENCE_BOUNDARY_RE.exec(text)) !== null) starts.push(m.index + m[0].length);
-		for (const start of starts) {
-			const wordMatch = /^[A-Za-z']+/.exec(text.slice(start));
-			if (!wordMatch) continue;
-			const word = wordMatch[0];
-			const first = word[0];
-			if (!/[a-z]/.test(first)) continue;
-			if (word.toLowerCase() === 'i') continue; // the lone-"i" check above already owns this one
-			if (spellIgnoreSet.has(word.toLowerCase())) continue;
-			const from = basePos + start;
-			if (taken.has(from)) continue;
-			out.push({ from, to: from + word.length, suggestion: first.toUpperCase() + word.slice(1), kind: 'capitalization' });
+		if (capitalizationOn) {
+			const starts: number[] = [];
+			if (isBlockStart) starts.push(0);
+			SENTENCE_BOUNDARY_RE.lastIndex = 0;
+			while ((m = SENTENCE_BOUNDARY_RE.exec(text)) !== null) starts.push(m.index + m[0].length);
+			for (const start of starts) {
+				const wordMatch = /^[A-Za-z']+/.exec(text.slice(start));
+				if (!wordMatch) continue;
+				const word = wordMatch[0];
+				const first = word[0];
+				if (!/[a-z]/.test(first)) continue;
+				if (word.toLowerCase() === 'i') continue; // the lone-"i" check above already owns this one
+				if (spellIgnoreSet.has(word.toLowerCase())) continue;
+				const from = basePos + start;
+				if (taken.has(from)) continue;
+				out.push({ from, to: from + word.length, suggestion: first.toUpperCase() + word.slice(1), kind: 'capitalization' });
+			}
 		}
 		return out;
 	}
@@ -755,6 +776,12 @@
 	 *      call), so they have nothing to catch up on and are fully covered by path 1. */
 	function computeActiveSpellFix(state: EditorState): { from: number; to: number; suggestion: string; kind: SpellErrorKind } | null {
 		if (!$appConfig?.spell_check_enabled) return null;
+		// "Suggestion popup while typing" (Settings) - off still leaves the underlines themselves
+		// on (those come from dispatchSpellDecorations/mechanicalRanges/basicSpellRanges/
+		// aiSpellRanges, a separate path from this function), just without the floating badge or
+		// Tab-accept, since showing neither visual cue but still responding to Tab would be a
+		// confusing half-off state.
+		if ($appConfig?.spell_suggestion_popup_enabled === false) return null;
 		const sel = state.selection;
 		if (!sel.empty) return null;
 		const pos = sel.from;
@@ -855,6 +882,7 @@
 							const decoSet = spellCheckPluginKey.getState(state) as DecorationSet | undefined;
 							const base = decoSet ?? DecorationSet.empty;
 							if (!$appConfig?.spell_check_enabled) return base;
+							if ($appConfig?.spell_suggestion_popup_enabled === false) return base;
 							const active = computeActiveSpellFix(state);
 							const hoverActive = hoverSpellPos !== null ? currentSpellFlagAt(state.doc, hoverSpellPos) : null;
 							// Don't double up a badge when the mouse happens to be hovering the exact same
@@ -885,6 +913,16 @@
 							return base.add(state.doc, extra);
 						},
 						handleKeyDown(view, event) {
+							// The right-click suggestion menu is a plain positioned div, not something
+							// focus ever moves into, so its up/down/Enter/Escape navigation is handled
+							// here (where focus actually still is) rather than on the menu's own DOM
+							// node - see moveSpellSuggestion()/applySelectedSpellSuggestion().
+							if (spellContextMenu) {
+								if (event.key === 'ArrowDown') { event.preventDefault(); moveSpellSuggestion(1); return true; }
+								if (event.key === 'ArrowUp') { event.preventDefault(); moveSpellSuggestion(-1); return true; }
+								if (event.key === 'Enter') { event.preventDefault(); applySelectedSpellSuggestion(); return true; }
+								if (event.key === 'Escape') { event.preventDefault(); closeSpellContextMenu(); return true; }
+							}
 							if (event.key !== 'Tab' || event.shiftKey || event.altKey || event.metaKey || event.ctrlKey) return false;
 							// Defer to an autocomplete popup that's already claiming Tab for itself.
 							if (slashMenu || wikiLinkMenu || taskMetaMenu) return false;
@@ -896,7 +934,7 @@
 						},
 						handleDOMEvents: {
 							mousemove(view, event) {
-								if (!$appConfig?.spell_check_enabled) return false;
+								if (!$appConfig?.spell_check_enabled || $appConfig?.spell_suggestion_popup_enabled === false) return false;
 								const coords = view.posAtCoords({ left: (event as MouseEvent).clientX, top: (event as MouseEvent).clientY });
 								updateHoverSpellPos(coords ? coords.pos : null, view);
 								return false;
@@ -1045,6 +1083,61 @@
 			if (suggestion) return { from: dict.from, to: dict.to, suggestion, kind: spellingKindFor(dict.word) };
 		}
 		return mechanicalFlagAt(doc, pos);
+	}
+
+	/** Auto-Capitalize (Settings) - a separate, independent setting from Spelling Corrections
+	 *  above: it fixes a standalone "i" and a lowercase sentence-start word IN PLACE as you type,
+	 *  rather than just flagging them, and works even with spell-check turned off entirely (it's
+	 *  not gated on spell_check_enabled at all - this is an autocorrect, not a spell-check
+	 *  feature). Called from onUpdate for every doc-changing transaction.
+	 *
+	 *  Deliberately waits for a word to be *finished* (a boundary character typed right after it,
+	 *  same SPELL_CHECK_BOUNDARY_RE moment computeActiveSpellFix's fallback uses) before fixing it
+	 *  - firing the instant the first letter goes down (the way the advisory capitalization
+	 *  underline does, which is harmless since nothing there is auto-applied) would wrongly "fix"
+	 *  a legitimately-capitalized word still being typed one letter at a time (an "iPhone" typed
+	 *  as i-P-h-o-n-e would get auto-capped to "IPhone" the instant the "i" went down). */
+	function runAutoCapitalize() {
+		if (!editor || editor.isDestroyed || boundLiveFieldId || editor.view.composing) return;
+		if (!$appConfig?.auto_capitalize_enabled) return;
+		const sel = editor.state.selection;
+		if (!sel.empty) return;
+		const pos = sel.from;
+		const doc = editor.state.doc;
+		const blockStart = doc.resolve(pos).start();
+		const lookbackStart = Math.max(blockStart, pos - SPELL_CHECK_LOOKBACK_CHARS);
+		const context = doc.textBetween(lookbackStart, pos, '\n', '\n');
+		const m = context.match(SPELL_CHECK_BOUNDARY_RE);
+		if (!m) return;
+		const rawWord = m[1];
+		const boundaryLen = m[2].length;
+		const wordEndRel = context.length - boundaryLen;
+		const wordStartRel = wordEndRel - rawWord.length;
+		const from = lookbackStart + wordStartRel;
+		const to = lookbackStart + wordEndRel;
+		const lower = rawWord.toLowerCase();
+		if (spellIgnoreSet.has(lower)) return;
+
+		if (lower === 'i' && rawWord !== 'I') {
+			editor.chain().insertContentAt({ from, to }, 'I').run();
+			return;
+		}
+
+		const first = rawWord[0];
+		if (!/[a-z]/.test(first)) return;
+		// Sentence start: either the very beginning of this block, or immediately after what
+		// looks like a sentence boundary in the text just before this word.
+		let atSentenceStart = from === blockStart;
+		if (!atSentenceStart) {
+			const beforeWord = doc.textBetween(Math.max(blockStart, from - 20), from, '\n', '\n');
+			SENTENCE_BOUNDARY_RE.lastIndex = 0;
+			let bm: RegExpExecArray | null;
+			while ((bm = SENTENCE_BOUNDARY_RE.exec(beforeWord)) !== null) {
+				if (bm.index + bm[0].length === beforeWord.length) { atSentenceStart = true; break; }
+			}
+		}
+		if (!atSentenceStart) return;
+		editor.chain().insertContentAt({ from, to: from + 1 }, first.toUpperCase()).run();
 	}
 
 	function clearAllSpellCheck() {
@@ -1407,6 +1500,29 @@
 		closeSpellContextMenu();
 		runSpellCheckScan();
 		runMechanicalScan();
+	}
+
+	/** Moves the highlighted suggestion in the right-click menu by `delta` (wrapping both ways) -
+	 *  shared by the up/down arrow keys (SpellCheckPlugin's handleKeyDown below, since focus stays
+	 *  in the editor after a right-click rather than moving into this plain div) and mouse-wheel
+	 *  scrolling over the menu (onwheel in the template). */
+	function moveSpellSuggestion(delta: number) {
+		if (!spellContextMenu || !spellContextMenu.suggestions.length) return;
+		const n = spellContextMenu.suggestions.length;
+		const next = ((spellContextMenu.selectedIndex + delta) % n + n) % n;
+		spellContextMenu = { ...spellContextMenu, selectedIndex: next };
+	}
+
+	function applySelectedSpellSuggestion() {
+		if (!spellContextMenu) return;
+		const suggestion = spellContextMenu.suggestions[spellContextMenu.selectedIndex];
+		if (suggestion) applySpellContextSuggestion(suggestion);
+	}
+
+	function handleSpellContextMenuWheel(event: WheelEvent) {
+		if (!spellContextMenu || spellContextMenu.suggestions.length < 2) return;
+		event.preventDefault();
+		moveSpellSuggestion(event.deltaY > 0 ? 1 : -1);
 	}
 
 	function clearGhostSuggestion() {
@@ -1877,7 +1993,13 @@
 		if (ghostTextTimer) { clearTimeout(ghostTextTimer); ghostTextTimer = null; }
 		ghostTextGeneration++;
 		const ghostTextOn = !!$appConfig?.ghost_text_enabled;
-		const localSuggestionsOn = !!$appConfig?.math_suggestions_enabled;
+		// Each of the three "Quick Suggestions" is its own independent toggle in Settings -
+		// defaulting to on (!== false) so an older/partial config that predates these fields
+		// behaves the same as before they existed (back when they were all one math toggle).
+		const mathOn = $appConfig?.math_suggestions_enabled !== false;
+		const dateTimeOn = $appConfig?.date_time_suggestions_enabled !== false;
+		const unitConversionOn = $appConfig?.unit_conversion_suggestions_enabled !== false;
+		const localSuggestionsOn = mathOn || dateTimeOn || unitConversionOn;
 		if (!ghostTextOn && !localSuggestionsOn) return;
 		if (!editor || boundLiveFieldId || editor.view.composing) return;
 		const sel = editor.state.selection;
@@ -1889,17 +2011,21 @@
 		if (block.textContent.trim().length < 3) return;
 		const generation = ghostTextGeneration;
 		const pos = resolvedFrom.pos;
-		if (localSuggestionsOn) {
+		if (dateTimeOn) {
 			const dateSuggestion = tryDateTimeCompletion(block.textContent);
 			if (dateSuggestion !== null) {
 				showGhostSuggestion(dateSuggestion.result, pos, generation, true, pos - dateSuggestion.trigger.length);
 				return;
 			}
+		}
+		if (unitConversionOn) {
 			const unitSuggestion = tryUnitConversion(block.textContent);
 			if (unitSuggestion !== null) {
 				showGhostSuggestion(unitSuggestion, pos, generation, true);
 				return;
 			}
+		}
+		if (mathOn) {
 			const mathSuggestion = tryMathCompletion(block.textContent);
 			if (mathSuggestion !== null) {
 				showGhostSuggestion(mathSuggestion, pos, generation, true);
@@ -1939,7 +2065,7 @@
 	let hasPendingBlobs = false;
 	let lastSourceMode = $sourceMode;
 	let linkContextMenu = $state<{ x: number; y: number; href: string; anchor: HTMLAnchorElement } | null>(null);
-	let spellContextMenu = $state<{ x: number; y: number; from: number; to: number; word: string; suggestions: string[] } | null>(null);
+	let spellContextMenu = $state<{ x: number; y: number; from: number; to: number; word: string; suggestions: string[]; selectedIndex: number; kind: SpellErrorKind } | null>(null);
 	let hiddenTitleHeading: HiddenTitleHeading | null = null;
 	let taskRevealTimer: ReturnType<typeof setTimeout> | null = null;
 	let taskRevealElement: HTMLElement | null = null;
@@ -6600,7 +6726,13 @@
 				if (!isMobile && showOutline) scheduleOutline();
 				if (showInfo) scheduleCounts();
 				scheduleGhostTextSuggestion();
-				if (transaction.docChanged) trackAiSpellStateForTransaction(transaction);
+				if (transaction.docChanged) {
+					trackAiSpellStateForTransaction(transaction);
+					// Dispatches its own follow-up transaction synchronously when it fixes
+					// something - same-length replacements only (a lowercase letter swapped for
+					// its uppercase form), so this never desyncs the positions tracked above.
+					runAutoCapitalize();
+				}
 				scheduleSpellCheckScan();
 			},
 		});
@@ -6848,15 +6980,16 @@
 				const to = dictHit ? dictHit.to : mechHit!.to;
 				const word = dictHit ? dictHit.word : editor.state.doc.textBetween(mechHit!.from, mechHit!.to);
 				const suggestions = dictHit ? getSuggestionsFor(dictHit.word, 3, dictHit.from) : [mechHit!.suggestion];
+				const kind = dictHit ? spellingKindFor(dictHit.word) : mechHit!.kind;
 				let sx = event.clientX;
 				let sy = event.clientY;
-				const menuWidth = 200;
-				const menuHeight = 90 + suggestions.length * 34;
+				const menuWidth = 220;
+				const menuHeight = 84 + suggestions.length * 36;
 				if (sx + menuWidth > window.innerWidth) sx = window.innerWidth - menuWidth - 8;
 				if (sy + menuHeight > window.innerHeight) sy = window.innerHeight - menuHeight - 8;
 				if (sx < 4) sx = 4;
 				if (sy < 4) sy = 4;
-				spellContextMenu = { x: sx, y: sy, from, to, word, suggestions };
+				spellContextMenu = { x: sx, y: sy, from, to, word, suggestions, selectedIndex: 0, kind };
 				return;
 			}
 		}
@@ -9101,16 +9234,29 @@
 {#if spellContextMenu}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div class="link-context-overlay" onclick={(e) => closeFromOverlay(e, closeSpellContextMenu)} onkeydown={(e) => closeOnEscape(e, closeSpellContextMenu)}>
-		<div class="link-context-menu" style="left: {spellContextMenu.x}px; top: {spellContextMenu.y}px">
-			<div class="link-context-url">“{spellContextMenu.word}”</div>
-			{#each spellContextMenu.suggestions as suggestion}
-				<button onclick={() => applySpellContextSuggestion(suggestion)}>{suggestion}</button>
-			{/each}
-			{#if !spellContextMenu.suggestions.length}
-				<div class="link-context-url">No suggestions</div>
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div class="spell-context-menu" style="left: {spellContextMenu.x}px; top: {spellContextMenu.y}px" onwheel={handleSpellContextMenuWheel}>
+			<div class="spell-context-header">
+				<span class="spell-context-kind-dot spell-context-kind-{spellContextMenu.kind}"></span>
+				<span class="spell-context-word">{spellContextMenu.word}</span>
+				<span class="spell-context-kind-label">{kindLabel(spellContextMenu.kind)}</span>
+			</div>
+			{#if spellContextMenu.suggestions.length}
+				<div class="spell-context-suggestions">
+					{#each spellContextMenu.suggestions as suggestion, i}
+						<button
+							class="spell-context-suggestion"
+							class:selected={i === spellContextMenu.selectedIndex}
+							onmouseenter={() => { if (spellContextMenu) spellContextMenu = { ...spellContextMenu, selectedIndex: i }; }}
+							onclick={() => applySpellContextSuggestion(suggestion)}
+						>{suggestion}</button>
+					{/each}
+				</div>
+			{:else}
+				<div class="spell-context-empty">No suggestions</div>
 			{/if}
-			<div class="link-context-sep"></div>
-			<button onclick={ignoreSpellContextWord}>Ignore in this note</button>
+			<div class="spell-context-sep"></div>
+			<button class="spell-context-action" onclick={ignoreSpellContextWord}>Ignore in this note</button>
 		</div>
 	</div>
 {/if}
@@ -12401,6 +12547,118 @@
 		height: 1px;
 		background: var(--border-light);
 		margin: 4px 0;
+	}
+
+	/* The right-click spell-fix menu - its own dedicated styling rather than reusing
+	   .link-context-menu (which showed the word in quotes like a URL and had no way to tell
+	   suggestions apart or see which one keyboard/wheel navigation currently points at). */
+	.spell-context-menu {
+		position: fixed;
+		background: var(--bg-primary);
+		border: 1px solid var(--border-color);
+		border-radius: 10px;
+		box-shadow: var(--shadow-lg);
+		padding: 6px;
+		min-width: 200px;
+		z-index: 1501;
+	}
+
+	.spell-context-header {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 4px 6px 8px;
+		margin-bottom: 4px;
+		border-bottom: 1px solid var(--border-light);
+	}
+
+	.spell-context-kind-dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		flex-shrink: 0;
+		background: var(--warning);
+	}
+
+	.spell-context-kind-dot.spell-context-kind-grammar { background: #3b82f6; }
+	.spell-context-kind-dot.spell-context-kind-capitalization { background: #8b5cf6; }
+	.spell-context-kind-dot.spell-context-kind-repetition { background: #14b8a6; }
+
+	.spell-context-word {
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--text-primary);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		flex: 1;
+		min-width: 0;
+	}
+
+	.spell-context-kind-label {
+		font-size: 10px;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--text-tertiary);
+		flex-shrink: 0;
+	}
+
+	.spell-context-suggestions {
+		display: flex;
+		flex-direction: column;
+		gap: 1px;
+	}
+
+	.spell-context-suggestion {
+		display: block;
+		width: 100%;
+		padding: 7px 8px;
+		border: none;
+		background: none;
+		color: var(--text-primary);
+		font-size: 13px;
+		cursor: pointer;
+		border-radius: 6px;
+		text-align: left;
+	}
+
+	.spell-context-suggestion:hover,
+	.spell-context-suggestion.selected {
+		background: var(--bg-hover);
+	}
+
+	.spell-context-suggestion.selected {
+		outline: 1px solid var(--accent);
+		outline-offset: -1px;
+	}
+
+	.spell-context-empty {
+		padding: 8px 6px;
+		font-size: 12px;
+		color: var(--text-tertiary);
+	}
+
+	.spell-context-sep {
+		height: 1px;
+		background: var(--border-light);
+		margin: 4px 0;
+	}
+
+	.spell-context-action {
+		display: block;
+		width: 100%;
+		padding: 7px 8px;
+		border: none;
+		background: none;
+		color: var(--text-secondary);
+		font-size: 12px;
+		cursor: pointer;
+		border-radius: 6px;
+		text-align: left;
+	}
+
+	.spell-context-action:hover {
+		background: var(--bg-hover);
 	}
 
 	.link-modal-overlay {

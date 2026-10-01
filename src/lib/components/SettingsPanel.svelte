@@ -218,9 +218,16 @@
 	let ghostTextEnabled = $state($appConfig?.ghost_text_enabled ?? false);
 	let ghostTextMaxWords = $state($appConfig?.ghost_text_max_words ?? 1);
 	let mathSuggestionsEnabled = $state($appConfig?.math_suggestions_enabled ?? true);
+	let dateTimeSuggestionsEnabled = $state($appConfig?.date_time_suggestions_enabled ?? true);
+	let unitConversionSuggestionsEnabled = $state($appConfig?.unit_conversion_suggestions_enabled ?? true);
 	let spellCheckEngine = $state(
 		$appConfig?.spell_check_enabled === false ? 'off' : ($appConfig?.spell_check_engine ?? 'basic'),
 	);
+	let spellCheckGrammarEnabled = $state($appConfig?.spell_check_grammar_enabled ?? true);
+	let spellCheckCapitalizationEnabled = $state($appConfig?.spell_check_capitalization_enabled ?? true);
+	let spellCheckRepetitionEnabled = $state($appConfig?.spell_check_repetition_enabled ?? true);
+	let spellSuggestionPopupEnabled = $state($appConfig?.spell_suggestion_popup_enabled ?? true);
+	let autoCapitalizeEnabled = $state($appConfig?.auto_capitalize_enabled ?? false);
 	let aiShowKey = $state(false);
 	let aiShowCompatibleKey = $state(false);
 	let aiShowOllamaKey = $state(false);
@@ -256,6 +263,13 @@
 			spellCheckEngine !== 'off',
 			spellCheckEngine === 'off' ? 'basic' : spellCheckEngine,
 			mathSuggestionsEnabled,
+			dateTimeSuggestionsEnabled,
+			unitConversionSuggestionsEnabled,
+			spellCheckGrammarEnabled,
+			spellCheckCapitalizationEnabled,
+			spellCheckRepetitionEnabled,
+			spellSuggestionPopupEnabled,
+			autoCapitalizeEnabled,
 		);
 		if ($appConfig) {
 			$appConfig = {
@@ -272,8 +286,15 @@
 				ghost_text_enabled: ghostTextEnabled,
 				ghost_text_max_words: ghostTextMaxWords,
 				math_suggestions_enabled: mathSuggestionsEnabled,
+				date_time_suggestions_enabled: dateTimeSuggestionsEnabled,
+				unit_conversion_suggestions_enabled: unitConversionSuggestionsEnabled,
 				spell_check_enabled: spellCheckEngine !== 'off',
 				spell_check_engine: spellCheckEngine === 'off' ? 'basic' : spellCheckEngine,
+				spell_check_grammar_enabled: spellCheckGrammarEnabled,
+				spell_check_capitalization_enabled: spellCheckCapitalizationEnabled,
+				spell_check_repetition_enabled: spellCheckRepetitionEnabled,
+				spell_suggestion_popup_enabled: spellSuggestionPopupEnabled,
+				auto_capitalize_enabled: autoCapitalizeEnabled,
 			};
 		}
 	}
@@ -2232,16 +2253,87 @@
 										Sends each paragraph to your AI provider above for context-aware suggestions (catches things a plain dictionary can't, like "there" vs. "their"). Needs a working AI provider configured above, and sends your note text to it as you write.
 									{/if}
 								</p>
+
+								{#if spellCheckEngine !== 'off'}
+									<div class="setting-subgroup">
+										<label class="setting-toggle compact">
+											<span class="setting-label">
+												<span class="setting-name">Suggestion popup while typing</span>
+												<span class="setting-desc">The floating badge with a suggested fix, accepted with Tab. Turning this off still keeps the underlines below - it just stops the popup from appearing over the active word.</span>
+											</span>
+											<button class="toggle-switch" class:on={spellSuggestionPopupEnabled} role="switch" aria-checked={spellSuggestionPopupEnabled} aria-label="Suggestion popup while typing" onclick={() => { spellSuggestionPopupEnabled = !spellSuggestionPopupEnabled; saveAiSettings(); }}>
+												<span class="toggle-knob"></span>
+											</button>
+										</label>
+										<p class="setting-hint" style="margin-top: 4px;">These three run locally alongside whichever engine is picked above, even with it set to Basic, and catch things a dictionary lookup can't:</p>
+										<label class="setting-toggle compact">
+											<span class="setting-label">
+												<span class="setting-name">Grammar (standalone "i" → "I")</span>
+											</span>
+											<button class="toggle-switch" class:on={spellCheckGrammarEnabled} role="switch" aria-checked={spellCheckGrammarEnabled} aria-label="Flag a standalone lowercase i" onclick={() => { spellCheckGrammarEnabled = !spellCheckGrammarEnabled; saveAiSettings(); }}>
+												<span class="toggle-knob"></span>
+											</button>
+										</label>
+										<label class="setting-toggle compact">
+											<span class="setting-label">
+												<span class="setting-name">Capitalization (sentence start)</span>
+											</span>
+											<button class="toggle-switch" class:on={spellCheckCapitalizationEnabled} role="switch" aria-checked={spellCheckCapitalizationEnabled} aria-label="Flag a lowercase word at a sentence start" onclick={() => { spellCheckCapitalizationEnabled = !spellCheckCapitalizationEnabled; saveAiSettings(); }}>
+												<span class="toggle-knob"></span>
+											</button>
+										</label>
+										<label class="setting-toggle compact">
+											<span class="setting-label">
+												<span class="setting-name">Repetition (repeated word)</span>
+											</span>
+											<button class="toggle-switch" class:on={spellCheckRepetitionEnabled} role="switch" aria-checked={spellCheckRepetitionEnabled} aria-label="Flag an immediately repeated word" onclick={() => { spellCheckRepetitionEnabled = !spellCheckRepetitionEnabled; saveAiSettings(); }}>
+												<span class="toggle-knob"></span>
+											</button>
+										</label>
+									</div>
+								{/if}
+							</div>
+
+							<div class="settings-section">
+								<h3>Auto-Capitalize</h3>
+								<label class="setting-toggle">
+									<span class="setting-label">
+										<span class="setting-name">Automatically fix capitalization as you type</span>
+										<span class="setting-desc">Corrects a standalone "i" and the start of a new sentence in place, instead of just flagging them - no Tab needed. Independent of Spelling Corrections above: works even with it set to Off.</span>
+									</span>
+									<button class="toggle-switch" class:on={autoCapitalizeEnabled} role="switch" aria-checked={autoCapitalizeEnabled} aria-label="Automatically fix capitalization as you type" onclick={() => { autoCapitalizeEnabled = !autoCapitalizeEnabled; saveAiSettings(); }}>
+										<span class="toggle-knob"></span>
+									</button>
+								</label>
 							</div>
 
 							<div class="settings-section">
 								<h3>Quick Suggestions</h3>
-								<label class="setting-toggle">
+								<p class="setting-hint" style="margin-top: 0;">Small, instant completions computed locally on your device - press Tab to accept. All work with no AI provider configured at all.</p>
+								<label class="setting-toggle compact">
 									<span class="setting-label">
-										<span class="setting-name">Suggest math, dates, and conversions as you type</span>
-										<span class="setting-desc">Finish typing an expression like "12*7" and it suggests "=84" right after it; type "10 km to miles" and it suggests "= 6.21 mi"; type "@today" or "@now" and it suggests today's date or the current time in its place - press Tab to accept any of them. All computed locally on your device, so this works with no AI provider configured at all.</span>
+										<span class="setting-name">Math</span>
+										<span class="setting-desc">Finish typing an expression like "12*7" and it suggests "=84" right after it.</span>
 									</span>
-									<button class="toggle-switch" class:on={mathSuggestionsEnabled} role="switch" aria-checked={mathSuggestionsEnabled} aria-label="Suggest math, dates, and conversions as you type" onclick={() => { mathSuggestionsEnabled = !mathSuggestionsEnabled; saveAiSettings(); }}>
+									<button class="toggle-switch" class:on={mathSuggestionsEnabled} role="switch" aria-checked={mathSuggestionsEnabled} aria-label="Suggest math results as you type" onclick={() => { mathSuggestionsEnabled = !mathSuggestionsEnabled; saveAiSettings(); }}>
+										<span class="toggle-knob"></span>
+									</button>
+								</label>
+								<label class="setting-toggle compact">
+									<span class="setting-label">
+										<span class="setting-name">Date & time</span>
+										<span class="setting-desc">Type "@today", "@now", "@date", or "@time" and it suggests today's date or the current time in its place.</span>
+									</span>
+									<button class="toggle-switch" class:on={dateTimeSuggestionsEnabled} role="switch" aria-checked={dateTimeSuggestionsEnabled} aria-label="Suggest date and time for @today/@now triggers" onclick={() => { dateTimeSuggestionsEnabled = !dateTimeSuggestionsEnabled; saveAiSettings(); }}>
+										<span class="toggle-knob"></span>
+									</button>
+								</label>
+								<label class="setting-toggle compact">
+									<span class="setting-label">
+										<span class="setting-name">Unit conversion</span>
+										<span class="setting-desc">Type "10 km to miles" and it suggests "= 6.21 mi" right after it.</span>
+									</span>
+									<button class="toggle-switch" class:on={unitConversionSuggestionsEnabled} role="switch" aria-checked={unitConversionSuggestionsEnabled} aria-label="Suggest unit conversions as you type" onclick={() => { unitConversionSuggestionsEnabled = !unitConversionSuggestionsEnabled; saveAiSettings(); }}>
 										<span class="toggle-knob"></span>
 									</button>
 								</label>
@@ -2827,6 +2919,19 @@
 		font-size: 11px;
 		color: var(--text-tertiary);
 		line-height: 1.4;
+	}
+
+	/* A set of related toggles nested under another setting (e.g. the three mechanical spell
+	   checks under the engine picker) - a touch of indent and a subtle left rule to read as
+	   "part of the setting above" rather than a new unrelated section. */
+	.setting-subgroup {
+		margin-top: 10px;
+		padding-left: 12px;
+		border-left: 2px solid var(--border-light);
+	}
+
+	.setting-toggle.compact {
+		padding: 7px 0;
 	}
 
 	.toggle-switch {

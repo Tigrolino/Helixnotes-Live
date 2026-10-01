@@ -567,12 +567,21 @@ export async function setAiSettings(
   spellCheckEnabled: boolean = true,
   spellCheckEngine: string = "basic",
   mathSuggestionsEnabled: boolean = true,
+  dateTimeSuggestionsEnabled: boolean = true,
+  unitConversionSuggestionsEnabled: boolean = true,
+  spellCheckGrammarEnabled: boolean = true,
+  spellCheckCapitalizationEnabled: boolean = true,
+  spellCheckRepetitionEnabled: boolean = true,
+  spellSuggestionPopupEnabled: boolean = true,
+  autoCapitalizeEnabled: boolean = false,
 ): Promise<void> {
   return invoke("set_ai_settings", {
     provider, apiKey, model, writingStyle, baseUrl,
     ollamaApiKey, openaiCompatibleBaseUrl, openaiCompatibleApiKey,
     ghostTextEnabled, ghostTextMaxWords, spellCheckEnabled, spellCheckEngine,
-    mathSuggestionsEnabled,
+    mathSuggestionsEnabled, dateTimeSuggestionsEnabled, unitConversionSuggestionsEnabled,
+    spellCheckGrammarEnabled, spellCheckCapitalizationEnabled, spellCheckRepetitionEnabled,
+    spellSuggestionPopupEnabled, autoCapitalizeEnabled,
   });
 }
 

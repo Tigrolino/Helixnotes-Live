@@ -253,6 +253,13 @@ pub struct AppConfig {
     // spell_check_enabled below.
     #[serde(default = "default_true")]
     pub math_suggestions_enabled: bool,
+    // The other two "Quick Suggestions" (Editor.svelte's scheduleGhostTextSuggestion) - broken
+    // out from math_suggestions_enabled into their own toggles so each can be turned off
+    // independently (tryDateTimeCompletion / tryUnitConversion). Both local, no AI needed.
+    #[serde(default = "default_true")]
+    pub date_time_suggestions_enabled: bool,
+    #[serde(default = "default_true")]
+    pub unit_conversion_suggestions_enabled: bool,
     // Offline spelling-correction (static/dictionaries/en.txt) - unlike ghost-text, needs
     // no AI provider, so it defaults on.
     #[serde(default = "default_true")]
@@ -264,6 +271,29 @@ pub struct AppConfig {
     // spell_check_enabled above; this only picks which engine does the checking.
     #[serde(default = "default_spell_check_engine")]
     pub spell_check_engine: String,
+    // The three offline "mechanical" checks (Editor.svelte's collectMechanicalFlagsForText) -
+    // each independently toggleable, and each still runs with spell_check_enabled off (they're
+    // not gated on it at all - see runMechanicalScan). Named for what they catch: a standalone
+    // lowercase "i", a lowercase word at a sentence start, and an immediately-repeated word.
+    #[serde(default = "default_true")]
+    pub spell_check_grammar_enabled: bool,
+    #[serde(default = "default_true")]
+    pub spell_check_capitalization_enabled: bool,
+    #[serde(default = "default_true")]
+    pub spell_check_repetition_enabled: bool,
+    // Whether the inline Tab-accept suggestion badge shows at all while typing - off still
+    // leaves the underlines themselves on (from whichever engine/checks above are enabled), just
+    // without the popup badge on top of the active word.
+    #[serde(default = "default_true")]
+    pub spell_suggestion_popup_enabled: bool,
+    // Auto-corrects capitalization in place as you type (a standalone lowercase "i", or a
+    // lowercase word right after what looks like a sentence end) rather than just flagging it -
+    // a separate, independent setting from all of the above: it works with spell-check turned
+    // off entirely, since it's not a spell-check feature so much as an autocorrect one. Defaults
+    // off (unlike the checks above) since it silently rewrites what was typed, which should be
+    // opt-in rather than a surprise after an update.
+    #[serde(default)]
+    pub auto_capitalize_enabled: bool,
     #[serde(default)]
     pub default_view_mode: bool,
     #[serde(default)]
@@ -409,8 +439,15 @@ impl Default for AppConfig {
             ghost_text_enabled: false,
             ghost_text_max_words: 1,
             math_suggestions_enabled: true,
+            date_time_suggestions_enabled: true,
+            unit_conversion_suggestions_enabled: true,
             spell_check_enabled: true,
             spell_check_engine: "basic".to_string(),
+            spell_check_grammar_enabled: true,
+            spell_check_capitalization_enabled: true,
+            spell_check_repetition_enabled: true,
+            spell_suggestion_popup_enabled: true,
+            auto_capitalize_enabled: false,
             default_view_mode: false,
             new_notes_in_source_mode: false,
             show_tray_icon: false,

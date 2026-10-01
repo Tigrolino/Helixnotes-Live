@@ -146,8 +146,15 @@ export interface AppConfig {
   ghost_text_enabled: boolean;
   ghost_text_max_words: number;
   math_suggestions_enabled: boolean;
+  date_time_suggestions_enabled: boolean;
+  unit_conversion_suggestions_enabled: boolean;
   spell_check_enabled: boolean;
   spell_check_engine: string;
+  spell_check_grammar_enabled: boolean;
+  spell_check_capitalization_enabled: boolean;
+  spell_check_repetition_enabled: boolean;
+  spell_suggestion_popup_enabled: boolean;
+  auto_capitalize_enabled: boolean;
   default_view_mode: boolean;
   new_notes_in_source_mode: boolean;
   show_tray_icon: boolean;
