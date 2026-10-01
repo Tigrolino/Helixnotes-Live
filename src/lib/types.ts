@@ -145,6 +145,7 @@ export interface AppConfig {
   ai_writing_style: string | null;
   ghost_text_enabled: boolean;
   ghost_text_max_words: number;
+  math_suggestions_enabled: boolean;
   spell_check_enabled: boolean;
   spell_check_engine: string;
   default_view_mode: boolean;

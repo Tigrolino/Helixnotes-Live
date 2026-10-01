@@ -217,6 +217,7 @@
 	let aiWritingStyle = $state($appConfig?.ai_writing_style ?? '');
 	let ghostTextEnabled = $state($appConfig?.ghost_text_enabled ?? false);
 	let ghostTextMaxWords = $state($appConfig?.ghost_text_max_words ?? 1);
+	let mathSuggestionsEnabled = $state($appConfig?.math_suggestions_enabled ?? true);
 	let spellCheckEngine = $state(
 		$appConfig?.spell_check_enabled === false ? 'off' : ($appConfig?.spell_check_engine ?? 'basic'),
 	);
@@ -254,6 +255,7 @@
 			ghostTextMaxWords,
 			spellCheckEngine !== 'off',
 			spellCheckEngine === 'off' ? 'basic' : spellCheckEngine,
+			mathSuggestionsEnabled,
 		);
 		if ($appConfig) {
 			$appConfig = {
@@ -269,6 +271,7 @@
 				ai_writing_style: aiWritingStyle || null,
 				ghost_text_enabled: ghostTextEnabled,
 				ghost_text_max_words: ghostTextMaxWords,
+				math_suggestions_enabled: mathSuggestionsEnabled,
 				spell_check_enabled: spellCheckEngine !== 'off',
 				spell_check_engine: spellCheckEngine === 'off' ? 'basic' : spellCheckEngine,
 			};
@@ -2209,6 +2212,41 @@
 								</div>
 							</div>
 
+							<div class="settings-section">
+								<h3>Spelling Corrections</h3>
+								<p class="setting-hint" style="margin-top: 0;">Underlines a misspelled word right after you type it and shows a suggested fix - press Tab to accept it, or right-click it for more options.</p>
+								<div class="setting-options">
+									<button class="option-btn" class:active={spellCheckEngine === 'off'} onclick={() => { if (spellCheckEngine === 'off') return; spellCheckEngine = 'off'; saveAiSettings(); }}>Off</button>
+									<button class="option-btn" class:active={spellCheckEngine === 'basic'} onclick={() => { if (spellCheckEngine === 'basic') return; spellCheckEngine = 'basic'; saveAiSettings(); }}>Basic (offline)</button>
+									<button class="option-btn" class:active={spellCheckEngine === 'ai'} onclick={() => { if (spellCheckEngine === 'ai') return; spellCheckEngine = 'ai'; saveAiSettings(); }}>AI-powered</button>
+									<button class="option-btn" class:active={spellCheckEngine === 'combined'} onclick={() => { if (spellCheckEngine === 'combined') return; spellCheckEngine = 'combined'; saveAiSettings(); }}>Combined</button>
+								</div>
+								<p class="setting-hint">
+									{#if spellCheckEngine === 'off'}
+										Spell-check is off.
+									{:else if spellCheckEngine === 'basic'}
+										Checked against a bundled offline Hunspell dictionary - the same engine Word, Chrome, and LibreOffice use - so this works with no AI provider configured at all.
+									{:else if spellCheckEngine === 'combined'}
+										The offline Hunspell dictionary catches plain misspellings on its own, reliably and for free - the AI provider above is only asked for what a dictionary can't see (wrong-but-correctly-spelled words like "its" vs. "it's", missing apostrophes, one-word grammar fixes). Needs a working AI provider configured above for that part; misspellings alone still work even if it's not.
+									{:else}
+										Sends each paragraph to your AI provider above for context-aware suggestions (catches things a plain dictionary can't, like "there" vs. "their"). Needs a working AI provider configured above, and sends your note text to it as you write.
+									{/if}
+								</p>
+							</div>
+
+							<div class="settings-section">
+								<h3>Math Suggestions</h3>
+								<label class="setting-toggle">
+									<span class="setting-label">
+										<span class="setting-name">Suggest math results as you type</span>
+										<span class="setting-desc">Finish typing an expression like "12*7" and it suggests "=84" right after it - press Tab to accept. Computed locally on your device, so this works with no AI provider configured at all.</span>
+									</span>
+									<button class="toggle-switch" class:on={mathSuggestionsEnabled} role="switch" aria-checked={mathSuggestionsEnabled} aria-label="Suggest math results as you type" onclick={() => { mathSuggestionsEnabled = !mathSuggestionsEnabled; saveAiSettings(); }}>
+										<span class="toggle-knob"></span>
+									</button>
+								</label>
+							</div>
+
 							{#if aiProvider}
 								{#if aiProvider === 'ollama' || aiProvider === 'openai_compatible'}
 									<p class="setting-hint" style="color: var(--text-success, #4ade80); margin-top: -4px; margin-bottom: 12px;">Your data stays on your device. No text is sent to any external server.</p>
@@ -2368,28 +2406,6 @@
 										<button class="option-btn" class:active={ghostTextMaxWords === 3} onclick={() => { if (ghostTextMaxWords === 3) return; ghostTextMaxWords = 3; saveAiSettings(); }}>3 words</button>
 									</div>
 									<p class="setting-hint">Suggestions show a full sentence (or close to it) at once - this sets how much of it each Tab press fills in. Lower feels closer to typing it yourself one step at a time; higher fills in more per press, with the rest still waiting for your next Tab(s).</p>
-								</div>
-
-								<div class="settings-section">
-									<h3>Spelling Corrections</h3>
-									<p class="setting-hint" style="margin-top: 0;">Underlines a misspelled word right after you type it and shows a suggested fix - press Tab to accept it, or right-click it for more options.</p>
-									<div class="setting-options">
-										<button class="option-btn" class:active={spellCheckEngine === 'off'} onclick={() => { if (spellCheckEngine === 'off') return; spellCheckEngine = 'off'; saveAiSettings(); }}>Off</button>
-										<button class="option-btn" class:active={spellCheckEngine === 'basic'} onclick={() => { if (spellCheckEngine === 'basic') return; spellCheckEngine = 'basic'; saveAiSettings(); }}>Basic (offline)</button>
-										<button class="option-btn" class:active={spellCheckEngine === 'ai'} onclick={() => { if (spellCheckEngine === 'ai') return; spellCheckEngine = 'ai'; saveAiSettings(); }}>AI-powered</button>
-										<button class="option-btn" class:active={spellCheckEngine === 'combined'} onclick={() => { if (spellCheckEngine === 'combined') return; spellCheckEngine = 'combined'; saveAiSettings(); }}>Combined</button>
-									</div>
-									<p class="setting-hint">
-										{#if spellCheckEngine === 'off'}
-											Spell-check is off.
-										{:else if spellCheckEngine === 'basic'}
-											Checked against a bundled offline Hunspell dictionary - the same engine Word, Chrome, and LibreOffice use - so this works with no AI provider configured at all.
-										{:else if spellCheckEngine === 'combined'}
-											The offline Hunspell dictionary catches plain misspellings on its own, reliably and for free - the AI provider above is only asked for what a dictionary can't see (wrong-but-correctly-spelled words like "its" vs. "it's", missing apostrophes, one-word grammar fixes). Needs a working AI provider configured above for that part; misspellings alone still work even if it's not.
-										{:else}
-											Sends each paragraph to your AI provider above for context-aware suggestions (catches things a plain dictionary can't, like "there" vs. "their"). Needs a working AI provider configured above, and sends your note text to it as you write.
-										{/if}
-									</p>
 								</div>
 
 								<div class="settings-section">

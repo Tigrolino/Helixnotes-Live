@@ -2409,6 +2409,7 @@ pub fn set_ai_settings(
     ghost_text_max_words: u32,
     spell_check_enabled: bool,
     spell_check_engine: String,
+    math_suggestions_enabled: bool,
 ) -> Result<(), String> {
     let mut config = state.config.lock().map_err(|e| e.to_string())?;
     let key = api_key.filter(|k| !k.is_empty());
@@ -2430,6 +2431,7 @@ pub fn set_ai_settings(
     config.ai_writing_style = writing_style.filter(|s| !s.trim().is_empty());
     config.ghost_text_enabled = ghost_text_enabled;
     config.ghost_text_max_words = ghost_text_max_words.clamp(1, 3);
+    config.math_suggestions_enabled = math_suggestions_enabled;
     config.spell_check_enabled = spell_check_enabled;
     // Anything other than the known alternate engines falls back to "basic" - never persist a
     // typo'd or future/unknown engine name that the frontend then can't match on.

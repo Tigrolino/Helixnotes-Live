@@ -1492,14 +1492,24 @@
 	}
 
 	/** Called on every editor update; debounces a ghost-text request for the current cursor
-	 *  position once typing pauses. A no-op unless the feature is on, this isn't a live note,
-	 *  and the cursor sits at the end of a plain paragraph or heading with a bit of real
-	 *  content already in it. A trailing math expression short-circuits straight to an instant
-	 *  local suggestion - no AI provider needed for that part. */
+	 *  position once typing pauses. A no-op unless at least one of the two features below is on,
+	 *  this isn't a live note, and the cursor sits at the end of a plain paragraph or heading
+	 *  with a bit of real content already in it.
+	 *
+	 *  Two independent features share this one scheduling function, since both key off the exact
+	 *  same "cursor at the end of a textblock, pausing while typing" moment, but they're gated
+	 *  separately: a trailing math expression (math_suggestions_enabled) resolves to an instant
+	 *  local result - evalMathExpression() below, no AI provider needed or consulted at all -
+	 *  while everything else (ghost_text_enabled) is a sentence continuation that has to go
+	 *  through the configured AI provider. A math expression takes priority when both are on and
+	 *  the cursor happens to be positioned after one, since there's nothing an AI continuation
+	 *  could usefully add to "2+2".  */
 	function scheduleGhostTextSuggestion() {
 		if (ghostTextTimer) { clearTimeout(ghostTextTimer); ghostTextTimer = null; }
 		ghostTextGeneration++;
-		if (!$appConfig?.ghost_text_enabled) return;
+		const ghostTextOn = !!$appConfig?.ghost_text_enabled;
+		const mathOn = !!$appConfig?.math_suggestions_enabled;
+		if (!ghostTextOn && !mathOn) return;
 		if (!editor || boundLiveFieldId || editor.view.composing) return;
 		const sel = editor.state.selection;
 		if (!sel.empty) return;
@@ -1510,12 +1520,14 @@
 		if (block.textContent.trim().length < 3) return;
 		const generation = ghostTextGeneration;
 		const pos = resolvedFrom.pos;
-		const mathSuggestion = tryMathCompletion(block.textContent);
-		if (mathSuggestion !== null) {
-			showGhostSuggestion(mathSuggestion, pos, generation, true);
-			return;
+		if (mathOn) {
+			const mathSuggestion = tryMathCompletion(block.textContent);
+			if (mathSuggestion !== null) {
+				showGhostSuggestion(mathSuggestion, pos, generation, true);
+				return;
+			}
 		}
-		if (!$appConfig?.ai_provider) return;
+		if (!ghostTextOn || !$appConfig?.ai_provider) return;
 		// With almost nothing written yet, the model has nothing real to continue and tends to
 		// free-associate into an unrelated story or quiz-style tangent instead - require enough
 		// context anywhere before the cursor (not just this paragraph) to actually ground a guess.
@@ -11838,10 +11850,19 @@
 		vertical-align: baseline;
 	}
 
+	/* `top: 1.4em` (one full line below the anchor) used to be how this badge avoided sitting on
+	   top of the flagged word itself - but the active word is almost never the last line of a
+	   paragraph (there's usually more already-typed text right after it), so a flat line-below
+	   offset routinely landed the badge on top of *that* text instead, which is what produced the
+	   "it shows after a totally unrelated word" report: nothing was wrong with which word got
+	   flagged, the badge itself was just floating over the next line's unrelated content. Staying
+	   on the same line, right after the word, keeps it visually anchored to the word it's
+	   actually for regardless of how much more text follows - the small negative `top` only
+	   nudges it up enough to clear the wavy underline beneath the word. */
 	:global(.tiptap-wrapper .tiptap .spell-suggestion-badge) {
 		position: absolute;
-		left: 0;
-		top: 1.4em;
+		left: 2px;
+		top: -0.1em;
 		z-index: 5;
 		color: var(--warning);
 		background: var(--bg-primary);

@@ -242,10 +242,17 @@ pub struct AppConfig {
     pub ai_writing_style: Option<String>,
     #[serde(default)]
     pub ghost_text_enabled: bool,
-    // How many words (1-3) a ghost-text/math suggestion shows at once; the frontend clamps
-    // this range and sizes its max_tokens request from it.
+    // How many words (1-3) an AI ghost-text suggestion shows at once; the frontend clamps this
+    // range and sizes its max_tokens request from it. Doesn't apply to math_suggestions_enabled
+    // below - a math result is shown whole, never word-by-word.
     #[serde(default = "default_ghost_text_max_words")]
     pub ghost_text_max_words: u32,
+    // Instant "2+2" -> "=4" style completions, evaluated locally (evalMathExpression in
+    // Editor.svelte) - unlike the rest of ghost-text, this needs no AI provider at all, so it's
+    // its own toggle rather than riding on ghost_text_enabled, and defaults on like
+    // spell_check_enabled below.
+    #[serde(default = "default_true")]
+    pub math_suggestions_enabled: bool,
     // Offline spelling-correction (static/dictionaries/en.txt) - unlike ghost-text, needs
     // no AI provider, so it defaults on.
     #[serde(default = "default_true")]
@@ -401,6 +408,7 @@ impl Default for AppConfig {
             ai_writing_style: None,
             ghost_text_enabled: false,
             ghost_text_max_words: 1,
+            math_suggestions_enabled: true,
             spell_check_enabled: true,
             spell_check_engine: "basic".to_string(),
             default_view_mode: false,
