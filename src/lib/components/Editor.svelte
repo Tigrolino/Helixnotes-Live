@@ -469,6 +469,41 @@
 		aint: "ain't",
 	};
 
+	/** Auto-Capitalize's third half (see runAutoCapitalize()): common first names, capitalized
+	 *  wherever they appear - not just at a sentence start, since the whole point is that a name
+	 *  is always capitalized, the same way "I" always is.
+	 *
+	 *  Deliberately a CURATED list, not an attempt at every possible name - most common names are
+	 *  also ordinary English words ("will", "mark", "grace", "bill", "rose", "art", "may", "hope",
+	 *  "faith", "jack", "grant", "sky", "dawn", "summer", "john", "mason", "heather", "amber",
+	 *  "carol", "maria", "timothy" is literally a type of grass...), and auto-capitalizing one of
+	 *  those mid-sentence ("i will go" -> "i Will go") would silently wreck a correct, ordinary
+	 *  sentence - worse than not fixing the name at all. Every entry below was checked against the
+	 *  bundled dictionary (isKnownWord()) and kept only if it has NO other recognized meaning as a
+	 *  lowercase word - this is deliberately a smaller, safer list than "every name a person might
+	 *  have," not a judgment call made by eye. A name that isn't on this list still gets no worse
+	 *  treatment than before (left alone, exactly like today). */
+	const PROPER_NAME_CAPITALIZE_SET = new Set([
+		'michael', 'david', 'james', 'robert', 'daniel', 'matthew', 'christopher', 'andrew', 'joshua',
+		'ryan', 'justin', 'brandon', 'kevin', 'jonathan', 'eric', 'brian', 'jason', 'nathan', 'tyler',
+		'aaron', 'jacob', 'zachary', 'alexander', 'benjamin', 'samuel', 'nicholas', 'anthony', 'patrick',
+		'richard', 'sean', 'scott', 'gregory', 'joseph', 'kyle', 'steven', 'edward', 'jeffrey', 'marcus',
+		'jeremy', 'adam', 'jose', 'dennis', 'jerry', 'austin', 'noah', 'ethan', 'liam', 'logan',
+		'lucas', 'oliver', 'elijah', 'gabriel', 'caleb', 'isaac', 'nathaniel', 'dominic', 'xavier',
+		'tristan', 'julian', 'sebastian', 'vincent', 'marco', 'antonio', 'carlos', 'miguel', 'francisco',
+		'javier', 'sarah', 'jennifer', 'jessica', 'ashley', 'amanda', 'stephanie', 'nicole', 'rachel',
+		'lauren', 'megan', 'samantha', 'kayla', 'michelle', 'kimberly', 'amy', 'angela', 'melissa',
+		'rebecca', 'laura', 'danielle', 'brittany', 'tiffany', 'christina', 'courtney', 'allison', 'erin',
+		'kristen', 'vanessa', 'julie', 'monica', 'natalie', 'katherine', 'victoria', 'jacqueline', 'hannah',
+		'evelyn', 'madison', 'olivia', 'isabella', 'sophia', 'emma', 'ava', 'mia', 'abigail', 'emily',
+		'elizabeth', 'charlotte', 'amelia', 'harper', 'ella', 'scarlett', 'chloe', 'riley', 'zoe', 'leah',
+		'savannah', 'brooklyn', 'kennedy', 'maya', 'sydney', 'gabriella', 'alexis', 'taylor', 'morgan',
+		'jordan', 'jamie', 'casey', 'alexa', 'stacy', 'tracy', 'wendy', 'cindy', 'andy', 'larry', 'barry',
+		'nancy', 'betty', 'dorothy', 'shirley', 'sharon', 'cynthia', 'kathleen', 'deborah', 'frances',
+		'janet', 'diane', 'joyce', 'judith', 'andrea', 'cheryl', 'martha', 'gloria', 'teresa', 'pamela',
+		'brenda', 'ruth', 'joan', 'judy', 'marilyn', 'beverly', 'denise', 'doris',
+	]);
+
 	/** Runs all three mechanical checks over a single text node's own text. `basePos` is that
 	 *  text node's own starting document position; `isBlockStart` is whether this text node is
 	 *  the very first thing in its block (so position 0 counts as a sentence start too). Shared by
@@ -1139,11 +1174,12 @@
 	}
 
 	/** Auto-Capitalize (Settings) - a separate, independent setting from Spelling Corrections
-	 *  above: it fixes a standalone "i", a lowercase sentence-start word, and an unambiguous
-	 *  missing-apostrophe contraction (MISSING_APOSTROPHE_FIXES above) IN PLACE as you type,
-	 *  rather than just flagging them, and works even with spell-check turned off entirely (it's
-	 *  not gated on spell_check_enabled at all - this is an autocorrect, not a spell-check
-	 *  feature). Called from onUpdate for every doc-changing transaction.
+	 *  above: it fixes a standalone "i", a lowercase sentence-start word, an unambiguous
+	 *  missing-apostrophe contraction (MISSING_APOSTROPHE_FIXES above), and a name from the
+	 *  curated PROPER_NAME_CAPITALIZE_SET above, IN PLACE as you type, rather than just flagging
+	 *  them, and works even with spell-check turned off entirely (it's not gated on
+	 *  spell_check_enabled at all - this is an autocorrect, not a spell-check feature). Called
+	 *  from onUpdate for every doc-changing transaction.
 	 *
 	 *  Deliberately waits for a word to be *finished* (a boundary character typed right after it,
 	 *  same SPELL_CHECK_BOUNDARY_RE moment computeActiveSpellFix's fallback uses) before fixing it
@@ -1200,6 +1236,18 @@
 				? apostropheFix[0].toUpperCase() + apostropheFix.slice(1)
 				: apostropheFix;
 			editor.chain().insertContentAt({ from, to }, replacement, { updateSelection: false }).run();
+			return;
+		}
+
+		// A name from the curated PROPER_NAME_CAPITALIZE_SET (see its own comment above for why
+		// this list is deliberately small) - capitalized wherever it appears, not gated on sentence
+		// position. Only when the word was typed in pure lowercase (rawWord === lower): ALL CAPS or
+		// already-mixed casing is left alone, the same "probably intentional, don't guess" rule
+		// basicCouldFlag()/ALL_UPPER_RE follow elsewhere in this file for acronyms.
+		if (rawWord === lower && PROPER_NAME_CAPITALIZE_SET.has(lower)) {
+			const to = from + rawWord.length;
+			const capitalized = lower[0].toUpperCase() + lower.slice(1);
+			editor.chain().insertContentAt({ from, to }, capitalized, { updateSelection: false }).run();
 			return;
 		}
 

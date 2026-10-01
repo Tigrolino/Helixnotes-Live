@@ -2299,7 +2299,8 @@
 								<label class="setting-toggle">
 									<span class="setting-label">
 										<span class="setting-name">Automatically fix capitalization as you type</span>
-										<span class="setting-desc">Corrects a standalone "i", the start of a new sentence, and common missing-apostrophe contractions (dont &rarr; don't, im &rarr; I'm, youre &rarr; you're, and similar) in place, instead of just flagging them - no Tab needed. Skips genuinely ambiguous ones on purpose (its, cant, wont, well, ill - each a real word with its own separate meaning too). Independent of Spelling Corrections above: works even with it set to Off.</span>
+										<span class="setting-desc">Corrects a standalone "i", the start of a new sentence, common missing-apostrophe contractions (dont &rarr; don't, im &rarr; I'm, youre &rarr; you're, and similar), and a curated list of common first names (david, sarah, michael, and similar) in place, instead of just flagging them - no Tab needed. Skips genuinely ambiguous ones on purpose - words that are also real words with their own separate meaning (its, cant, wont, well, ill, john, grace, will, mark, and similar) are left untouched rather than risked.</span>
+										<span class="setting-desc" style="margin-top: 4px; display: block;">Independent of Spelling Corrections above: works even with it set to Off.</span>
 									</span>
 									<button class="toggle-switch" class:on={autoCapitalizeEnabled} role="switch" aria-checked={autoCapitalizeEnabled} aria-label="Automatically fix capitalization as you type" onclick={() => { autoCapitalizeEnabled = !autoCapitalizeEnabled; saveAiSettings(); }}>
 										<span class="toggle-knob"></span>
