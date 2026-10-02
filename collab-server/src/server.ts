@@ -75,6 +75,18 @@
 // redeploy/restart) - GITHUB_TOKEN/GITHUB_REPO is what makes an upload, or a workspace's saved
 // document snapshot, survive that. Without them, both still work locally, they just don't outlive
 // the next deploy.
+//
+// Admin panel (opt-in via ADMIN_PASSWORD): a small HTML page at GET /admin, gated by HTTP Basic
+// Auth checked against ADMIN_PASSWORD (any username; only the password is checked) - a separate
+// secret from COLLAB_PASSWORD, since knowing the collaboration password shouldn't by itself let
+// someone wipe a workspace for everyone. Lists every workspace this server knows about (found by
+// scanning WORKSPACE_AUTH_DIR/DOC_SNAPSHOTS_DIR/UPLOADS_DIR - there's no separate workspace
+// registry) with its password/connection/storage state, and a delete button per row
+// (POST /admin/workspaces/<workspace>/delete) that disconnects anyone currently in it and removes
+// its document, uploads, and claimed password - locally and, if GITHUB_BACKUP_ENABLED, from the
+// GitHub backup too - so the workspace id is fully unclaimed again afterward. Irreversible; there
+// is no undo. Leaving ADMIN_PASSWORD unset disables the panel entirely (GET/POST /admin* then 404,
+// same as any other unknown route) rather than defaulting it open.
 
 // Load variables from a local .env file (see .env.example) into process.env, if one exists.
 // This must run before anything below reads process.env - nothing else in the module graph
@@ -84,7 +96,7 @@
 import "dotenv/config";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { timingSafeEqual, randomUUID, randomBytes, scryptSync } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { WebSocketServer, WebSocket, type RawData } from "ws";
 import * as Y from "yjs";
@@ -98,6 +110,15 @@ if (!COLLAB_PASSWORD) {
   // Fail loudly at startup rather than silently accepting every connection.
   console.error("COLLAB_PASSWORD is not set - refusing to start. Set it in the environment (see .env.example).");
   process.exit(1);
+}
+
+// --- Admin panel (see the module doc comment's "Admin panel" section) ---
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "";
+const ADMIN_ENABLED = Boolean(ADMIN_PASSWORD);
+if (!ADMIN_ENABLED) {
+  console.warn(
+    "[collab] ADMIN_PASSWORD not set - the /admin workspace-management panel is disabled. See .env.example.",
+  );
 }
 
 const AUTH_TIMEOUT_MS = 10_000;
@@ -148,6 +169,53 @@ function passwordMatches(candidate: string): boolean {
     return false;
   }
   return timingSafeEqual(expected, actual);
+}
+
+/** Constant-time comparison against ADMIN_PASSWORD, same reasoning as passwordMatches above but
+ * kept separate since it's a different secret. */
+function adminPasswordMatches(candidate: string): boolean {
+  const expected = Buffer.from(ADMIN_PASSWORD, "utf8");
+  const actual = Buffer.from(candidate, "utf8");
+  if (expected.length !== actual.length) {
+    timingSafeEqual(expected, expected);
+    return false;
+  }
+  return timingSafeEqual(expected, actual);
+}
+
+/** Gates every /admin* route behind HTTP Basic Auth checked against ADMIN_PASSWORD (the username
+ * is ignored - this is a single shared secret, not per-user accounts). Writes the 401/404 response
+ * itself and returns false when access should be refused, so a route handler can just
+ * `if (!requireAdminAuth(req, res)) return;` as its first line. When ADMIN_PASSWORD isn't set at
+ * all, every /admin* route 404s instead of 401ing, so the panel is indistinguishable from not
+ * existing rather than visibly present-but-locked. */
+function requireAdminAuth(req: IncomingMessage, res: ServerResponse): boolean {
+  if (!ADMIN_ENABLED) {
+    res.writeHead(404, { "content-type": "text/plain" }).end("not found\n");
+    return false;
+  }
+  const header = req.headers.authorization ?? "";
+  const match = /^Basic\s+(.+)$/i.exec(header);
+  let password = "";
+  if (match) {
+    try {
+      const decoded = Buffer.from(match[1], "base64").toString("utf8");
+      const sep = decoded.indexOf(":");
+      password = sep === -1 ? decoded : decoded.slice(sep + 1);
+    } catch {
+      password = "";
+    }
+  }
+  if (!password || !adminPasswordMatches(password)) {
+    res
+      .writeHead(401, {
+        "content-type": "text/plain",
+        "www-authenticate": 'Basic realm="HelixNotes Collab Admin", charset="UTF-8"',
+      })
+      .end("Unauthorized\n");
+    return false;
+  }
+  return true;
 }
 
 /** A workspace id becomes a directory name on disk - restrict it to a safe charset rather than
@@ -769,6 +837,263 @@ function handleDocMessage(workspace: string, sender: CollabSocket, bytes: Uint8A
   }
 }
 
+// --- Admin panel ---
+//
+// See the module doc comment's "Admin panel" section for the model. Everything below only reads
+// from and writes to state already defined above (the in-memory maps keyed by workspace, plus
+// each workspace's on-disk/GitHub artifacts) - there's no separate admin-only data store.
+
+function escapeHtml(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+async function listDirEntriesSafe(dir: string): Promise<string[]> {
+  try {
+    return await readdir(dir);
+  } catch {
+    return [];
+  }
+}
+
+async function listSubdirsSafe(dir: string): Promise<string[]> {
+  try {
+    const entries = await readdir(dir, { withFileTypes: true });
+    return entries.filter((e) => e.isDirectory()).map((e) => e.name);
+  } catch {
+    return [];
+  }
+}
+
+/** Every workspace id this server has any record of - there's no separate workspace registry, so
+ * this is the union of everything found by scanning the three places a workspace leaves a trace on
+ * disk (its auth record, its saved document, its uploads directory). A workspace only reachable
+ * through the GitHub backup (e.g. right after a fresh Render redeploy wiped local disk, before
+ * anyone has reconnected to rehydrate it) won't show up here yet - the same limitation
+ * loadWorkspaceDoc()/loadWorkspaceAuth() already have, just surfaced here instead of hidden. */
+async function listKnownWorkspaces(): Promise<string[]> {
+  const [authFiles, snapshotFiles, uploadDirs] = await Promise.all([
+    listDirEntriesSafe(WORKSPACE_AUTH_DIR),
+    listDirEntriesSafe(DOC_SNAPSHOTS_DIR),
+    listSubdirsSafe(UPLOADS_DIR),
+  ]);
+  const names = new Set<string>();
+  for (const f of authFiles) if (f.endsWith(".json")) names.add(f.slice(0, -".json".length));
+  for (const f of snapshotFiles) if (f.endsWith(".ydoc")) names.add(f.slice(0, -".ydoc".length));
+  for (const d of uploadDirs) names.add(d);
+  return Array.from(names)
+    .filter(isSafeWorkspaceSegment)
+    .sort((a, b) => a.localeCompare(b));
+}
+
+interface AdminWorkspaceInfo {
+  workspace: string;
+  connected: number;
+  hasPassword: boolean | null; // null = its auth record couldn't be read
+  hasSnapshot: boolean;
+  uploadCount: number;
+}
+
+async function getAdminWorkspaceInfo(workspace: string): Promise<AdminWorkspaceInfo> {
+  const connected = workspaces.get(workspace)?.size ?? 0;
+
+  let hasPassword: boolean | null = null;
+  try {
+    const record = workspaceAuth.get(workspace) ?? (await loadWorkspaceAuth(workspace));
+    hasPassword = record ? record.hasPassword : null;
+  } catch {
+    hasPassword = null;
+  }
+
+  let hasSnapshot = true;
+  try {
+    await stat(docSnapshotPath(workspace));
+  } catch {
+    hasSnapshot = false;
+  }
+
+  const uploadCount = (await listDirEntriesSafe(join(UPLOADS_DIR, workspace))).length;
+
+  return { workspace, connected, hasPassword, hasSnapshot, uploadCount };
+}
+
+function renderAdminPage(infos: AdminWorkspaceInfo[], deletedFlash: string | null): string {
+  const rows = infos
+    .map((info) => {
+      const safeName = escapeHtml(info.workspace);
+      const passwordLabel = info.hasPassword === null ? "unknown" : info.hasPassword ? "password set" : "open";
+      return `<tr>
+        <td>${safeName}</td>
+        <td>${passwordLabel}</td>
+        <td>${info.connected}</td>
+        <td>${info.hasSnapshot ? "yes" : "no"}</td>
+        <td>${info.uploadCount}</td>
+        <td><form method="post" action="/admin/workspaces/${encodeURIComponent(info.workspace)}/delete" onsubmit="return confirm('Delete workspace \\u2018${safeName}\\u2019? This removes its document, uploads, and password for everyone connected to it, and cannot be undone.');"><button type="submit">Delete</button></form></td>
+      </tr>`;
+    })
+    .join("\n");
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HelixNotes Collab Admin</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; max-width: 860px; margin: 32px auto; padding: 0 16px; color: #1a1a1a; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  p.hint { color: #666; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #ddd; font-size: 14px; }
+  th { color: #555; font-weight: 600; }
+  button { background: #c0392b; color: #fff; border: none; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  button:hover { background: #a93226; }
+  .flash { background: #eafbea; border: 1px solid #b7e3b7; color: #1d6b1d; padding: 8px 12px; border-radius: 4px; margin-top: 16px; font-size: 14px; }
+  .empty { color: #777; margin-top: 16px; }
+</style>
+</head>
+<body>
+<h1>HelixNotes Collaboration - Admin</h1>
+<p class="hint">Every workspace this server has a record of.${GITHUB_BACKUP_ENABLED ? " Deleting one also removes its GitHub backup." : ""} Deleting a workspace disconnects anyone currently in it and cannot be undone.</p>
+${deletedFlash ? `<div class="flash">Deleted workspace “${escapeHtml(deletedFlash)}”.</div>` : ""}
+${
+  infos.length === 0
+    ? '<p class="empty">No workspaces found.</p>'
+    : `<table>
+<thead><tr><th>Workspace</th><th>Password</th><th>Connected now</th><th>Saved doc</th><th>Uploads</th><th></th></tr></thead>
+<tbody>
+${rows}
+</tbody>
+</table>`
+}
+</body>
+</html>
+`;
+}
+
+/** Deletes `repoPath` from the GitHub backup repo if it currently exists there - fetching its sha
+ * first since the Contents API's DELETE requires one, same as the create/update helpers above need
+ * it for an update. A no-op (not an error) if the file was never backed up in the first place. */
+async function deleteGithubFileIfExists(repoPath: string, message: string): Promise<void> {
+  const res = await fetch(
+    `https://api.github.com/repos/${GITHUB_REPO}/contents/${repoPath}?ref=${encodeURIComponent(GITHUB_BRANCH)}`,
+    { headers: githubApiHeaders() },
+  );
+  if (res.status === 404) return;
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`GitHub API ${res.status}: ${text.slice(0, 300)}`);
+  }
+  const json = (await res.json()) as { sha?: string };
+  if (!json.sha) return;
+  const del = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${repoPath}`, {
+    method: "DELETE",
+    headers: { ...githubApiHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ message, sha: json.sha, branch: GITHUB_BRANCH }),
+  });
+  if (!del.ok) {
+    const text = await del.text().catch(() => "");
+    throw new Error(`GitHub API ${del.status}: ${text.slice(0, 300)}`);
+  }
+}
+
+/** Removes `workspace`'s document snapshot, auth record, and every file under its attachments
+ * directory from the GitHub backup repo, each independently best-effort - one failing (a transient
+ * API error, a file that was never actually backed up) doesn't stop the others from being tried.
+ * No-op entirely when GitHub backup isn't configured. */
+async function deleteWorkspaceFromGitHub(workspace: string): Promise<void> {
+  if (!GITHUB_BACKUP_ENABLED) return;
+
+  await deleteGithubFileIfExists(`snapshots/${workspace}.ydoc`, `Delete snapshot for workspace "${workspace}" (admin delete)`).catch(
+    (e) => console.error(`[collab] admin delete: failed to remove GitHub snapshot for "${workspace}":`, e),
+  );
+  await deleteGithubFileIfExists(
+    `workspace-auth/${workspace}.json`,
+    `Delete auth record for workspace "${workspace}" (admin delete)`,
+  ).catch((e) => console.error(`[collab] admin delete: failed to remove GitHub auth record for "${workspace}":`, e));
+
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${GITHUB_REPO}/contents/attachments/${encodeURIComponent(workspace)}?ref=${encodeURIComponent(GITHUB_BRANCH)}`,
+      { headers: githubApiHeaders() },
+    );
+    if (res.ok) {
+      const entries = (await res.json()) as Array<{ path: string; sha: string; type: string }>;
+      for (const entry of entries) {
+        if (entry.type !== "file") continue;
+        await deleteGithubFileIfExists(entry.path, `Delete attachment ${entry.path} (admin delete of workspace "${workspace}")`).catch(
+          (e) => console.error(`[collab] admin delete: failed to remove GitHub attachment "${entry.path}":`, e),
+        );
+      }
+    } else if (res.status !== 404) {
+      const text = await res.text().catch(() => "");
+      console.error(`[collab] admin delete: failed to list GitHub attachments for "${workspace}": ${res.status} ${text.slice(0, 200)}`);
+    }
+  } catch (e) {
+    console.error(`[collab] admin delete: failed to list GitHub attachments for "${workspace}":`, e);
+  }
+}
+
+/** Drops every in-memory trace of `workspace` - its connected-sockets set, shadow doc, pending
+ * save timer/dirty marker, and cached auth record - and returns the sockets that were in it so the
+ * caller can close them. Deleting the `workspaces` entry FIRST (before any socket is closed) is
+ * what keeps each socket's own "close" handler from re-triggering leaveWorkspace()'s last-peer-
+ * leaves flush: that handler looks the workspace up in `workspaces` and finds nothing, so it does
+ * nothing, instead of racing to resave a snapshot this function is about to delete out from under
+ * it. Cancelling any pending saveTimer for the same reason - a debounced save firing after the
+ * files below are gone would silently recreate the snapshot file. */
+function purgeWorkspaceMemory(workspace: string): CollabSocket[] {
+  const members = workspaces.get(workspace);
+  const sockets = members ? Array.from(members) : [];
+  workspaces.delete(workspace);
+  docs.delete(workspace);
+  docLoadPromises.delete(workspace);
+  dirtySince.delete(workspace);
+  const timer = saveTimers.get(workspace);
+  if (timer) clearTimeout(timer);
+  saveTimers.delete(workspace);
+  lastGithubPush.delete(workspace);
+  workspaceAuth.delete(workspace);
+  workspaceAuthLoadPromises.delete(workspace);
+  return sockets;
+}
+
+async function handleAdminDeleteWorkspace(req: IncomingMessage, res: ServerResponse, workspaceRaw: string): Promise<void> {
+  let workspace: string;
+  try {
+    workspace = decodeURIComponent(workspaceRaw);
+  } catch {
+    res.writeHead(400, { "content-type": "text/plain" }).end("Invalid workspace id\n");
+    return;
+  }
+  if (!isSafeWorkspaceSegment(workspace)) {
+    res.writeHead(400, { "content-type": "text/plain" }).end("Invalid workspace id\n");
+    return;
+  }
+
+  const sockets = purgeWorkspaceMemory(workspace);
+  for (const socket of sockets) {
+    try {
+      socket.close(4004, "Workspace deleted by admin");
+    } catch (e) {
+      console.error(`[collab] admin delete: failed to close a socket for "${workspace}":`, e);
+    }
+  }
+
+  await rm(docSnapshotPath(workspace), { force: true }).catch((e) =>
+    console.error(`[collab] admin delete: failed to remove local snapshot for "${workspace}":`, e),
+  );
+  await rm(workspaceAuthPath(workspace), { force: true }).catch((e) =>
+    console.error(`[collab] admin delete: failed to remove local auth record for "${workspace}":`, e),
+  );
+  await rm(join(UPLOADS_DIR, workspace), { recursive: true, force: true }).catch((e) =>
+    console.error(`[collab] admin delete: failed to remove local uploads for "${workspace}":`, e),
+  );
+  await deleteWorkspaceFromGitHub(workspace);
+
+  console.log(`[collab] admin: deleted workspace "${workspace}" (disconnected ${sockets.length} client(s))`);
+  res.writeHead(303, { location: `/admin?deleted=${encodeURIComponent(workspace)}` }).end();
+}
+
 function requestHandler(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
 
@@ -791,6 +1116,32 @@ function requestHandler(req: IncomingMessage, res: ServerResponse) {
   if (downloadMatch) {
     handleDownload(req, res, downloadMatch[1], downloadMatch[2], url.searchParams).catch((e) => {
       console.error("[collab] unhandled download error:", e);
+      if (!res.headersSent) res.writeHead(500, { "content-type": "text/plain" }).end("Internal error\n");
+    });
+    return;
+  }
+
+  if (url.pathname === "/admin" && req.method === "GET") {
+    if (!requireAdminAuth(req, res)) return;
+    listKnownWorkspaces()
+      .then((names) => Promise.all(names.map(getAdminWorkspaceInfo)))
+      .then((infos) => {
+        res
+          .writeHead(200, { "content-type": "text/html; charset=utf-8" })
+          .end(renderAdminPage(infos, url.searchParams.get("deleted")));
+      })
+      .catch((e) => {
+        console.error("[collab] admin page error:", e);
+        if (!res.headersSent) res.writeHead(500, { "content-type": "text/plain" }).end("Internal error\n");
+      });
+    return;
+  }
+
+  const adminDeleteMatch = req.method === "POST" && url.pathname.match(/^\/admin\/workspaces\/([^/]+)\/delete\/?$/);
+  if (adminDeleteMatch) {
+    if (!requireAdminAuth(req, res)) return;
+    handleAdminDeleteWorkspace(req, res, adminDeleteMatch[1]).catch((e) => {
+      console.error("[collab] unhandled admin delete error:", e);
       if (!res.headersSent) res.writeHead(500, { "content-type": "text/plain" }).end("Internal error\n");
     });
     return;

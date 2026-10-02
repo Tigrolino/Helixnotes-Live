@@ -189,4 +189,11 @@ test("persistence: a workspace's document survives a full server restart", async
   const readerDoc = await syncFreshDoc(reader);
   assert.equal(readerDoc.getText("note").toString(), "still here after a restart");
   await closeAndWait(reader);
+  // leaveWorkspace (src/server.ts) fires its own "last peer left" flush fire-and-forget when this
+  // close is processed server-side, same as the comment above about the writer's close - give it
+  // a moment to land before this test's t.after hooks kill "second" and rm() the snapshots dir.
+  // Without this, rm() can race that in-flight write (it recreates DOC_SNAPSHOTS_DIR via mkdir
+  // and then writes into it) and intermittently fail with ENOTEMPTY - this is pre-existing
+  // flakiness in this test, reproducible against the server unmodified by the admin panel work.
+  await new Promise((r) => setTimeout(r, 300));
 });

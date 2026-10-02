@@ -59,6 +59,7 @@ defaults and comments: [`.env.example`](.env.example).
 | `PORT` | Which port to listen on. Render sets this itself - don't override it there. |
 | `UPLOAD_MAX_BYTES` | Max size of one uploaded file. Defaults to 95 MB. |
 | `GITHUB_TOKEN` + `GITHUB_REPO` | Set both to back up uploads and notebooks to a GitHub repo, so they survive a redeploy. See `.env.example` for how to create a token. |
+| `ADMIN_PASSWORD` | Set to turn on the admin panel (see below) for whoever is hosting this server. Unset by default. |
 
 ## How it works, in short
 
@@ -76,6 +77,27 @@ password for theirs, while still being able to connect to both yourself at once.
 There's still no per-account login system, just passwords shared per group. That keeps things
 simple for a small team or a group of friends, though it does mean everyone who knows a
 workspace's password can see and edit everything in it.
+
+## Admin panel
+
+Whoever is hosting this server (not anyone using HelixNotes itself) can set `ADMIN_PASSWORD` in
+the environment to turn on a small management page at `/admin` - for example,
+`https://<your-service>.onrender.com/admin`. It's protected by HTTP Basic Auth: any username, and
+the password you set as `ADMIN_PASSWORD`.
+
+The page lists every workspace this server has a record of - whether it has a password, how many
+people are connected right now, whether it has a saved document, and how many uploads it has -
+and lets you permanently delete one. Deleting a workspace:
+
+- Disconnects anyone currently in it
+- Removes its saved document, its claimed password, and its uploaded files from this server's
+  disk, and from the GitHub backup too if that's configured
+- Leaves the workspace name fully free to be claimed fresh, with a new password, same as if it
+  had never existed
+
+This can't be undone, and it isn't exposed anywhere in the HelixNotes app itself - it's purely for
+server maintenance. Leave `ADMIN_PASSWORD` unset to turn the whole thing off; `/admin` then 404s
+instead of asking for a password, so it's indistinguishable from a page that doesn't exist.
 
 ## Testing
 
