@@ -10,3 +10,8 @@ uploads/
 # Local-disk copies of live-document snapshots (see DOC_SNAPSHOTS_DIR in .env.example) - same
 # story: GITHUB_TOKEN/GITHUB_REPO is the durable backup, this is just the fast local cache.
 doc-snapshots/
+
+# Local-disk copies of per-workspace password claims (see WORKSPACE_AUTH_DIR in .env.example) -
+# same story as uploads/ and doc-snapshots/ above: GITHUB_TOKEN/GITHUB_REPO is the durable backup,
+# this is just the fast local cache.
+workspace-auth/

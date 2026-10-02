@@ -1,9 +1,20 @@
 // HelixNotes collaboration server - Stage 2 transport + Stage 3 relay + Stage 5 file uploads +
-// Stage 6 live-document persistence.
+// Stage 6 live-document persistence + Stage 7 per-workspace passwords.
 //
 // Scope (see the "HelixNotes Collaboration - Technical Analysis" doc, section 10): this server
-// authenticates a connection against a shared workspace password, then relays messages between
-// clients:
+// authenticates a connection in two tiers, then relays messages between clients:
+//
+//   1. The server password (COLLAB_PASSWORD, one value for the whole process) - gates "can you
+//      talk to this server at all". Unchanged since Stage 2.
+//   2. A workspace password (Stage 7, optional, one per workspace) - gates "can you join this
+//      particular workspace". There's no admin step to pre-register a workspace or its password:
+//      the first client to authenticate into a given workspace id "claims" it, with whatever
+//      workspace password (possibly none) it supplied - see "Per-workspace passwords" further
+//      down. From then on, that workspace's password requirement is fixed: the same workspace id
+//      from a different client is checked against it (or, if none was ever set, treated as open -
+//      a later client can't retroactively lock a workspace that started open just by supplying a
+//      password, which would let anyone lock other people out of a workspace they were already
+//      using).
 //
 //   - Binary frames (Yjs sync-step/update messages, Stage 3+) are broadcast to every OTHER
 //     client currently authenticated into the same workspace - this part is still a dumb,
@@ -19,26 +30,37 @@
 //
 // Protocol (matches src-tauri/src/collab.rs on the client):
 //   1. Client connects and, as its first message, sends:
-//        {"type":"auth","workspace":"<id>","password":"<shared secret>"}
+//        {"type":"auth","workspace":"<id>","password":"<shared secret>","workspacePassword":"<optional>"}
+//      `workspacePassword` is omitted or empty for a workspace with no password of its own.
 //   2. Server replies {"type":"connected"} on success, or closes the socket (with a close reason
 //      the client surfaces as its error detail) on failure or timeout.
 //   3. After that: binary frames are broadcast to other clients in the same workspace; text
 //      frames are echoed back to the sender.
 //
-// Stage 5 (file/image attachments) adds two plain HTTP routes alongside the WebSocket, gated by
-// the same shared workspace password rather than a new auth scheme:
+// Stage 5 (file/image attachments) adds two plain HTTP routes alongside the WebSocket, gated the
+// same two-tier way (server password, then that workspace's own password if it has one):
 //   - POST /upload/<workspace>  - raw file bytes as the body (no multipart - one file per
-//     request), headers `X-Collab-Password` and `X-File-Name` (the original filename,
-//     percent-encoded the same way `encodeURIComponent` would). Capped at UPLOAD_MAX_BYTES
-//     (default 95 MB) - enforced against a lying/missing Content-Length too, not just the header.
-//     Saved to local disk under UPLOADS_DIR; if GITHUB_TOKEN + GITHUB_REPO are set, also pushed
-//     to that repo via the Contents API as a best-effort backup (a GitHub failure doesn't fail
-//     the upload - the file is still on disk and still usable, just not backed up yet).
-//   - GET /uploads/<workspace>/<stored-name>?password=<shared secret> - serves an uploaded file
-//     back. The password travels in the query string (not a header) because this URL is what
-//     gets embedded as an <img src> / <a href> in the note itself, where only a plain GET is
-//     possible - consistent with this server's existing one-shared-secret-per-workspace model
+//     request), headers `X-Collab-Password`, `X-Collab-Workspace-Password` (optional), and
+//     `X-File-Name` (the original filename, percent-encoded the same way `encodeURIComponent`
+//     would). Capped at UPLOAD_MAX_BYTES (default 95 MB) - enforced against a lying/missing
+//     Content-Length too, not just the header. Saved to local disk under UPLOADS_DIR; if
+//     GITHUB_TOKEN + GITHUB_REPO are set, also pushed to that repo via the Contents API as a
+//     best-effort backup (a GitHub failure doesn't fail the upload - the file is still on disk
+//     and still usable, just not backed up yet).
+//   - GET /uploads/<workspace>/<stored-name>?password=<shared secret>&workspacePassword=<optional>
+//     - serves an uploaded file back. Both passwords travel in the query string (not a header)
+//     because this URL is what gets embedded as an <img src> / <a href> in the note itself, where
+//     only a plain GET is possible - consistent with this server's existing shared-secret model
 //     (see §8 of the analysis doc for why there's no per-user auth here at all).
+//
+// Per-workspace passwords (Stage 7): persisted the same way Stage 6 persists each workspace's
+// document - one small JSON file per workspace (see WORKSPACE_AUTH_DIR, mirroring
+// DOC_SNAPSHOTS_DIR), holding a salted scrypt hash rather than the password itself, loaded lazily
+// on first use and cached in memory for the life of the process. Backed up to the GitHub repo the
+// same best-effort way a document snapshot is, for the same reason (this server's own disk isn't
+// durable on a redeploy). A workspace with no password gets a record too (`hasPassword: false`),
+// not just an absent file - that's what makes "started open" a durable fact instead of something
+// a later, differently-behaved client could change.
 //
 // Stage 6 (live document persistence) keeps one in-memory Yjs document per workspace, fed purely
 // from the same binary frames the relay above already sees (decoding just the envelope - message
@@ -61,7 +83,7 @@
 // no-op and the environment variables set in the host's dashboard are used as-is.
 import "dotenv/config";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { timingSafeEqual, randomUUID } from "node:crypto";
+import { timingSafeEqual, randomUUID, randomBytes, scryptSync } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { WebSocketServer, WebSocket, type RawData } from "ws";
@@ -99,6 +121,9 @@ interface AuthMessage {
   type: "auth";
   workspace: string;
   password: string;
+  /** This workspace's own password, if it has one - optional because most clients won't set one.
+   * Absent and "" are treated identically (see checkOrClaimWorkspacePassword below). */
+  workspacePassword?: string;
 }
 
 function isAuthMessage(value: unknown): value is AuthMessage {
@@ -107,7 +132,9 @@ function isAuthMessage(value: unknown): value is AuthMessage {
     value !== null &&
     (value as { type?: unknown }).type === "auth" &&
     typeof (value as { workspace?: unknown }).workspace === "string" &&
-    typeof (value as { password?: unknown }).password === "string"
+    typeof (value as { password?: unknown }).password === "string" &&
+    ((value as { workspacePassword?: unknown }).workspacePassword === undefined ||
+      typeof (value as { workspacePassword?: unknown }).workspacePassword === "string")
   );
 }
 
@@ -236,6 +263,17 @@ async function handleUpload(req: IncomingMessage, res: ServerResponse, workspace
     res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: "Invalid workspace id" }));
     return;
   }
+  const workspacePassword = req.headers["x-collab-workspace-password"];
+  const workspaceOk = await checkOrClaimWorkspacePassword(
+    workspace,
+    typeof workspacePassword === "string" ? workspacePassword : "",
+  );
+  if (!workspaceOk) {
+    res
+      .writeHead(401, { "content-type": "application/json" })
+      .end(JSON.stringify({ error: "Invalid workspace password" }));
+    return;
+  }
 
   const contentLength = Number(req.headers["content-length"] ?? NaN);
   if (Number.isFinite(contentLength) && contentLength > UPLOAD_MAX_BYTES) {
@@ -323,6 +361,11 @@ async function handleDownload(
   }
   if (!isSafeWorkspaceSegment(workspace) || !isSafeStoredFilename(filename)) {
     res.writeHead(400, { "content-type": "text/plain" }).end("Invalid path\n");
+    return;
+  }
+  const workspacePassword = query.get("workspacePassword") ?? "";
+  if (!(await checkOrClaimWorkspacePassword(workspace, workspacePassword))) {
+    res.writeHead(401, { "content-type": "text/plain" }).end("Invalid workspace password\n");
     return;
   }
 
@@ -521,6 +564,165 @@ function scheduleSave(workspace: string): void {
   );
 }
 
+// --- Stage 7: per-workspace passwords ---
+//
+// See the module doc comment's "Per-workspace passwords" section for the model. One small JSON
+// file per workspace, loaded lazily and cached for the life of the process - the exact same
+// lazy-load/cache shape Stage 6 uses for a workspace's document (docs/docLoadPromises), just for
+// a much smaller payload.
+
+const WORKSPACE_AUTH_DIR = process.env.WORKSPACE_AUTH_DIR ?? "workspace-auth";
+const SCRYPT_KEY_LEN = 64;
+
+interface WorkspaceAuthRecord {
+  hasPassword: boolean;
+  /** hex-encoded scrypt hash and salt - present only when hasPassword is true. */
+  hash?: string;
+  salt?: string;
+}
+
+function workspaceAuthPath(workspace: string): string {
+  return join(WORKSPACE_AUTH_DIR, `${workspace}.json`);
+}
+
+function hashWorkspacePassword(password: string, salt: Buffer): Buffer {
+  return scryptSync(password, salt, SCRYPT_KEY_LEN);
+}
+
+/** Fetches a workspace's saved auth record from the GitHub backup repo, or `null` if none exists
+ * there yet - the same fallback path loadWorkspaceDoc() uses for a saved document snapshot, for
+ * the same reason (a fresh Render instance after a redeploy has nothing on local disk). */
+async function fetchWorkspaceAuthFromGitHub(
+  workspace: string,
+): Promise<{ record: WorkspaceAuthRecord; sha: string } | null> {
+  const repoPath = `workspace-auth/${workspace}.json`;
+  const res = await fetch(
+    `https://api.github.com/repos/${GITHUB_REPO}/contents/${repoPath}?ref=${encodeURIComponent(GITHUB_BRANCH)}`,
+    { headers: githubApiHeaders() },
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`GitHub API ${res.status}: ${text.slice(0, 300)}`);
+  }
+  const json = (await res.json()) as { content?: string; sha?: string };
+  if (!json.content || !json.sha) return null;
+  const record = JSON.parse(Buffer.from(json.content, "base64").toString("utf8")) as WorkspaceAuthRecord;
+  return { record, sha: json.sha };
+}
+
+/** Create-or-update a workspace's saved auth record in the GitHub backup repo - same shape as
+ * pushSnapshotToGitHub (needs the existing file's sha to update it, once it exists). */
+async function pushWorkspaceAuthToGitHub(workspace: string, record: WorkspaceAuthRecord): Promise<void> {
+  const repoPath = `workspace-auth/${workspace}.json`;
+  const existing = await fetchWorkspaceAuthFromGitHub(workspace).catch(() => null);
+  const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${repoPath}`, {
+    method: "PUT",
+    headers: { ...githubApiHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message: `Set auth record for workspace "${workspace}"`,
+      content: Buffer.from(JSON.stringify(record)).toString("base64"),
+      branch: GITHUB_BRANCH,
+      ...(existing ? { sha: existing.sha } : {}),
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`GitHub API ${res.status}: ${text.slice(0, 300)}`);
+  }
+}
+
+const workspaceAuth = new Map<string, WorkspaceAuthRecord>();
+const workspaceAuthLoadPromises = new Map<string, Promise<WorkspaceAuthRecord | null>>();
+
+/** Loads `workspace`'s saved auth record from local disk, falling back to the GitHub backup the
+ * same way loadWorkspaceDoc() does. Returns `null` (not a record) if neither has one yet - this
+ * workspace has genuinely never been authenticated into before, and the caller is about to decide
+ * its record from the first client's own request. */
+async function loadWorkspaceAuth(workspace: string): Promise<WorkspaceAuthRecord | null> {
+  try {
+    const raw = await readFile(workspaceAuthPath(workspace), "utf8");
+    return JSON.parse(raw) as WorkspaceAuthRecord;
+  } catch {
+    // No local record - fall through to GitHub below.
+  }
+  if (GITHUB_BACKUP_ENABLED) {
+    try {
+      const remote = await fetchWorkspaceAuthFromGitHub(workspace);
+      if (remote) return remote.record;
+    } catch (e) {
+      console.warn(`[collab] could not check GitHub for workspace "${workspace}"'s saved auth record:`, e);
+    }
+  }
+  return null;
+}
+
+/** Persists `record` as `workspace`'s auth record: local disk always, and - best-effort, same as
+ * every other GitHub backup in this file - the GitHub repo too if configured. */
+async function saveWorkspaceAuth(workspace: string, record: WorkspaceAuthRecord): Promise<void> {
+  await mkdir(WORKSPACE_AUTH_DIR, { recursive: true });
+  await writeFile(workspaceAuthPath(workspace), JSON.stringify(record));
+  if (GITHUB_BACKUP_ENABLED) {
+    try {
+      await pushWorkspaceAuthToGitHub(workspace, record);
+    } catch (e) {
+      console.error(`[collab] GitHub backup of workspace "${workspace}"'s auth record failed (kept on local disk):`, e);
+    }
+  }
+}
+
+/** Checks `suppliedPassword` against `workspace`'s own password, claiming (and persisting) one
+ * for the workspace if this is the first time anyone has ever authenticated into it - see the
+ * module doc comment's "Per-workspace passwords" section. Concurrent first-joins of the very same
+ * brand-new workspace share one load (the pending-promise de-dup below), but the follow-on
+ * decide-and-save step isn't itself locked - two clients racing to be the very first to create
+ * the exact same new workspace, with different passwords, could each get `true` back before
+ * either's save lands, with the later save winning. Accepted as a rare-enough edge case, same
+ * spirit as this file's other best-effort persistence (GitHub backup throttling, etc.) - not
+ * something to add real distributed locking for. Returns true/false for "may this client
+ * proceed"; never throws for an ordinary wrong-password case. */
+async function checkOrClaimWorkspacePassword(workspace: string, suppliedPassword: string): Promise<boolean> {
+  let record = workspaceAuth.get(workspace);
+  if (!record) {
+    let pending = workspaceAuthLoadPromises.get(workspace);
+    if (!pending) {
+      pending = loadWorkspaceAuth(workspace);
+      workspaceAuthLoadPromises.set(workspace, pending);
+    }
+    const loaded = await pending;
+    workspaceAuthLoadPromises.delete(workspace);
+    record = workspaceAuth.get(workspace) ?? loaded ?? undefined;
+    if (record) workspaceAuth.set(workspace, record);
+  }
+
+  if (!record) {
+    // Nobody has ever authenticated into this workspace before - this client's own request
+    // decides whether it starts with a password or without one.
+    const trimmed = suppliedPassword.trim();
+    if (trimmed) {
+      const salt = randomBytes(16);
+      record = {
+        hasPassword: true,
+        hash: hashWorkspacePassword(trimmed, salt).toString("hex"),
+        salt: salt.toString("hex"),
+      };
+    } else {
+      record = { hasPassword: false };
+    }
+    workspaceAuth.set(workspace, record);
+    await saveWorkspaceAuth(workspace, record);
+    return true;
+  }
+
+  if (!record.hasPassword) return true; // started open - stays open, regardless of what's supplied
+  if (!record.hash || !record.salt) return false; // corrupt/incomplete record - fail closed
+  const salt = Buffer.from(record.salt, "hex");
+  const expected = Buffer.from(record.hash, "hex");
+  const actual = hashWorkspacePassword(suppliedPassword, salt);
+  if (expected.length !== actual.length) return false;
+  return timingSafeEqual(expected, actual);
+}
+
 /** `ws` hands binary messages back as a Buffer by default (this server sets no streaming/
  * fragmentation options) - ArrayBuffer/Buffer[] are handled too, defensively. */
 function toUint8Array(data: RawData): Uint8Array {
@@ -673,17 +875,35 @@ wss.on("connection", (socket: CollabSocket, req: IncomingMessage) => {
         socket.close(4002, "First message must be JSON auth");
         return;
       }
-      if (!isAuthMessage(parsed) || !parsed.workspace.trim() || !passwordMatches(parsed.password)) {
+      if (
+        !isAuthMessage(parsed) ||
+        !parsed.workspace.trim() ||
+        !isSafeWorkspaceSegment(parsed.workspace) ||
+        !passwordMatches(parsed.password)
+      ) {
         console.warn(`[collab] auth failed from ${remote}`);
         socket.close(4001, "Invalid workspace or password");
         return;
       }
       const workspace = parsed.workspace;
       clearTimeout(authTimer);
-      // Load (or hydrate from a saved snapshot) this workspace's shadow document before telling
-      // the client they're connected, so it's ready the moment their first sync step 1 arrives.
-      ensureWorkspaceDocLoaded(workspace)
-        .then(() => {
+      // Server password passed above; this workspace's own password (if any) is checked next -
+      // see checkOrClaimWorkspacePassword's doc comment for the first-join "claim" behavior.
+      checkOrClaimWorkspacePassword(workspace, parsed.workspacePassword ?? "")
+        .then((ok) => {
+          if (!ok) {
+            console.warn(`[collab] workspace password rejected for "${workspace}" from ${remote}`);
+            socket.close(4001, "Invalid workspace password");
+            return null;
+          }
+          if (socket.readyState !== WebSocket.OPEN) return null; // client gave up while we were checking
+          // Load (or hydrate from a saved snapshot) this workspace's shadow document before
+          // telling the client they're connected, so it's ready the moment their first sync
+          // step 1 arrives.
+          return ensureWorkspaceDocLoaded(workspace);
+        })
+        .then((doc) => {
+          if (!doc) return; // already closed above, or the workspace password check failed
           if (socket.readyState !== WebSocket.OPEN) return; // client gave up while we were loading
           state.authenticated = true;
           state.workspace = workspace;
@@ -692,7 +912,7 @@ wss.on("connection", (socket: CollabSocket, req: IncomingMessage) => {
           socket.send(JSON.stringify({ type: "connected" }));
         })
         .catch((e) => {
-          console.error(`[collab] failed to load workspace "${workspace}":`, e);
+          console.error(`[collab] failed to authenticate/load workspace "${workspace}":`, e);
           socket.close(1011, "Failed to load workspace state");
         });
       return;

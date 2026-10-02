@@ -3,13 +3,15 @@
 This is the backend for **Live Notebook**, [HelixNotes Live](../README.md)'s real-time
 collaboration feature. It's a small server you run yourself (Render's free tier works fine) that
 lets a few people edit the same notebook together in real time - live cursors, seeing who's
-online, and sharing images/files - with just one shared password per group, no accounts needed.
+online, and sharing images/files - with just a password (or two) to get in, no accounts needed.
 
 ## What it does
 
 - Syncs edits between everyone connected to the same notebook, live
 - Shows who's online and where their cursor is
 - Lets people paste or drop in images and files (up to 95 MB)
+- Lets you give each workspace its own password, so different groups can share one server
+  without seeing each other's notebooks
 - Saves the notebook automatically, so nothing is lost if everyone disconnects or the server
   restarts
 - Can optionally back up uploads and notebooks to a GitHub repo, so they also survive a full
@@ -60,14 +62,20 @@ defaults and comments: [`.env.example`](.env.example).
 
 ## How it works, in short
 
-Anyone who connects with the right password joins a "workspace" - just a shared room name (set
-per-notebook in the app). Any change one person makes is sent to everyone else in that workspace
-instantly. The server also quietly saves a copy of the notebook and any uploaded files as they
-come in, so reconnecting later - or restarting the whole server - doesn't lose anything.
+Anyone who connects with the right server password joins a "workspace" - just a shared room name
+(set per-notebook in the app). Any change one person makes is sent to everyone else in that
+workspace instantly. The server also quietly saves a copy of the notebook and any uploaded files
+as they come in, so reconnecting later - or restarting the whole server - doesn't lose anything.
 
-There's no per-account login system, just one shared password per group. That keeps things simple
-for a small team or a group of friends, though it does mean everyone in a workspace can see and
-edit everything in it.
+A workspace can also have its own password, on top of the server password. Whoever connects to a
+workspace first decides this: if they supply a password, that workspace needs it from then on; if
+they don't, it stays open to anyone with the server password. That lets you hand one group a
+workspace and password for their project, and a different group a different workspace and
+password for theirs, while still being able to connect to both yourself at once.
+
+There's still no per-account login system, just passwords shared per group. That keeps things
+simple for a small team or a group of friends, though it does mean everyone who knows a
+workspace's password can see and edit everything in it.
 
 ## Testing
 
@@ -80,8 +88,8 @@ file uploads, and notebook persistence (across a reconnect and a full server res
 
 ## Known limitations
 
-- Everyone in a workspace shares one broadcast group - there's no way yet to have separate
-  permissions for different notebooks within the same workspace.
+- Permissions are per-workspace, not per-notebook - give someone a workspace's password and
+  they can see and edit everything in it, with no finer-grained split within one workspace.
 - No per-user accounts - see the "HelixNotes Collaboration - Technical Analysis" doc for the
   reasoning behind that choice.
 
